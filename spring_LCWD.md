@@ -80,7 +80,6 @@ public class MyBean {
 
 ### 5. **Advantages of Spring Framework**
 
-```markdown
 # Advantages of Spring Framework
 
 1. **Loose Coupling**: By using IoC and DI, Spring reduces the coupling between different components in your application, making the code easier to maintain and test.
@@ -99,7 +98,6 @@ public class MyBean {
 -   **Web Applications**: Spring provides a powerful MVC framework to build robust web applications.
 -   **Microservices**: With Spring Boot and Spring Cloud, Spring provides excellent support for developing microservices.
 -   **Database Integration**: If your application needs to integrate with databases using ORM frameworks or JDBC, Spring simplifies data access and transaction management.
-```
 
 # What is Dependency Injection (DI)?
 
