@@ -136,7 +136,9 @@ There are three main types of Dependency Injection in Spring:
             repository.save(employee);
         }
     }
+    ```
 
+    ```java
     // In Spring configuration (XML or Java Config):
     @Bean
     public EmployeeService employeeService() {
@@ -164,7 +166,9 @@ There are three main types of Dependency Injection in Spring:
             repository.save(employee);
         }
     }
+    ```
 
+    ```java
     // In Spring configuration (XML or Java Config):
     @Bean
     public EmployeeService employeeService() {
@@ -280,19 +284,25 @@ Imagine an application that needs to interact with different types of databases 
 public interface DatabaseConnection {
     void connect();
 }
+    ```
 
+    ```java
 public class MySQLConnection implements DatabaseConnection {
     public void connect() {
         System.out.println("Connected to MySQL Database");
     }
 }
+    ```
 
+    ```java
 public class PostgreSQLConnection implements DatabaseConnection {
     public void connect() {
         System.out.println("Connected to PostgreSQL Database");
     }
 }
+    ```
 
+    ```java
 public class DatabaseService {
     private DatabaseConnection connection;
 
@@ -306,7 +316,9 @@ public class DatabaseService {
     }
 }
 
-```java
+    ```
+
+    ```java
 @Configuration
 public class AppConfig {
 
@@ -320,4 +332,5 @@ public class AppConfig {
         return new DatabaseService(mysqlConnection()); // Inject MySQL connection
     }
 }
+```
 ````
