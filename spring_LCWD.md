@@ -921,3 +921,687 @@ In this mode, Spring will inject dependencies through the constructor of the bea
 -   **Autowire by Type**: Injects dependencies by matching the type of the property with available beans.
 -   **Autowire by Name**: Injects dependencies by matching the property name with the bean name.
 -   **Autowire by Constructor**: Injects dependencies through the constructor of the bean.
+
+# @Autowired and @Qualifier Annotation for Autowiring
+
+Spring provides the `@Autowired` and `@Qualifier` annotations to manage dependency injection. These annotations are typically used for autowiring beans, allowing Spring to automatically inject dependencies into your classes.
+
+### 1. @Autowired Annotation
+
+-   The `@Autowired` annotation is used to automatically inject a bean into a field, constructor, or method. Spring resolves the dependency by type, meaning it looks for a matching bean type in the container.
+
+-   **@Autowired**: Automatically injects a bean by type. It can be used on fields, constructors, and setter methods.
+
+#### Example with Field Injection
+
+```java
+import org.springframework.beans.factory.annotation.Autowired;
+
+public class Car {
+
+    @Autowired
+    private Engine engine;  // Engine bean will be injected automatically
+
+    public void start() {
+        engine.run();
+    }
+}
+```
+
+#### Example with Constructor Injection
+
+```java
+import org.springframework.beans.factory.annotation.Autowired;
+
+public class Car {
+
+    private Engine engine;
+
+    @Autowired
+    public Car(Engine engine) {
+        this.engine = engine;  // Engine bean will be injected through constructor
+    }
+
+    public void start() {
+        engine.run();
+    }
+}
+```
+
+#### Example with Setter Injection
+
+```java
+import org.springframework.beans.factory.annotation.Autowired;
+
+public class Car {
+
+    private Engine engine;
+
+    @Autowired
+    public void setEngine(Engine engine) {
+        this.engine = engine;  // Engine bean will be injected via setter method
+    }
+
+    public void start() {
+        engine.run();
+    }
+}
+```
+
+### 2. @Qualifier Annotation
+
+-   `@Qualifier` is used in conjunction with `@Autowired` to resolve ambiguity when there are multiple beans of the same type. It specifies which bean should be injected when there are multiple options.
+-   **@Qualifier**: Used with `@Autowired` to resolve ambiguity when there are multiple beans of the same type. It specifies which bean to inject.
+
+#### Example
+
+```java
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+
+public class Car {
+
+    private Engine engine;
+
+    @Autowired
+    @Qualifier("v8Engine")  // Specifies which engine to inject when multiple engine beans exist
+    public void setEngine(Engine engine) {
+        this.engine = engine;
+    }
+
+    public void start() {
+        engine.run();
+    }
+}
+```
+
+#### Example of Multiple Beans of Same Type
+
+```java
+<bean id="v6Engine" class="com.example.Engine" />
+<bean id="v8Engine" class="com.example.Engine" />
+
+<bean id="car" class="com.example.Car">
+    <property name="engine" ref="v8Engine" />  <!-- Using a specific engine bean -->
+</bean>
+```
+
+# List in Spring Standalone Collections
+
+Lists in Spring are injected using `<list>` tags in XML configuration. A list allows duplicate elements and maintains the order of insertion.
+
+## Example of List
+
+```xml
+<bean id="person" class="com.example.Person">
+    <property name="names">
+        <list>
+            <value>John</value>
+            <value>Jane</value>
+            <value>Jack</value>
+        </list>
+    </property>
+</bean>
+```
+
+## Key Points:
+
+-   Allows duplicates: Yes
+-   Maintains order: Yes
+
+---
+
+### **Set.md**
+
+# Set in Spring Standalone Collections
+
+Sets in Spring are injected using `<set>` tags in XML configuration. A set does not allow duplicate elements and does not guarantee order.
+
+## Example of Set
+
+```xml
+<bean id="person" class="com.example.Person">
+    <property name="skills">
+        <set>
+            <value>Java</value>
+            <value>Spring</value>
+            <value>Hibernate</value>
+        </set>
+    </property>
+</bean>
+```
+
+## Key Points:
+
+-   Allows duplicates: No
+-   Maintains order: No
+
+---
+
+### **Map.md**
+
+# Map in Spring Standalone Collections
+
+Maps are used to store key-value pairs. In Spring, maps are injected using the `<map>` tag.
+
+## Example of Map
+
+```xml
+<bean id="person" class="com.example.Person">
+    <property name="contactNumbers">
+        <map>
+            <entry key="home" value="1234567890" />
+            <entry key="work" value="0987654321" />
+        </map>
+    </property>
+</bean>
+```
+
+## Key Points:
+
+-   Stores data in key-value pairs.
+-   Keys are unique, but values can be duplicate.
+
+---
+
+### **Properties.md**
+
+# Properties in Spring Standalone Collections
+
+The `<props>` tag is used to inject a set of key-value pairs into a `Properties` object. Properties are often used for configuration purposes.
+
+## Example of Properties
+
+```xml
+<bean id="person" class="com.example.Person">
+    <property name="address">
+        <props>
+            <prop key="street">123 Main St</prop>
+            <prop key="city">New York</prop>
+        </props>
+    </property>
+</bean>
+```
+
+## Key Points:
+
+-   Used for configurations and settings.
+-   Key-value pairs are stored in a Properties object.
+
+# @Component Annotation in Spring
+
+The `@Component` annotation is one of the stereotype annotations in Spring. It indicates that a class is a Spring-managed component and should be registered as a bean in the Spring container.
+
+## Purpose
+
+-   Used to define a bean for automatic detection and configuration.
+-   Eliminates the need to define the bean in an XML file.
+
+## Example
+
+```java
+import org.springframework.stereotype.Component;
+
+@Component
+public class MyService {
+    public void performTask() {
+        System.out.println("Task performed.");
+    }
+}
+```
+
+## How It Works
+
+-   The `@Component` annotation is scanned by the Spring container during the component scanning process.
+-   The annotated class is registered as a Spring bean.
+
+### Component Scanning Configuration
+
+Enable component scanning in the configuration file:
+
+#### XML-based Configuration:
+
+```xml
+<context:component-scan base-package="com.example" />
+```
+
+#### Java-based Configuration:
+
+```java
+@Configuration
+@ComponentScan("com.example")
+public class AppConfig {
+}
+```
+
+## Key Points
+
+-   The default bean name is the class name in lowercase.
+    -   Example: `MyService` -> `myService`
+-   Can be used with other annotations like `@Autowired` for dependency injection.
+
+# @Value Annotation in Spring
+
+The `@Value` annotation is used to inject values into fields, method parameters, or constructor arguments in Spring-managed beans. It supports injecting literal values, properties, and expressions.
+
+## Purpose
+
+-   Used to set values for fields, parameters, or methods.
+-   Can inject values from properties files, environment variables, or hardcoded values.
+
+## Example: Injecting a Literal Value
+
+```java
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
+@Component
+public class MyComponent {
+
+    @Value("Hello, Spring!")
+    private String message;
+
+    public void printMessage() {
+        System.out.println(message);
+    }
+}
+```
+
+## Example: Injecting a Value from a Properties File
+
+### Properties File (`application.properties`):
+
+```properties
+app.name=Spring Application
+```
+
+### Java Code:
+
+```java
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
+@Component
+public class AppConfig {
+
+    @Value("${app.name}")
+    private String appName;
+
+    public void printAppName() {
+        System.out.println("Application Name: " + appName);
+    }
+}
+```
+
+## Example: Using Expressions
+
+You can use SpEL (Spring Expression Language) with `@Value`.
+
+```java
+@Value("#{2 + 3}")
+private int result; // Injects 5
+```
+
+## Key Points
+
+-   Supports placeholders for values (`${}`).
+-   Can inject environment variables and system properties.
+-   Allows SpEL for dynamic value evaluation.
+
+# Collections with @Value in Spring
+
+In Spring, collections such as lists, sets, and maps can be injected into a bean using the `@Value` annotation. These collections are populated with values from properties files or hardcoded literals.
+
+## Injecting a List with @Value
+
+You can inject a list of values into a bean field.
+
+### Example: Injecting a List
+
+#### Properties File (`application.properties`):
+
+```properties
+names.list=John,Doe,Jane,Smith
+```
+
+#### Java Code:
+
+```java
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+import java.util.List;
+
+@Component
+public class ListExample {
+
+    @Value("#{'${names.list}'.split(',')}")
+    private List<String> names;
+
+    public void printNames() {
+        System.out.println("Names: " + names);
+    }
+}
+```
+
+## Injecting a Map with @Value
+
+A map can also be populated with key-value pairs.
+
+### Example: Injecting a Map
+
+#### Properties File (`application.properties`):
+
+```properties
+settings.map=key1:value1,key2:value2
+```
+
+#### Java Code:
+
+```java
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+@Component
+public class MapExample {
+
+    @Value("#{T(java.util.stream.Stream).of('${settings.map}'.split(','))"
+            + ".collect(T(java.util.stream.Collectors).toMap(e -> e.split(':')[0], e -> e.split(':')[1]))}")
+    private Map<String, String> settings;
+
+    public void printSettings() {
+        System.out.println("Settings: " + settings);
+    }
+}
+```
+
+## Key Points
+
+-   The `@Value` annotation uses SpEL (Spring Expression Language) to process collections.
+-   You can use `split` to parse a delimited string into a list or map.
+-   Collections are populated at runtime based on the values in the properties file.
+
+## Advantages
+
+-   Simplifies the configuration of collections in beans.
+-   Reduces the need for complex parsing logic in your code.
+
+# Spring Bean Scope
+
+In Spring, the **scope** of a bean defines the lifecycle and visibility of a bean within the Spring container. Spring supports several types of bean scopes, each serving a different purpose.
+
+## Types of Bean Scopes
+
+### 1. Singleton (Default Scope)
+
+-   **Definition**: A single instance of the bean is created and shared across the application.
+-   **When to Use**: For stateless beans that are shared across multiple threads or components.
+-   **Example**:
+
+```java
+@Component
+public class SingletonBean {
+    public SingletonBean() {
+        System.out.println("Singleton Bean Initialized");
+    }
+}
+```
+
+```xml
+<bean id="singletonBean" class="com.example.SingletonBean" scope="singleton" />
+```
+
+### 2. Prototype
+
+-   **Definition**: A new instance of the bean is created every time it is requested.
+-   **When to Use**: For stateful beans or beans that hold temporary data.
+-   **Example**:
+
+```java
+@Component
+@Scope("prototype")
+public class PrototypeBean {
+    public PrototypeBean() {
+        System.out.println("Prototype Bean Initialized");
+    }
+}
+```
+
+```xml
+<bean id="prototypeBean" class="com.example.PrototypeBean" scope="prototype" />
+```
+
+### 2. Prototype
+
+-   **Definition**: A new instance of the bean is created every time it is requested.
+-   **When to Use**: For stateful beans or beans that hold temporary data.
+-   **Example**:
+
+```java
+@Component
+@Scope("prototype")
+public class PrototypeBean {
+    public PrototypeBean() {
+        System.out.println("Prototype Bean Initialized");
+    }
+}
+
+```
+
+```xml
+<bean id="prototypeBean" class="com.example.PrototypeBean" scope="prototype" />
+
+```
+
+### 3. Request (Web Application Only)
+
+-   **Definition**: A new bean instance is created for every HTTP request.
+-   **When to Use**: For beans that are tied to a single HTTP request.
+-   **Example**:
+
+    ```java
+    @Component
+    @Scope("request")
+    public class RequestScopedBean {
+        public RequestScopedBean() {
+            System.out.println("Request Scoped Bean Initialized");
+        }
+    }
+
+    ```
+
+### 4. Session (Web Application Only)
+
+-   **Definition**: A new bean instance is created for each HTTP session.
+-   **When to Use**: For beans that need to maintain session-specific data.
+-   **Example**:
+
+```java
+@Component
+@Scope("session")
+public class SessionScopedBean {
+    public SessionScopedBean() {
+        System.out.println("Session Scoped Bean Initialized");
+    }
+}
+
+```
+
+### 5. Global Session (Web Application Only)
+
+-   **Definition**: A new bean instance is created for each global HTTP session (portlet-based applications).
+-   **When to Use**: Rarely used in modern applications.
+-   **Example**:
+
+```java
+@Component
+@Scope("globalSession")
+public class GlobalSessionScopedBean {
+    public GlobalSessionScopedBean() {
+        System.out.println("Global Session Scoped Bean Initialized");
+    }
+}
+
+```
+
+### 6. Application
+
+-   **Definition**: A single instance of the bean is shared across the lifecycle of a ServletContext.
+-   **When to Use**: For beans that need to share state across the application in a web environment.
+-   **Example**:
+
+```java
+@Component
+@Scope("application")
+public class ApplicationScopedBean {
+    public ApplicationScopedBean() {
+        System.out.println("Application Scoped Bean Initialized");
+    }
+}
+
+```
+
+## How to Configure Bean Scopes
+
+### Using Annotations
+
+-   Use the @Scope annotation to define the scope of a bean.
+
+### Using XML Configuration
+
+-   Define the scope attribute in the bean definition.
+-   **Example**:
+
+```xml
+<bean id="exampleBean" class="com.example.ExampleBean" scope="prototype" />
+
+```
+
+## Summary Table
+
+| Scope             | Description                                  | Usage                      |
+| ----------------- | -------------------------------------------- | -------------------------- |
+| **Singleton**     | Single instance per Spring container         | Default, stateless beans   |
+| **Prototype**     | New instance per request                     | Stateful beans             |
+| **Request**       | New instance per HTTP request                | Web applications           |
+| **Session**       | New instance per HTTP session                | Session-specific data      |
+| **Application**   | Single instance per ServletContext lifecycle | Application-wide state     |
+| **GlobalSession** | Single instance per global HTTP session      | Portlet-based applications |
+
+It seems like I can’t do more advanced data analysis right now. Please try again later. However, I can still provide you with the content for "Spring Expression" in markdown format so you can copy it manually:
+
+````markdown
+# Spring Expression
+
+Spring Expression Language (SpEL) is a powerful expression language that is used in the Spring Framework. SpEL is used for querying and manipulating object graphs at runtime. SpEL provides support for querying Spring beans, accessing properties, performing operations, and invoking methods.
+
+## Key Features of SpEL
+
+-   **Bean manipulation**: Accessing and manipulating Spring beans at runtime.
+-   **Evaluation of properties**: Access properties of beans and class fields.
+-   **Arithmetic operations**: Support for arithmetic operations like addition, subtraction, multiplication, etc.
+-   **Logical operations**: Support for logical operations (AND, OR, NOT).
+-   **Control flow**: Conditional operators such as `if-else` and `switch`.
+-   **Method invocation**: Invoking methods of beans at runtime.
+
+## Syntax
+
+SpEL expressions are written within `#{}` in Spring configuration files (XML or annotation-based) and can be evaluated using the `ExpressionParser` class.
+
+### Example 1: Accessing Bean Properties
+
+You can access bean properties using SpEL like this:
+
+```xml
+<bean id="employee" class="com.example.Employee">
+    <property name="name" value="John Doe" />
+    <property name="age" value="30" />
+</bean>
+
+<bean id="greeting" class="com.example.Greeting">
+    <property name="message" value="#{employee.name}" />
+</bean>
+```
+````
+
+In this case, the `message` property of the `Greeting` bean will be set to the value of `employee.name`.
+
+### Example 2: Arithmetic Expressions
+
+You can use SpEL to perform arithmetic operations:
+
+```xml
+<bean id="calculator" class="com.example.Calculator">
+    <property name="result" value="#{10 + 20}" />
+</bean>
+```
+
+This expression sets the `result` property of the `Calculator` bean to `30`.
+
+### Example 3: Conditional Expressions
+
+You can also use SpEL for conditional expressions:
+
+```xml
+<bean id="discount" class="com.example.Discount">
+    <property name="amount" value="#{discountAmount > 100 ? 'High' : 'Low'}" />
+</bean>
+```
+
+This expression sets the `amount` property to either 'High' or 'Low' based on the `discountAmount` value.
+
+### Example 4: Method Invocation
+
+You can invoke methods using SpEL:
+
+```xml
+<bean id="employee" class="com.example.Employee">
+    <property name="name" value="John Doe" />
+</bean>
+
+<bean id="greeting" class="com.example.Greeting">
+    <property name="message" value="#{employee.getGreetingMessage()}" />
+</bean>
+```
+
+In this example, the `message` property will be set to the value returned by the `getGreetingMessage()` method of the `employee` bean.
+
+## SpEL with Annotations
+
+SpEL is also used with annotations like `@Value` and `@PostConstruct` to inject values or expressions directly into Spring beans.
+
+### Example with `@Value` annotation:
+
+```java
+@Component
+public class Discount {
+    @Value("#{10 * 0.1}")
+    private double discountAmount;
+
+    // Getter and Setter
+}
+```
+
+In this case, the `discountAmount` field will be calculated as `10 * 0.1 = 1.0` using SpEL.
+
+### Example with `@PostConstruct` annotation:
+
+```java
+@Component
+public class Employee {
+    private String name;
+
+    @PostConstruct
+    public void init() {
+        System.out.println("Employee name is: " + name);
+    }
+
+    // Getter and Setter
+}
+```
+
+## Summary
+
+SpEL is a flexible and powerful feature within the Spring Framework that allows you to dynamically query and manipulate the properties of beans. It enables features like method invocation, arithmetic operations, logical operations, and conditional expressions.
