@@ -264,7 +264,6 @@ Here’s an example of how DI works in a Spring application:
         ```
 
         ```java
-
         @Configuration
         public class AppConfig {
 
@@ -277,8 +276,8 @@ Here’s an example of how DI works in a Spring application:
             public MyService myService() {
                 return new MyService(myRepository());
             }
-
-        }```
+        }
+        ```
 
         ```java
         @SpringBootApplication
@@ -294,7 +293,8 @@ Here’s an example of how DI works in a Spring application:
 
                 context.close();
             }
-        }```
+        }
+        ```
 
 # Ambiguity Problem and Its Solution with Constructor Injection
 
