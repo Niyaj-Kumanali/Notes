@@ -1491,9 +1491,6 @@ public class ApplicationScopedBean {
 | **Application**   | Single instance per ServletContext lifecycle | Application-wide state     |
 | **GlobalSession** | Single instance per global HTTP session      | Portlet-based applications |
 
-It seems like I can’t do more advanced data analysis right now. Please try again later. However, I can still provide you with the content for "Spring Expression" in markdown format so you can copy it manually:
-
-````markdown
 # Spring Expression
 
 Spring Expression Language (SpEL) is a powerful expression language that is used in the Spring Framework. SpEL is used for querying and manipulating object graphs at runtime. SpEL provides support for querying Spring beans, accessing properties, performing operations, and invoking methods.
@@ -1525,6 +1522,7 @@ You can access bean properties using SpEL like this:
     <property name="message" value="#{employee.name}" />
 </bean>
 ```
+
 ````
 
 In this case, the `message` property of the `Greeting` bean will be set to the value of `employee.name`.
@@ -1606,3 +1604,4 @@ public class Employee {
 ## Summary
 
 SpEL is a flexible and powerful feature within the Spring Framework that allows you to dynamically query and manipulate the properties of beans. It enables features like method invocation, arithmetic operations, logical operations, and conditional expressions.
+````
