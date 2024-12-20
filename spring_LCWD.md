@@ -1523,8 +1523,6 @@ You can access bean properties using SpEL like this:
 </bean>
 ```
 
-````
-
 In this case, the `message` property of the `Greeting` bean will be set to the value of `employee.name`.
 
 ### Example 2: Arithmetic Expressions
@@ -1604,4 +1602,259 @@ public class Employee {
 ## Summary
 
 SpEL is a flexible and powerful feature within the Spring Framework that allows you to dynamically query and manipulate the properties of beans. It enables features like method invocation, arithmetic operations, logical operations, and conditional expressions.
+
+Here's a markdown document explaining how to invoke static methods, variables, and create objects using Spring Expression Language (SpEL):
+
+````markdown
+# Spring Expression Language (SpEL): Invoking Static Methods, Variables, and Creating Objects
+
+Spring Expression Language (SpEL) provides the ability to query and manipulate Spring beans, properties, methods, and even invoke static methods and variables. SpEL also allows for creating objects at runtime. Here are some key concepts and examples to demonstrate how to invoke static methods, use static variables, and create objects in SpEL.
+
+## 1. Invoking Static Methods
+
+You can invoke static methods using SpEL by referring to the class and method name in the following format:
+
+```java
+#ClassName.methodName()
+```
 ````
+
+### Example: Invoking Static Method
+
+Consider a `MathUtils` class with a static method `add` that performs addition.
+
+```java
+public class MathUtils {
+    public static int add(int a, int b) {
+        return a + b;
+    }
+}
+```
+
+You can invoke this static method in SpEL like this:
+
+```xml
+<bean id="mathUtils" class="com.example.MathUtils"/>
+
+<bean id="result" class="java.lang.Integer">
+    <constructor-arg value="#{T(com.example.MathUtils).add(10, 20)}"/>
+</bean>
+```
+
+In the above example, the SpEL expression `#{T(com.example.MathUtils).add(10, 20)}` calls the static method `add` of the `MathUtils` class.
+
+## 2. Accessing Static Variables
+
+You can access static variables in a similar manner as static methods using `T` followed by the class name and the variable name.
+
+### Example: Accessing Static Variable
+
+```java
+public class MathUtils {
+    public static final String CONSTANT = "Constant Value";
+}
+```
+
+You can access the static variable `CONSTANT` in SpEL like this:
+
+```xml
+<bean id="constantValue" class="java.lang.String">
+    <constructor-arg value="#{T(com.example.MathUtils).CONSTANT}"/>
+</bean>
+```
+
+In this case, `#{T(com.example.MathUtils).CONSTANT}` accesses the static variable `CONSTANT` of the `MathUtils` class.
+
+## 3. Creating Objects Using SpEL
+
+SpEL can also be used to create objects dynamically at runtime. This is achieved using the `new` keyword followed by the class name and constructor arguments.
+
+### Example: Creating Object Using SpEL
+
+Consider a simple `Employee` class:
+
+```java
+public class Employee {
+    private String name;
+    private int age;
+
+    public Employee(String name, int age) {
+        this.name = name;
+        this.age = age;
+    }
+
+    // Getter and Setter
+}
+```
+
+You can create an `Employee` object using SpEL like this:
+
+```xml
+<bean id="employee" class="com.example.Employee" factory-method="getInstance">
+    <constructor-arg value="#{T(com.example.Employee).new('John Doe', 30)}"/>
+</bean>
+```
+
+In this example, `#{T(com.example.Employee).new('John Doe', 30)}` creates a new instance of the `Employee` class with the specified arguments.
+
+## 4. Creating Object from Class Name Using SpEL
+
+If you want to create an object dynamically by referring to the class name stored in a variable, you can use the `T` operator in SpEL.
+
+### Example: Creating Object from Class Name
+
+Suppose you have a `ClassName` variable and want to create an instance of the class referred by this variable:
+
+```java
+public class DynamicClassLoader {
+    public Object createObject(String className) throws Exception {
+        Class<?> clazz = Class.forName(className);
+        return clazz.getDeclaredConstructor().newInstance();
+    }
+}
+```
+
+You can invoke this method using SpEL as follows:
+
+```xml
+<bean id="dynamicClassLoader" class="com.example.DynamicClassLoader"/>
+
+<bean id="newObject" class="java.lang.Object">
+    <constructor-arg value="#{dynamicClassLoader.createObject('com.example.Employee')}"/>
+</bean>
+```
+
+In this example, `dynamicClassLoader.createObject('com.example.Employee')` dynamically creates an object of the `Employee` class based on the provided class name.
+
+## Summary
+
+SpEL allows you to invoke static methods and variables, as well as create objects at runtime. This flexibility makes SpEL a powerful tool for dynamic expressions within Spring. You can:
+
+-   Invoke static methods using `T(ClassName).methodName()`
+-   Access static variables using `T(ClassName).STATIC_VAR`
+-   Create objects using the `new` keyword and dynamic expressions like `T(ClassName).new(arg1, arg2)`
+
+SpEL is commonly used for configuration purposes and when you need dynamic expression evaluation in Spring.
+
+This markdown provides examples and explanations on how to use Spring Expression Language for invoking static methods, accessing static variables, and creating objects dynamically.
+
+Here’s a markdown for using Boolean with Spring Expression Language (SpEL):
+
+````markdown
+# Boolean with Spring Expression Language (SpEL)
+
+Spring Expression Language (SpEL) allows you to perform logical operations, evaluate boolean expressions, and use boolean values in your Spring beans. SpEL supports logical operators, conditional checks, and comparisons involving boolean values, making it a powerful tool for dynamic configurations.
+
+## 1. Boolean Values in SpEL
+
+You can directly assign boolean values (`true` or `false`) to properties or variables using SpEL.
+
+### Example: Assigning Boolean Value to a Property
+
+```xml
+<bean id="myBean" class="com.example.MyBean">
+    <property name="isActive" value="#{true}" />
+</bean>
+```
+````
+
+In this example, the property `isActive` of the `MyBean` class is assigned the boolean value `true`.
+
+## 2. Logical Operators
+
+SpEL supports logical operations that can be used with boolean values. The basic logical operators supported in SpEL are:
+
+-   `AND` (&&)
+-   `OR` (||)
+-   `NOT` (!)
+
+### Example: Using Logical Operators
+
+```xml
+<bean id="myBean" class="com.example.MyBean">
+    <property name="status" value="#{true and false}" />
+</bean>
+```
+
+In the above example, the logical `AND` operator is used, and the property `status` will be assigned the value `false`.
+
+Similarly, you can use the `OR` and `NOT` operators in SpEL:
+
+```xml
+<bean id="anotherBean" class="com.example.AnotherBean">
+    <property name="isEligible" value="#{true or false}" />
+    <property name="isActive" value="#{not false}" />
+</bean>
+```
+
+-   `#{true or false}` will evaluate to `true`.
+-   `#{not false}` will evaluate to `true`.
+
+## 3. Conditional Expressions
+
+SpEL allows conditional logic using the ternary operator (`condition ? trueValue : falseValue`) to evaluate boolean expressions.
+
+### Example: Conditional Expression in SpEL
+
+```xml
+<bean id="myBean" class="com.example.MyBean">
+    <property name="status" value="#{someCondition ? 'Active' : 'Inactive'}" />
+</bean>
+```
+
+In this example, the property `status` is assigned the value `'Active'` if the condition `someCondition` is `true`, otherwise `'Inactive'`.
+
+## 4. Using Boolean Expressions in Annotations
+
+You can also use boolean expressions in annotations, such as `@Value` for injecting values based on conditions.
+
+### Example: Using Boolean in `@Value` Annotation
+
+```java
+@Component
+public class Discount {
+    @Value("#{10 > 5 ? 'Yes' : 'No'}")
+    private String discountEligible;
+
+    // Getter and Setter
+}
+```
+
+In this example, `discountEligible` will be assigned the value `'Yes'` because `10 > 5` evaluates to `true`.
+
+## 5. Combining Boolean Expressions
+
+You can combine multiple boolean expressions using logical operators for more complex conditions.
+
+### Example: Combining Boolean Expressions
+
+```xml
+<bean id="myBean" class="com.example.MyBean">
+    <property name="isActive" value="#{true and (false or true)}" />
+</bean>
+```
+
+In this case, `true and (false or true)` evaluates to `true`, and the `isActive` property will be assigned the value `true`.
+
+## 6. Using SpEL with Collections and Booleans
+
+SpEL allows for using boolean conditions within collections. You can use boolean expressions to filter, check conditions, or manipulate lists or sets.
+
+### Example: Filtering with Boolean Expression
+
+```xml
+<bean id="myListBean" class="java.util.ArrayList">
+    <constructor-arg value="#{T(java.util.Arrays).asList(1, 2, 3, 4, 5).stream().filter(x -> x % 2 == 0).collect(T(java.util.stream.Collectors).toList())}" />
+</bean>
+```
+
+In this example, we use a boolean condition (`x % 2 == 0`) to filter even numbers from a list of integers.
+
+## 7. Summary of Boolean Operations in SpEL
+
+-   **Boolean literals**: You can use `true` and `false` in SpEL expressions.
+-   **Logical operators**: Use `and`, `or`, and `not` for logical operations.
+-   **Conditional expressions**: Use the ternary operator for conditional assignments.
+-   **Annotations**: Boolean values and expressions can be injected into beans via annotations like `@Value`.
+
+SpEL provides flexibility in working with boolean values and expressions, allowing for more dynamic and conditional configurations in Spring applications.
