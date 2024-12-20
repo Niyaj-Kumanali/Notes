@@ -237,64 +237,64 @@ The Spring container is responsible for managing the objects (beans) and their d
 
 Here’s an example of how DI works in a Spring application:
 
-1.  **Bean Definitions** (`@Component` annotation):
+-   **Bean Definitions** (`@Component` annotation):
 
-        ```java
-        @Component
-        public class MyRepository {
-            public void saveData() {
-                System.out.println("Data saved!");
-            }
+    ```java
+    @Component
+    public class MyRepository {
+        public void saveData() {
+            System.out.println("Data saved!");
+        }
+    }
+
+    @Component
+    public class MyService {
+        private final MyRepository myRepository;
+
+        // Constructor Injection
+        @Autowired
+        public MyService(MyRepository myRepository) {
+            this.myRepository = myRepository;
         }
 
-        @Component
-        public class MyService {
-            private final MyRepository myRepository;
-
-            // Constructor Injection
-            @Autowired
-            public MyService(MyRepository myRepository) {
-                this.myRepository = myRepository;
-            }
-
-            public void performAction() {
-                myRepository.saveData();
-            }
+        public void performAction() {
+            myRepository.saveData();
         }
-        ```
+    }
+    ```
 
-        ```java
-        @Configuration
-        public class AppConfig {
+    ```java
+    @Configuration
+    public class AppConfig {
 
-            @Bean
-            public MyRepository myRepository() {
-                return new MyRepository();
-            }
-
-            @Bean
-            public MyService myService() {
-                return new MyService(myRepository());
-            }
+        @Bean
+        public MyRepository myRepository() {
+            return new MyRepository();
         }
-        ```
 
-        ```java
-        @SpringBootApplication
-        public class Application {
-            public static void main(String[] args) {
-                AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext(AppConfig.class);
-
-                // Retrieve the MyService bean from the container
-                MyService myService = context.getBean(MyService.class);
-
-                // Perform action
-                myService.performAction();
-
-                context.close();
-            }
+        @Bean
+        public MyService myService() {
+            return new MyService(myRepository());
         }
-        ```
+    }
+    ```
+
+    ```java
+    @SpringBootApplication
+    public class Application {
+        public static void main(String[] args) {
+            AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext(AppConfig.class);
+
+            // Retrieve the MyService bean from the container
+            MyService myService = context.getBean(MyService.class);
+
+            // Perform action
+            myService.performAction();
+
+            context.close();
+        }
+    }
+    ```
 
 # Ambiguity Problem and Its Solution with Constructor Injection
 
@@ -329,16 +329,17 @@ If both ServiceA and ServiceB are present, Spring won't know which one to inject
 
 ### 3.1 Use @Qualifier
 
-    The @Qualifier annotation specifies which bean to inject by name.
-    ```java
+-   The @Qualifier annotation specifies which bean to inject by name.
+    ````java
     @Autowired
     public Employee(@Qualifier("serviceA") Service service) {
         this.service = service;
     }```
+    ````
 
 ### 3.2 Use @Primary
 
-    The @Primary annotation marks one bean as the default when multiple candidates are available.
+-   The @Primary annotation marks one bean as the default when multiple candidates are available.
     ```java
     @Component
     @Primary
@@ -347,7 +348,7 @@ If both ServiceA and ServiceB are present, Spring won't know which one to inject
 
 ### 3.3 Use Multiple Constructors
 
-    If you have multiple constructors, use @Autowired on the one you want Spring to use for injection.
+-   If you have multiple constructors, use @Autowired on the one you want Spring to use for injection.
     ```java
     @Autowired
     public Employee(Service service) { ... }
