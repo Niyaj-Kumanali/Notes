@@ -1,8 +1,7 @@
-# Collection Framework Library
-
-
-
 ## Collection Framework Library
+
+
+
 - Collection Framework Library is a Library of pre-defined interfaces and implementation classes.
 - The Collection Framework provides predefined implementation of the standard data structure.
 - It provide ready made algorithms to operate on the data.
@@ -14,7 +13,7 @@
 - Collection is a group of objects of same type or different type, which is used to maintain, manage, modify and update the Objects.
 - Collection doesn't have any limitation in size, it is a dynamic in nature and it can grow at runtime.
 
-# Types of Collection:
+## Types of Collection
     There are 4 types of Collection,
 1. List
 2. Queue
@@ -22,7 +21,7 @@
 4. Map
 
 
-# Pre-defined interfaces of Collection Framework:
+## Pre-defined interfaces of Collection Framework
 1. List
 2. Queue
 3. Set
@@ -30,7 +29,7 @@
 5. Iterable
 6. Iterator
 
-# Pre-defined implementation classes of Collection Framework
+## Pre-defined implementation classes of Collection Framework
 1. ArrayList
 2. Vector
 3. LinkedList
@@ -44,19 +43,19 @@
 11. LinkedHashMap
 12. TreeMap
 
-# Utility class of Collection Framework:
+## Utility class of Collection Framework
 1. Collections
 
-# Arrays:
+## Arrays
 - Collection of homogenous types.
 - Object[] arr; // support heterogenous type.
 
-# Data Structure:
+## Data Structure
 - Storing data in a structured manner.
 - Provide set of algorithms for operations.
 - Algorithms are set of instructions written to perform operations on Data Structure.
 
-# Standard Data Structure & Algorithms:
+## Standard Data Structure & Algorithms
 1. Arrays
 2. LinkedList
 3. Stack
@@ -67,7 +66,7 @@
 8. Dictionary
 
 
-## List
+### List
 - Storing the elements with index is known as List.
 - All the elements will have the index.
 - Each element is accessed based on its index.
@@ -76,9 +75,9 @@
 - It allows, null values.
 - It maintains the order of insertion untill it is disturbed.
 - It provide index based access.
-	
 
-# List Interface : 
+
+### List Interface
 - It defines the standard operation that can be performed on a List.
 1. public boolean add(int index, Object element);
 2. public Object remove(int index)
@@ -90,31 +89,31 @@
 8. public int lastIndexOf(Object element)
 
 1. public boolean add(int index, Object element);
-			This method is used to insert the given element at a given index. If the index is not present the method throws Exception.
+            This method is used to insert the given element at a given index. If the index is not present the method throws Exception.
 
 2. public Object remove(int index);
-			This method removes the element present in the given index, it returns the removed element reference.
+            This method removes the element present in the given index, it returns the removed element reference.
 
 3. public Object set(int index, Object element);
-			This method is used to replace an element in the given index by another element, it returns the removed element.
+            This method is used to replace an element in the given index by another element, it returns the removed element.
 
 4. public Object get(int index);
-			This method is used to get reference present in the given index.
+            This method is used to get reference present in the given index.
 
 5. public ListIterator listIterator();
-			This method returns ListIterator type Object used to iterate the elements of the List.
+            This method returns ListIterator type Object used to iterate the elements of the List.
 
 6. public List subList(int fromIndex, int toIndex);
-			This method returns the partial List from the specified index till the specified end index excluding the element at the end index.
+            This method returns the partial List from the specified index till the specified end index excluding the element at the end index.
 
 7. public int indexOf(Object element);
-			This method returns the index of first occurance of the given element in the List.
+            This method returns the index of first occurance of the given element in the List.
 
 8. public int lastIndexOf(Object element);
-			This method returns the index of last occurance of the given element.
+            This method returns the index of last occurance of the given element.
 
 
-# ArrayList: 
+### ArrayList
 - ArrayList is a implementation class of List interface. 
 - It provide the implementation to all the abstract methods of List & Collection interface.
 - ArrayList class implements 3 marker interface,
@@ -134,26 +133,26 @@
 - ArrayList uses the resizable data structure when it grows with the formula,
         newCapacity = (oldCapacity * 1.5) + 1
 
-    # Growing mechanism of ArrayList.
+### Growing mechanism of ArrayList
 - Steps:
 1. Create new ArrayList object with new capacity,
         newCapacity = (oldCapacity * 1.5) + 1
 2. Copy elements from old ArrayList to new ArrayList index wise.
 3. Old reference changed to point to new ArrayList object.
 4. Add new elements.
-		
 
 
 
 
 
-# Vector:
+
+### Vector
 - It is a implementation class of List interface & it is a legacy class.
 - Vector & ArrayList functionalities are same.
 - Vector is a thread safe class because vector class methods are synchronized.
 - The vector grows by doubling capacity of vector.
 
-# LinkedList: 
+### LinkedList
 - LinkedList is a implementation class of List interface.
 - It implements 2 marker interfaces,
 1. Serializable
@@ -161,34 +160,34 @@
 - The LinkedList class uses doubly LinkedList Data Structure to store the elements.
 - The LinkedList class also implements Queue interface hence LinkedList can be used as Queue also.
 - ArrayList & LinkedList functionality wise they are similar but implementation wise they are different.
-	
-	
-# Difference between ArrayList & LinkedList
-## ArrayList:
+
+
+## Difference between ArrayList & LinkedList
+### ArrayList
         Store:  Sequential List
         Access: faster O(1)
         insert: slower O(n)
         delete: slower O(n)
         ArrayList can't be used as Queue.
 
-## LinkedList:
+### LinkedList
         Store:  Non-Sequential List
         Access: slower O(n)
         insert: faster O(1)
         delete: faster O(1)
         LinkedList can be used as Queue because it implements Queue interface.
-		
 
 
 
 
-## MAP
+
+### Map
 - It is a collection of the key value pairs.
 - The value is associated to key & stored in the map.
 - Without key we can not access the value.
 - Key must be unique and values can be duplicate.
 
-# Map interface: 
+### Map interface
     The Map interface defines the set of standard methods that can be operated on any types of Map.
 
 1. public boolean put(Object key, Object value);
@@ -207,7 +206,7 @@
         This method removes the entire key value pair associated with specified key.
         This method will reduce size of the Map.
 
-# HashMap:
+### HashMap
 - HashMap is implementation class of Map interface.
 - It implements 2 marker interface,
 1. Serializable
@@ -226,7 +225,7 @@
         create an HashTable with given initial capacity of 100 and default load factor of 0.75.
 - HashMap h3 = new HashMap(100, 0.9f);
         create an HashTable with given initial capacity of 100 and load factor of 0.90.
-# LinkedHashMap:
+### LinkedHashMap
 - LinkedHashMap is a child class of HashMap.
 - LinkedHashMap has same properties of HashMap with the only difference HashMap is not synchronized, LinkedHashMap is a synchronized hence LinkedHashMap is Thread safe.
 - LinkedHashMap uses 2 Data Structures to store the pair of elements
@@ -234,17 +233,17 @@
 2. HashTable
 - LinkedHashMap maintains the order of insertion.
 
-# HashTable:
+### HashTable
 - HashTable is a implementation class of Map interface.
 - It implements 2 marker interface,
 1. Serializable
 2. Clonable
 - HashTable & HashMap uses same Data structure, the only difference is, in HashMap null is allowed as key or value but in HashTable null is not allowed.
 - HashTable is also synchronized.
-	
 
 
-## Set
+
+### Set
 - Stores unique elements only.
 - It's an unordered collection.
 - It not indexed based collection.
@@ -254,7 +253,7 @@
 - LinkedHashSet is a type of Set which doesn't support duplicate elements but maintain the order of insertion.
 - TreeSet is a type of Set which doesn't allow duplicates elements but elements are stored in naturally sorted order(Ascending order).
 
-# HashSet:
+### HashSet
 - HashSet is a implementation class of Set interface.
 - It implements 2 marker interfaces
 1. Serializable
@@ -265,54 +264,54 @@
 - Since HashSet uses HashMap duplicate values are not allowed.
 - It expands its capacity when size > capacity * loadFactor
 - where loadfactor is 0.75
-	
-	Q: How HashSet Ensures the Uniqueness?
-	
+
+    Q: How HashSet Ensures the Uniqueness?
+
 - hashCode() is used find the bucket index.
 - equals() is used to compare elements inside the bucket,
 - So,
-			- two object with different hashcodes - definitely different.
-			- two object with same hashcode - compared using equals().
+- two object with different hashcodes - definitely different.
+- two object with same hashcode - compared using equals().
 - Internal Structure Diagram:
-			Bucket  Array(table)
-			0	-> 	null
-			1	->	Node('x')
-			2	->	null
-			3	->	Node('A') -> Node('B') -> Node('C')
-			4	->	null
+            Bucket  Array(table)
+            0    ->     null
+            1    ->    Node('x')
+            2    ->    null
+            3    ->    Node('A') -> Node('B') -> Node('C')
+            4    ->    null
 - Each bucket has either,
-			- null
-			- a Node
-			- or TreeNode(Red-Black Tree)
+- null
+- a Node
+- or TreeNode(Red-Black Tree)
 - Treeification(Java 8+)
 - If elements in a single bucket become too many:
-## Threshold:
-			- Bucket Size >= 8 : Convert Linked List -> Red-Black Tree
-			- Bucket Size <= 6 : Convert back to List.
-## Reason:
-			- Linked List: O(n)
-			- Red-Black Tree: O(log n)
+## Threshold
+- Bucket Size >= 8 : Convert Linked List -> Red-Black Tree
+- Bucket Size <= 6 : Convert back to List.
+## Reason
+- Linked List: O(n)
+- Red-Black Tree: O(log n)
 - HashSet Time Complexities
-		Operation	Time
-		add			O(1) average
-		remove		O(1) average
-		contains	O(1) average
-		Worst case	O(log n) after treeification
-	
-    
-# LinkedHashSet:
+        Operation    Time
+        add            O(1) average
+        remove        O(1) average
+        contains    O(1) average
+        Worst case    O(log n) after treeification
+
+
+### LinkedHashSet
 - It is child class of HashSet.
 - It uses hybrid Data Structure, which is a combination of LinkedList and HashMap.
 - The capacity of this is 16, maintain the order of insertion.
 - It uses,
-		- HashMap for hashing.
-		- Doubly Linked List to remember the order.
+- HashMap for hashing.
+- Doubly Linked List to remember the order.
 - We can use LinkedHashSet if we need,
-		- Unique + Order
-		- Not sorted
-		- Slightly slower than HashSet.
+- Unique + Order
+- Not sorted
+- Slightly slower than HashSet.
 
-# TreeSet: 
+### TreeSet
 - It used TreeMap internally.
 - It stores elementes in sorted order.
 - It used a Red-Black Tree(self-balancing BST).
@@ -331,22 +330,22 @@
 - Since TreeSet is a SortedSet, all the elements are arranged in a sorted order, the default sortin order is ascending order.
 - We can store only Comparable type object, if we try to store non-Comparable type object we get ClassCastException.
 - Whenever an element is added into TreeSet, the element is compared with all the elements already present in the TreeSet and get arranged in ascending order.
-	
+
 - Time Complexity of TreeSet
-		Operation	Time
-		add			O(log n)
-		remove		O(log n)
-		contains	O(log n)
-		traversal	O(n) (sorted order)
+        Operation    Time
+        add            O(log n)
+        remove        O(log n)
+        contains    O(log n)
+        traversal    O(n) (sorted order)
 
 
-## Queue
+### Queue
 - Queue is a type of Collection, where elements are processed in FIFO order.
 - Generally a Queue is not a indexed.
 - Queue allows duplicate but doesn't allow null.
 - Generally in a Queue, the intermediate elements can not accessed untill we start removing the elements from head position.
 
-# Queue interface:
+### Queue interface
 - The Queue interface defines standard methods that can be operated on any type of Queue.
 - The Queue interface methods are,
         // Used to insert element into Queue at tail end
@@ -356,12 +355,12 @@
         // Used to retrieve the head element of the Queue.
 3. public Object peek();
 4. public Object element();
-		
+
         // Used to remove the head element of the Queue.
 5. public Object poll();
 6. public Object remove();
 
-# PriorityQueue:
+### PriorityQueue
 - PriorityQueue is a implementation class of Queue interface.
 - It implements two marker interfaces,
 1. Serializable
@@ -377,21 +376,21 @@
 - On calling poll() on empty Queue return null whereas calling remove() on empty Queue throws NoSuchElementException.
 - On calling peek() on empty Queue return null whereas calling element() on empty Queue throws NoSuchElementException
 - PriorityQueue Complexities
-		Operation				Time
-		add						O(log n)
-		poll					O(log n)
-		peek					O(1)
-		remove specific element	O(n)
-		contains				O(n)
-		
-# ArrayDeque:
+        Operation                Time
+        add                        O(log n)
+        poll                    O(log n)
+        peek                    O(1)
+        remove specific element    O(n)
+        contains                O(n)
+
+### ArrayDeque
 - It is most recommended for Stack & Queue.
 - It is faster than LinkedList, Stack(Legacy), ArrayList(as Stack).
 - ArrayDeque Complexities,
-		Operation
+        Operation
 
 
-	## LINKEDLIST INTERVIEW QUESTIONS
+## LINKEDLIST INTERVIEW QUESTIONS
 
 1. What is LinkedList in Java?
 - LinkedList is a doubly linked list implementation of List and Deque interfaces.
@@ -459,13 +458,13 @@
 
 15. Is LinkedList thread-safe?
 - No. Use Collections.synchronizedList() or ConcurrentLinkedDeque if thread safety is required.
-		
-		
 
-	## ARRAYLIST INTERVIEW QUESTIONS
+
+
+## ARRAYLIST INTERVIEW QUESTIONS
 
 1. What is the default capacity of an ArrayList?
-	   Default capacity is 10 in Java 8+. Actual array is created only when first element is added.
+       Default capacity is 10 in Java 8+. Actual array is created only when first element is added.
 
 2. What is the time complexity of major ArrayList operations?
 - get() – O(1)
@@ -534,7 +533,7 @@
 
 20. Is ArrayList fail-fast or fail-safe?
 - It is fail-fast.
-		
+
 21. How does ArrayList grow internally?
 - Uses a dynamic array underneath.
 - When full, capacity automatically increases.
@@ -554,14 +553,14 @@
 - LinkedList creates more objects, causing more garbage collection work.
 
 23. Difference between ensureCapacity() and trimToSize()
-## ensureCapacity(minCapacity):
+## ensureCapacity(minCapacity)
 
 - Increases capacity in advance.
 - Prevents repeated resizing operations.
 - Improves performance for bulk insertions.
 - Useful before adding many elements.
 
-## trimToSize():
+## trimToSize()
 
 - Reduces capacity to exact current size.
 - Frees unused memory.
@@ -583,9 +582,9 @@
 - Happens when the list is modified outside the iterator.
 - Fail-fast behavior is best effort, not guaranteed.
 - Helps detect accidental concurrent modifications early.
-		
-		
-	## SET INTERVIEW QUESTIONS
+
+
+## SET INTERVIEW QUESTIONS
 
 1. How does HashSet work internally?
 
@@ -696,4 +695,59 @@
 - Yes, by passing HashSet to TreeSet constructor.
 - Resulting TreeSet will automatically sort the elements.
 
+## Additional Notes
 
+### Collection Framework Concepts
+- `Collection` is the root interface for groups of objects. It represents single-column data structures.
+- `Collections` is a utility class with static methods such as `sort`, `reverse`, `shuffle`, `binarySearch`, `synchronizedList`, and `unmodifiableList`.
+- `Iterable` is the super interface of `Collection`; it allows objects to be the target of the enhanced `for` loop.
+- Most collection implementations are not synchronized by default and should be wrapped if thread safety is required.
+- `Comparator` and `Comparable` are used to define ordering for sorted collections such as `TreeSet` and `TreeMap`.
+
+### Examples
+- ArrayList example:
+    List<String> list = new ArrayList<>();
+    list.add("A");
+    list.add("B");
+    list.remove(0);
+- LinkedList example:
+    LinkedList<Integer> linked = new LinkedList<>();
+    linked.addFirst(10);
+    linked.addLast(20);
+    linked.removeFirst();
+- HashMap example:
+    Map<String, Integer> map = new HashMap<>();
+    map.put("one", 1);
+    map.put("two", 2);
+    int value = map.get("one");
+- HashSet example:
+    Set<String> set = new HashSet<>();
+    set.add("A");
+    set.add("B");
+    boolean hasA = set.contains("A");
+- PriorityQueue example:
+    PriorityQueue<Integer> pq = new PriorityQueue<>();
+    pq.add(5);
+    pq.add(1);
+    pq.add(3);
+    int head = pq.poll();
+
+### When to Use Which Collection
+- Use `ArrayList` when fast random access and iteration are important.
+- Use `LinkedList` when frequent insertions or removals at both ends are required.
+- Use `HashMap` for fast key-based lookup when order does not matter.
+- Use `LinkedHashMap` when insertion order must be preserved.
+- Use `TreeMap` or `TreeSet` when sorted order is required.
+- Use `HashSet` when uniqueness is the only requirement.
+- Use `LinkedHashSet` to preserve insertion order with unique elements.
+- Use `PriorityQueue` when you need to process items in priority order.
+- Use `ArrayDeque` when you need a fast double-ended queue or stack.
+
+### Interview Notes
+- `ArrayList` is backed by an array and grows by about 1.5x when needed.
+- `LinkedList` stores nodes with `prev` and `next` pointers, so random access is slower.
+- `HashMap` uses buckets and handles collisions using linked lists or trees.
+- `HashSet` is implemented internally with a `HashMap` where elements are stored as keys.
+- `TreeSet` stores elements in sorted order using a balanced tree and does not allow null.
+- `Queue` methods differ in behavior on failure: `add()`/`remove()` throw exceptions, while `offer()`/`poll()` return `false`/`null`.
+- `fail-fast` iterators detect structural modification and throw `ConcurrentModificationException`.
