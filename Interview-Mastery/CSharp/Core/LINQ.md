@@ -1,356 +1,86 @@
 # LINQ
 
-## 1. Executive Summary
+---
 
-Language Integrated Query (LINQ) is a set of language and runtime features for writing declarative, composable queries over data sources (objects, XML, databases, etc.). LINQ to Objects operates on `IEnumerable<T>`, using deferred execution, lazy evaluation, and a fluent API built on extension methods. Mastery of LINQ is essential for writing concise, readable, and efficient C# code.
+## Overview
 
-## 2. Core Theory
+- **Definition:** Language Integrated Query — a set of language and runtime features for writing declarative, composable queries over data sources (objects, XML, databases) using a fluent API built on extension methods.
+- **Why It Exists:** Provides a consistent, declarative query model across diverse data sources with deferred execution, lazy evaluation, and composability. Reduces imperative loop boilerplate and enables query translation (e.g., LINQ to SQL via EF Core).
+- **Key Concepts:** **Extension methods** (`Where`, `Select`, `Aggregate` in `System.Linq.Enumerable`), **expression trees** (`IQueryable<T>` translates C# to provider-specific queries), **deferred execution** (most operators don't materialize until iterated), **streaming vs buffering operators**, **`IAsyncEnumerable<T>`** (async streaming), and **LINQ query syntax** vs **fluent syntax**.
 
-LINQ is built on three pillars:
+---
 
-- **Extension Methods**: `Where`, `Select`, `Aggregate`, etc. are static methods in `System.Linq.Enumerable` extending `IEnumerable<T>`.
-- **Expression Trees**: `IQueryable<T>` providers (EF Core) translate C# expressions into SQL.
-- **Deferred Execution**: Most operators do not materialize results until iterated.
+## Core Concepts
 
-Standard Query Operators categories:
-- Filtering: `Where`, `OfType`
-- Projection: `Select`, `SelectMany`
-- Partitioning: `Take`, `Skip`, `TakeWhile`, `SkipWhile`
-- Ordering: `OrderBy`, `ThenBy`, `OrderByDescending`, `Reverse`
-- Grouping: `GroupBy`, `ToLookup`
-- Set: `Distinct`, `Union`, `Intersect`, `Except`
-- Element: `First`, `FirstOrDefault`, `Single`, `SingleOrDefault`, `Last`, `ElementAt`
-- Aggregation: `Count`, `Sum`, `Min`, `Max`, `Average`, `Aggregate`
-- Quantifiers: `Any`, `All`, `Contains`, `SequenceEqual`
-- Conversion: `ToArray`, `ToList`, `ToDictionary`, `ToHashSet`, `AsEnumerable`, `Cast`
-
-## 3. Under-the-Hood Deep Dive
-
-### Iterator Pattern and State Machine
+- **Standard Query Operators:**
+  - **Filtering:** `Where`, `OfType` — streaming, O(n)
+  - **Projection:** `Select`, `SelectMany` — streaming, O(n)
+  - **Partitioning:** `Take`, `Skip`, `TakeWhile`, `SkipWhile` — streaming
+  - **Ordering:** `OrderBy`, `ThenBy`, `OrderByDescending`, `Reverse` — buffering, O(n log n)
+  - **Grouping:** `GroupBy`, `ToLookup` — buffering, O(n)
+  - **Set:** `Distinct`, `Union`, `Intersect`, `Except` — buffering
+  - **Element:** `First`, `FirstOrDefault`, `Single`, `SingleOrDefault`, `Last`, `ElementAt` — short-circuiting
+  - **Aggregation:** `Count`, `Sum`, `Min`, `Max`, `Average`, `Aggregate`
+  - **Quantifiers:** `Any`, `All`, `Contains`, `SequenceEqual`
+  - **Conversion:** `ToArray`, `ToList`, `ToDictionary`, `ToHashSet`, `AsEnumerable`, `Cast`
 
 ```csharp
-// The compiler transforms LINQ into state machine calls.
-// Example: source.Where(x => x > 5).Select(x => x * 2)
-
-// Compiler generates something like:
-IEnumerable<int> WhereSelect(IEnumerable<int> source)
-{
-    foreach (var x in source)
-    {
-        if (x > 5)            // Where predicate
-            yield return x * 2;  // Select projection
-    }
-}
+// Streaming operators yield as they go; buffering operators consume all before yielding
+source.Where(x => x > 5).OrderBy(x => x.Name).Select(x => x * 2)
+// Where: streaming → OrderBy: BUFFERS all → Select: streaming
 ```
 
+- **Iterator State Machine:** The compiler transforms LINQ operators into state machines using `yield return`. Each operator creates a new wrapper `IEnumerable<T>` with its own enumerator struct. The `MoveNext()` method advances through the pipeline, calling `MoveNext()` on the source and applying transformations.
+
 ```csharp
-// Decompiled state machine (simplified)
-internal class WhereSelectIterator : IEnumerable<int>, IEnumerator<int>
-{
-    private int _state;
-    private int _current;
-    private IEnumerator<int> _sourceEnumerator;
-
-    public bool MoveNext()
-    {
-        switch (_state)
-        {
-            case 0: _state = 1;
-                    _sourceEnumerator = _source.GetEnumerator(); break;
-            case 1: goto loop;
-        }
-        return false;
-
-        loop:
-        while (_sourceEnumerator.MoveNext())
-        {
-            int x = _sourceEnumerator.Current;
-            if (x > 5)
-            {
-                _current = x * 2;
-                return true;
-            }
-        }
-        _state = -1;
-        _sourceEnumerator?.Dispose();
-        return false;
-    }
-}
+// Compiler generates a state machine for: source.Where(x => x > 5).Select(x => x * 2)
+// Internally: foreach (var x in source) { if (x > 5) yield return x * 2; }
 ```
 
-### Expression Trees vs Delegates
+- **Expression Trees vs Delegates:** `Func<T,bool>` is compiled IL executed locally. `Expression<Func<T,bool>>` is an expression tree that can be analyzed and translated (e.g., by EF Core to SQL). `IQueryable<T>` stores expression trees; `IEnumerable<T>` works with delegates.
+- **Streaming vs Buffering:**
+  - **Streaming:** `Where`, `Select`, `SelectMany`, `Take`, `Skip`, `Any`, `All`, `First` — process one element at a time, O(1) memory
+  - **Buffering:** `OrderBy`, `GroupBy`, `Distinct`, `Union`, `Intersect`, `Reverse`, `ToLookup`, `ToArray`, `ToList` — consume entire sequence before yielding, O(n) or more memory
 
 ```csharp
-// Delegate: compiled IL, executed locally
-Func<int, bool> predicate = x => x > 5;
-source.Where(predicate);  // Enumerable.Where
-
-// Expression tree: represented as tree of Node objects, can be analyzed/translated
-Expression<Func<int, bool>> expr = x => x > 5;
-// expr.Body is BinaryExpression (GreaterThan)
-// expr.Parameters[0] is ParameterExpression "x"
-// expr.Body.Left is x, Body.Right is ConstantExpression 5
-queryable.Where(expr);    // Queryable.Where -> translates to SQL
+// Bad: OrderBy before Where sorts everything, then filters
+query.OrderBy(x => x.Name).Where(x => x.Age > 5); // Sorts 100% of data, filters after
+// Good: filter first, then sort
+query.Where(x => x.Age > 5).OrderBy(x => x.Name); // Filters before sorting
 ```
 
-### Method Chaining and Intermediate Allocations
+- **IQueryable vs IEnumerable:** `IQueryable<T>` composes expression trees, translated by the provider (e.g., SQL). `IEnumerable<T>` executes in memory with compiled IL. Calling `AsEnumerable()` switches from server-side to client-side evaluation. Mixing them can cause accidental client evaluation (EF Core warns about this).
+
+---
+
+## Common Mistakes
+
+- **Multiple enumeration** — A LINQ query is re-evaluated each time it's enumerated. `filtered.Count()` and `filtered.First()` enumerate twice. Fix: materialize with `.ToList()` once.
+- **Using `SingleOrDefault` when `FirstOrDefault` is intended** — `SingleOrDefault` throws if more than one match exists. Use `FirstOrDefault` unless the query is guaranteed to return at most one result.
+- **Forgetting deferred execution** — LINQ queries are not evaluated until enumerated. Mutations to the source after query definition are reflected in results. Materialize early if the source may change.
+- **Not understanding IQueryable vs IEnumerable boundary** — Calling `.AsEnumerable()` before a filter causes the filter to run client-side (pulling all data from database). Ensure filters are applied to `IQueryable` before materialization.
+- **Modifying source in `Select`** — `items.Select(x => { x.Count++; return x; })` has side effects. `Select` should be pure. Use `foreach` for mutations.
+- **Null collection** — `nullSource.Where(x => x > 5)` throws `NullReferenceException`. Use `source ?? Array.Empty<T>()`.
+- **Exception inside iterator** — `source.Select(x => Parse(x))` doesn't throw until the result is enumerated. Wrap iteration in try/catch.
 
 ```csharp
-// Each operator creates a new wrapper IEnumerable<T>.
-// source.Where(...).OrderBy(...).Select(...)
-// -> WhereEnumerableIterator wraps source
-// -> OrderByEnumerable wraps Where iterator (buffers all! due to sorting)
-// -> SelectEnumerableIterator wraps OrderBy
-
-// OrderBy is a BUFFERING operator: consumes entire input before yielding.
-// Where/Select are STREAMING operators: yield as they go.
-```
-
-## 4. Production Code Examples
-
-```csharp
-// Complex ETL pipeline
-public IEnumerable<ReportRow> GenerateReport(IEnumerable<RawData> source)
-{
-    return source
-        .Where(r => r.Status != Status.Deleted)
-        .SelectMany(r => r.LineItems)
-        .GroupBy(li => new { li.Category, li.Region })
-        .Select(g => new ReportRow
-        {
-            Category = g.Key.Category,
-            Region = g.Key.Region,
-            TotalSales = g.Sum(li => li.Amount),
-            AveragePrice = g.Average(li => li.UnitPrice),
-            TransactionCount = g.Count()
-        })
-        .OrderByDescending(r => r.TotalSales)
-        .ThenBy(r => r.Category);
-}
-```
-
-```csharp
-// Paginated API with total count
-public async Task<PagedResult<T>> GetPagedAsync<T>(
-    IQueryable<T> query,
-    int page,
-    int pageSize,
-    Expression<Func<T, bool>> filter = null)
-{
-    if (filter != null) query = query.Where(filter);
-
-    var totalCount = await query.CountAsync();
-    var items = await query
-        .Skip((page - 1) * pageSize)
-        .Take(pageSize)
-        .ToListAsync();
-
-    return new PagedResult<T>
-    {
-        Items = items,
-        TotalCount = totalCount,
-        Page = page,
-        PageSize = pageSize
-    };
-}
-```
-
-```csharp
-// Lookup for 1:N relationship (avoids GroupBy materialization)
-public ILookup<int, Order> BuildOrderLookup(IEnumerable<Order> orders) =>
-    orders.ToLookup(o => o.CustomerId);
-
-// Usage: var customerOrders = lookup[customerId]; // fast
-```
-
-```csharp
-// Custom LINQ operator
-public static IEnumerable<T> WhereNotNull<T>(this IEnumerable<T?> source) where T : class
-{
-    foreach (var item in source)
-    {
-        if (item is not null)
-            yield return item;
-    }
-}
-```
-
-```csharp
-// Batch processing with channels
-public async IAsyncEnumerable<T> ProcessBatchedAsync<T>(
-    IEnumerable<T> source,
-    int batchSize,
-    Func<List<T>, Task> processor)
-{
-    var batch = new List<T>(batchSize);
-    foreach (var item in source)
-    {
-        batch.Add(item);
-        if (batch.Count >= batchSize)
-        {
-            await processor(batch);
-            foreach (var processed in batch) yield return processed;
-            batch.Clear();
-        }
-    }
-    if (batch.Count > 0)
-    {
-        await processor(batch);
-        foreach (var processed in batch) yield return processed;
-    }
-}
-```
-
-## 5. Real-World Scenarios
-
-**Scenario 1: Reporting Dashboard**
-- Aggregate 1M+ records with `GroupBy` + aggregations on the database side (IQueryable).
-- Avoid pulling raw data into memory; let EF translate to SQL GROUP BY.
-
-**Scenario 2: Real-Time Data Pipeline**
-- Use `Channel<T>` with `ReadAllAsync()` and `Select` transforms.
-- Use `ToLookup` for 1:N joins in memory.
-
-**Scenario 3: Message Routing**
-- Use `OfType<T>()` to filter messages from a heterogeneous stream.
-
-**Scenario 4: Validation Rule Engine**
-- Chain `Where`, `SelectMany`, `Any`, `All` to express complex rules.
-
-## 6. Performance
-
-| Operator          | Behavior     | Notes                                  |
-|-------------------|--------------|----------------------------------------|
-| Where             | Streaming    | O(n), one pass                         |
-| Select            | Streaming    | O(n), no internal buffering            |
-| SelectMany        | Streaming    | O(n*m), flattens                       |
-| OrderBy           | Buffering    | O(n log n), consumes entire sequence   |
-| GroupBy           | Buffering    | O(n), builds lookup table in memory    |
-| Distinct          | Buffering    | O(n), uses Set<T> internally           |
-| Union/Intersect   | Buffering    | O(n+m), uses Set<T>                    |
-| Take(n)           | Streaming    | O(n) worst, short-circuits             |
-| Skip(n)           | Streaming    | O(n), must traverse skipped elements   |
-| First/Any         | Streaming    | Short-circuits on match                |
-| Count()           | Streaming   | O(n) unless ICollection<T> optimized   |
-| ElementAt(i)      | Streaming    | O(n) unless IList<T> optimized         |
-| Reverse           | Buffering    | O(n), buffers all                      |
-| ToList/ToArray    | Buffering    | O(n), materializes                     |
-| Contains          | Streaming    | O(n) unless ICollection<T>             |
-
-```csharp
-// BAD: Multiple enumeration
+// Problem: multiple enumeration
 var filtered = source.Where(x => x > 5);
-int count = filtered.Count();     // Enumerates once
-var first = filtered.First();     // Enumerates again!
-// FIX: Materialize once, use the list
+int count = filtered.Count();   // Enumerates once
+var first = filtered.First();   // Enumerates again!
+// Fix: materialize once
 var materialized = source.Where(x => x > 5).ToList();
-
-// BAD: OrderBy before Where
-query.OrderBy(x => x.Name).Where(x => x.Age > 5); // Sorts everything, then filters
-// FIX: Filter first, then sort
-query.Where(x => x.Age > 5).OrderBy(x => x.Name);
 ```
 
-## 7. Security
+---
 
-```csharp
-// SQL Injection via dynamic LINQ
-public IQueryable<User> SearchUsers(string name)
-{
-    // DANGEROUS: string interpolation in IQueryable
-    return _context.Users.Where($"Name == \"{name}\""); // Injection!
-}
+## Key Design Considerations
 
-// SAFE: parameterized predicates
-return _context.Users.Where(u => u.Name == name);
-
-// SAFE: pass Expression<Func<T,bool>> instead of raw strings
-```
-
-```csharp
-// Denial of service via large sequences
-public IEnumerable<T> UnsafePagination<T>(IEnumerable<T> source, int page, int pageSize)
-{
-    return source.Skip((page - 1) * pageSize).Take(pageSize);
-    // If page is huge, Skip iterates through millions of elements
-    // FIX: Cap page to, e.g., maxPage = 1000
-}
-```
-
-## 8. Common Mistakes
-
-```csharp
-// MISTAKE 1: Multiple enumeration
-var result = source.Where(pred);
-if (result.Any())                     // Enumerates
-    ProcessItems(result.ToList());    // Enumerates again!
-// FIX: ToList once
-
-// MISTAKE 2: Using SingleOrDefault when FirstOrDefault is intended
-var user = users.SingleOrDefault(u => u.Id == id);
-// Throws if more than one match; use FirstOrDefault unless uniqueness is enforced
-
-// MISTAKE 3: Forgetting deferred execution
-var items = source.Where(x => x > 5);
-source.Add(10);  // Mutation after query definition
-// items now includes 10!
-
-// MISTAKE 4: Not understanding IQueryable vs IEnumerable
-var query = _context.Products.Where(p => p.Price > 100);
-var filtered = query.Where(p => p.Category == "Electronics"); // Still IQueryable, goes to DB
-// vs
-var local = query.AsEnumerable().Where(p => SomeLocalFunc(p)); // Client-side eval
-
-// MISTAKE 5: Nested SelectMany with anonymous types causing Cartesian explosion
-var q = from c in customers
-        from o in c.Orders
-        from i in o.Items
-        select new { c.Name, o.Date, i.Product };  // Large result set
-// FIX: Be specific, use joins or pagination
-
-// MISTAKE 6: Modifying source in Select
-items.Select(x => { x.Count++; return x; }); // Side-effects in projection
-// FIX: Use foreach for mutations
-
-// MISTAKE 7: Exception inside iterator
-var source = GetData();
-var result = source.Select(x => Parse(x));  // No exception yet
-foreach (var r in result) { } // Exception thrown here!
-// FIX: Use ToList or wrap in try/catch around enumeration
-
-// MISTAKE 8: Null collection
-IEnumerable<int> nullSource = null;
-nullSource.Where(x => x > 5); // NullReferenceException
-// FIX: Use ?? Array.Empty<int>()
-```
-
-## 9. Senior Engineer Perspective
-
-**1. Choose IQueryable vs IEnumerable consciously.**
-- IQueryable = compose SQL, execute on server. Benefits: reduced data transfer.
-- IEnumerable = execute in memory. Benefits: arbitrary .NET code in predicates.
-- Watch for accidental client-side evaluation: EF Core logs a warning.
-
-**2. Understand streaming vs buffering operators.**
-- `OrderBy`, `GroupBy`, `Distinct`, `Union`, `Join` all buffer.
-- Chain streaming operators first, buffering operators last.
-
-**3. Use `ToHashSet()` for unique lookups instead of `Distinct().ToDictionary()`.**
-
-**4. Custom LINQ operators via `yield return` are zero-allocation wrappers (no extra list).**
-
-**5. Prefer `Any()` over `Count() > 0`** — Any short-circuits on first match.
-
-**6. Use `IAsyncEnumerable<T>` for async streaming** with `await foreach`.
-
-```csharp
-await foreach (var item in GetResultsAsync().SelectAwait(ProcessAsync))
-{
-    Console.WriteLine(item);
-}
-```
-
-**7. Expression tree manipulation for dynamic queries:**
+- **Choose `IQueryable` vs `IEnumerable` consciously** — `IQueryable` composes server-side SQL (reduced data transfer). `IEnumerable` executes in memory (arbitrary .NET code). Watch for accidental client evaluation.
+- **Understand streaming vs buffering** — Chain streaming operators first (`Where`, `Select`), buffering operators last (`OrderBy`, `GroupBy`). This minimizes memory usage.
+- **Prefer `Any()` over `Count() > 0`** — `Any()` short-circuits on the first match. `Count()` enumerates the entire sequence (unless `ICollection<T>` optimization applies).
+- **Use `IAsyncEnumerable<T>` for async streaming** — `await foreach` with `SelectAwait`, `WhereAwait` for async transformations in streaming pipelines.
+- **Expression tree manipulation for dynamic queries** — Build predicates by combining expressions with `Expression.AndAlso`/`OrElse` for dynamic filtering without string concatenation.
 
 ```csharp
 public static Expression<Func<T, bool>> AndAlso<T>(
@@ -365,220 +95,329 @@ public static Expression<Func<T, bool>> AndAlso<T>(
 }
 ```
 
-## 10. Interview Questions (Easy)
+- **Avoid `OrderBy` before `Where`** — Filtering first reduces the data that needs sorting. This can dramatically improve performance for large datasets.
 
-1. What is LINQ and what are its main components?
-2. Explain deferred execution vs immediate execution with examples.
-3. What is the difference between `Select` and `SelectMany`?
-4. What does `Where` do? Can you chain multiple `Where` calls?
-5. What is the difference between `First`, `FirstOrDefault`, `Single`, and `SingleOrDefault`?
-6. How does `IEnumerable<T>` differ from `IQueryable<T>`?
-7. What is `OfType<T>` used for?
-8. Explain the purpose of `ToList()` and `ToArray()`.
-9. What is the difference between `Any` and `All`?
-10. How do you use `OrderBy` and `ThenBy` for multi-level sorting?
+---
 
-## 11. Interview Questions (Medium)
+## Real-World Scenarios
 
-1. Explain how the compiler transforms a LINQ query with `yield return`.
-2. What is the difference in behavior between `Enumerable.OrderBy` and `Queryable.OrderBy`?
-3. How does `SelectMany` flatten nested collections? Show the equivalent query syntax.
-4. What is `ILookup<TKey, TElement>` and how does it differ from `IGrouping<TKey, TElement>`?
-5. Explain how `GroupBy` works internally (what does it buffer?).
-6. What is expression tree and how does LINQ to SQL (EF Core) use it?
-7. Write a `DistinctBy` equivalent (pre-.NET 6) using `GroupBy`.
-8. How does `Join` work in LINQ (what algorithm does it use internally)?
-9. Explain `Enumerable.Aggregate` with a practical example.
-10. What happens when you call `Count()` on an `ICollection<T>` vs a pure `IEnumerable<T>`?
-
-## 12. Advanced Interview Questions (Hard)
-
-1. Implement a custom LINQ operator `Batch(n)` that splits sequence into chunks without materializing the entire sequence.
-2. Design a streaming `MergeJoin` operator that merges two sorted sequences in O(n+m).
-3. Explain how `Expression<TDelegate>` enables query translation. Write a minimal SQL translator for a subset of LINQ.
-4. How would you implement `ToFrozenDictionary` using perfect hashing? What are the constraints?
-5. Implement a `DistinctBy` operator that preserves stable order and is O(n).
-6. Design a `Rank()` window function operator (like SQL RANK() OVER (ORDER BY ...)).
-7. Explain the trade-offs between `IAsyncEnumerable<T>`, `IObservable<T>`, and `Task<IEnumerable<T>>`.
-8. Implement a lazy `CartesianProduct` operator using LINQ and deferred execution.
-9. Design an operator `WhereWithCancellation` that respects `CancellationToken` during streaming.
-10. Write a `Memoize` operator that caches enumeration results for replay.
-
-## 13. Interview Questions (System Design)
-
-1. Design a real-time analytics pipeline using `IAsyncEnumerable<T>` and windowed aggregations.
-2. Design a graph traversal engine using LINQ-style operators (BFS, DFS).
-3. Design a distributed query engine that pushes predicates down to shards.
-4. Design an ETL framework using composable LINQ operators with checkpointing.
-5. Design a rule engine with 1000s of rules using expression trees and LINQ.
-6. Design a log aggregation system using LINQ over structured log streams.
-7. Design a streaming change-data-capture (CDC) processor with LINQ operators.
-8. Design a multi-tenant reporting system where each tenant has custom LINQ queries.
-9. Design an in-memory data warehouse with star-schema joins using LINQ.
-10. Design a real-time fraud detection system using windowed LINQ queries over event streams.
-
-## 14. Expert-Level Interview Questions (Architect)
-
-1. Design a full LINQ provider for a custom data source (e.g., Redis, Elasticsearch) with full expression tree translation, caching of compiled queries, and client-side fallback.
-2. Architect a distributed LINQ engine that transparently partitions queries across shards, aggregates results, and handles partial failures.
-3. Design a query optimization framework that rewrites LINQ expression trees (e.g., push down filters, reorder joins, eliminate redundant subqueries).
-4. Architect a reactive event sourcing system where projections are defined as LINQ queries over event streams with automatic checkpointing.
-5. Design a compiler transformation that converts LINQ queries into SIMD-optimized vectorized loops for hot paths.
-6. Architect a cross-language LINQ-like query system (C#, F#, Python) using a common intermediate query representation (QIR).
-7. Design a stream processor that supports exactly-once semantics using LINQ operators with checkpointed state.
-8. Architect a query federation layer that splits a single LINQ query across SQL, NoSQL, and file-based data sources.
-9. Design a lazy-materialization framework where LINQ operators work over memory-mapped files with zero-copy.
-10. Architect a self-tuning query engine that collects statistics and rewrites LINQ plans based on cardinality estimation.
-
-## 15. Debugging & Troubleshooting
+### Scenario 1: Real-Time Log Aggregation Pipeline
+**Context:** A monitoring system ingests 50K log entries/sec. Entries must be filtered, grouped by severity, enriched with context, and aggregated into 1-minute sliding windows.
 
 ```csharp
-// Debug LINQ pipelines
-// Use .Select(x => { Debug.WriteLine(x); return x; }) as a peek operator
-var result = source
-    .Where(x => x > 5)
-    .Select(x =>
+public class LogAggregationService
+{
+    private readonly ConcurrentDictionary<string, List<LogEntry>> _buffer = new();
+
+    public IAsyncEnumerable<AggregatedMetric> AggregateAsync(
+        IAsyncEnumerable<LogEntry> logStream, CancellationToken ct)
     {
-        Console.WriteLine($"Processing {x}");
-        return x * 2;
-    })
-    .ToList();
+        return logStream
+            .Where(entry => entry.Timestamp > DateTime.UtcNow.AddMinutes(-1))
+            .GroupBy(entry => entry.ServiceName)
+            .SelectAwait(async group =>
+            {
+                var entries = await group.ToListAsync();
+                return new AggregatedMetric
+                {
+                    ServiceName = group.Key,
+                    ErrorCount = entries.Count(e => e.Severity >= LogLevel.Error),
+                    AvgLatency = entries.Average(e => e.LatencyMs),
+                    P99Latency = ComputeP99(entries.Select(e => e.LatencyMs)),
+                    WindowStart = entries.Min(e => e.Timestamp)
+                };
+            });
+    }
 
-// Use breakpoints inside lambda by adding a dummy variable:
-var result = source
-    .Where(x =>
+    private static double ComputeP99(IEnumerable<double> latencies)
     {
-        bool flag = x > 5; // Breakpoint here
-        return flag;
+        var sorted = latencies.OrderBy(l => l).ToList();
+        return sorted[(int)(sorted.Count * 0.99)];
+    }
+}
+```
+
+### Scenario 2: ETL Pipeline with Change Tracking
+**Context:** A nightly ETL job reads 10M records from a source database, transforms them (filter, project, enrich with lookup data), and writes to a data warehouse. Must minimize memory and track progress.
+
+```csharp
+public class EtlPipeline
+{
+    public async Task RunEtlAsync(IQueryable<SourceRecord> source, CancellationToken ct)
+    {
+        var query = source
+            .Where(r => r.ModifiedAt > _lastRun)
+            .Select(r => new
+            {
+                r.Id,
+                r.Name,
+                r.CategoryId,
+                r.Amount
+            });
+
+        // Execute in batches to avoid memory pressure
+        var batchSize = 1000;
+        int processed = 0, skipped = 0;
+
+        await foreach (var batch in query.AsAsyncEnumerable().Buffer(batchSize))
+        {
+            var enriched = batch
+                .Join(_lookupTable, r => r.CategoryId, l => l.Id, (r, l) => new TargetRecord
+                {
+                    Id = r.Id,
+                    Name = r.Name,
+                    Category = l.CategoryName,
+                    Amount = r.Amount,
+                    Tier = r.Amount > 1000 ? "Premium" : "Standard"
+                })
+                .Where(r => !string.IsNullOrEmpty(r.Name))
+                .ToList();
+
+            await BulkInsertAsync(enriched, ct);
+            processed += enriched.Count;
+            skipped += batch.Count - enriched.Count;
+            
+            _logger.LogInformation("ETL progress: {Processed}/{Total}", processed, await query.CountAsync(ct));
+        }
+    }
+}
+```
+
+### Scenario 3: Hierarchical Data Flattening with SelectMany
+**Context:** An organization chart must be flattened to produce a report of all employees and their reporting chains. The organization is an arbitrary-depth tree.
+
+```csharp
+public class OrgChartService
+{
+    private List<Employee> _allEmployees;
+
+    // Recursive flatten with depth tracking using LINQ
+    public IEnumerable<OrgReport> FlattenReportingChain()
+    {
+        return _allEmployees
+            .Where(e => e.ManagerId == null) // Top-level managers
+            .SelectMany(manager => FlattenSubtree(manager, 0));
+    }
+
+    private IEnumerable<OrgReport> FlattenSubtree(Employee employee, int depth)
+    {
+        yield return new OrgReport(employee.Name, employee.Title, depth);
+        
+        var reports = _allEmployees
+            .Where(e => e.ManagerId == employee.Id)
+            .OrderBy(e => e.Name)
+            .ToList();
+
+        foreach (var report in reports)
+        {
+            foreach (var sub in FlattenSubtree(report, depth + 1))
+                yield return sub;
+        }
+    }
+}
+```
+
+---
+
+## Scenario-Based Questions
+
+1. **Q: You are building a product catalog API. The query supports 15 optional filters (price range, category, rating, brand, etc.) and returns paged results. How do you build the LINQ query without client-side evaluation?**
+   A: Start with `IQueryable<Product>` and conditionally append `.Where()` clauses based on which filters are provided. Each `.Where()` adds to the expression tree, and the final query is translated to a single SQL statement. Never call `.ToList()` or `.AsEnumerable()` before applying filters. Example:
+```csharp
+IQueryable<Product> query = _context.Products.AsQueryable();
+if (minPrice.HasValue) query = query.Where(p => p.Price >= minPrice);
+if (category != null) query = query.Where(p => p.Category == category);
+var results = await query.Skip(page * size).Take(size).ToListAsync();
+```
+This generates a single SQL query with all filters in the WHERE clause. The order of `.Where()` calls doesn't affect SQL generation.
+
+2. **Q: You have a performance-critical report that joins 5 tables and aggregates millions of rows. The LINQ query generates a Cartesian product with multiple `Include` calls. How do you fix it?**
+   A: Replace `Include` with `Select` projections to pick only needed columns. Multiple `Include` calls on collection navigations generate JOINs that multiply rows (Cartesian explosion). Use `.AsSplitQuery()` to issue separate queries per collection, or use `Select` to project to anonymous types:
+```csharp
+var report = await _context.Orders
+    .Where(o => o.Date > cutoff)
+    .Select(o => new {
+        o.Id, o.Total,
+        Items = o.Items.Select(i => new { i.ProductName, i.Quantity }),
+        Customer = new { o.Customer.Name, o.Customer.Email }
     })
-    .ToList();
-
-// Common issues:
-// - "Operation not supported" with IQueryable -> client-side eval
-// - NullReferenceException from null elements
-// - StackOverflow with recursive SelectMany
-// - OutOfMemory with buffering operators on large datasets
-
-// Use LINQPad or dotnet-counters for memory diagnostics
+    .ToListAsync();
 ```
+This generates efficient SQL with separate SELECT statements for related data.
 
-## 16. Comparison Section
-
+3. **Q: You need to find duplicate records in a 10M-row dataset by a composite key. How do you write the LINQ query for maximum performance?**
+   A: Use `GroupBy` with a composite key (anonymous type) and filter groups with `Count() > 1`:
+```csharp
+var duplicates = await _context.Records
+    .GroupBy(r => new { r.SourceId, r.TargetId })
+    .Where(g => g.Count() > 1)
+    .Select(g => new { g.Key.SourceId, g.Key.TargetId, Count = g.Count() })
+    .ToListAsync();
 ```
-+------------------------+---------------------+--------------------------+
-| Operator               | Streaming/Buffering | Memory                   |
-+------------------------+---------------------+--------------------------+
-| Where / Select         | Streaming           | O(1)                     |
-| SelectMany             | Streaming           | O(1) + inner enumerator  |
-| Take(n) / Skip(n)      | Streaming           | O(1)                     |
-| OrderBy / ThenBy       | Buffering           | O(n)                     |
-| GroupBy                | Buffering           | O(n) (builds lookup)     |
-| Distinct               | Buffering           | O(n) (hash set)          |
-| Union / Intersect      | Buffering           | O(n+m)                   |
-| Join / GroupJoin       | Buffering (inner)   | O(n+m) (lookup)          |
-| Concat                 | Streaming           | O(1)                     |
-| Reverse                | Buffering           | O(n)                     |
-| ToList / ToArray       | Buffering           | O(n)                     |
-+------------------------+---------------------+--------------------------+
+This translates to SQL `GROUP BY ... HAVING COUNT(*) > 1`, which is efficient (database does the grouping). For very large datasets, consider a raw SQL approach with window functions (`ROW_NUMBER() OVER (PARTITION BY ...)`) for potentially better performance.
 
-+--------------------+-----------------------+-----------------------+
-| Aspect             | IEnumerable<T>        | IQueryable<T>         |
-+--------------------+-----------------------+-----------------------+
-| Execution          | In-memory (CLR)       | Provider-dependent    |
-| Predicate          | Func<T,bool> (IL)     | Expression<Func>      |
-| Deferred           | Yes                   | Yes                   |
-| Translation        | None (native IL)      | Provider translates   |
-| Overloads          | Enumerable class      | Queryable class       |
-| Best for           | In-memory collections | Remote data sources   |
-+--------------------+-----------------------+-----------------------+
-
-+-----------------+--------------+---------------+---------------+
-| Feature         | LINQ (Fluent)| LINQ (Query)  | SQL           |
-+-----------------+--------------+---------------+---------------+
-| Filter          | .Where(p)    | where p       | WHERE p       |
-| Project         | .Select(m)   | select m      | SELECT m      |
-| Group           | .GroupBy(k)  | group by k    | GROUP BY k    |
-| Order           | .OrderBy(k)  | orderby k     | ORDER BY k    |
-| Join            | .Join(...)   | join ... in   | JOIN ... ON   |
-| Flatten         | .SelectMany  | from ... in   | CROSS APPLY   |
-+-----------------+--------------+---------------+---------------+
+4. **Q: You have an `IEnumerable<T>` in memory and need to partition it into batches of 100 without materializing the entire sequence. How?**
+   A: Use a custom `Batch` extension method that lazily yields batches using `yield return`:
+```csharp
+public static IEnumerable<IEnumerable<T>> Batch<T>(this IEnumerable<T> source, int size)
+{
+    using var enumerator = source.GetEnumerator();
+    while (enumerator.MoveNext())
+    {
+        yield return BatchInner(enumerator, size);
+    }
+}
+private static IEnumerable<T> BatchInner<T>(IEnumerator<T> enumerator, int size)
+{
+    do { yield return enumerator.Current; }
+    while (--size > 0 && enumerator.MoveNext());
+}
 ```
+For `IAsyncEnumerable<T>`, `System.Linq.Async` NuGet provides `.Buffer(size)`. This pattern avoids materializing the whole sequence, processing in streaming fashion with O(batchSize) memory.
 
-## 17. Revision Notes
+5. **Q: You are debugging a LINQ query that works locally but times out in production. What profiling steps do you take?**
+   A: (1) Log the generated SQL: set `_context.Database.Log = sql => _logger.LogDebug(sql)` or use `_context.Products.ToQueryString()`. (2) Check for N+1: enable lazy loading logging or use a profiler. (3) Look for client evaluation: EF Core logs a warning when a query can't be translated. (4) Check for missing indexes by running the SQL in SSMS with `SET STATISTICS IO ON`. (5) Examine parameter sniffing: identical queries with different parameters may use different plans. (6) Use `AsSplitQuery()` if Cartesian explosion is suspected.
 
-- Deferred execution: query is not evaluated until enumerated.
-- Streaming operators process one element at a time; buffering operators (OrderBy, GroupBy) consume all.
-- IQueryable translates to provider-specific query (SQL, etc.).
-- Expression trees enable dynamic query composition.
-- LINQ evaluation model: foreach loop with GetEnumerator/MoveNext/Dispose.
-- Yield return generates a state machine struct.
-- Always call ToList/ToArray if the source will be mutated later.
-- Use Any() not Count() > 0 for collections.
-- Use IAsyncEnumerable<T> for async streaming with await foreach.
-
-## 18. Cheat Sheet
-
+6. **Q: You need to implement a full-text search over a list of products in memory. The naive `Where(p => p.Name.Contains(query))` is too slow for 1M products. How do you optimize?**
+   A: Build an inverted index: tokenize product names into words, create a `Lookup<string, Product>`, and search by token:
+```csharp
+var index = products
+    .SelectMany(p => p.Name.Split(' ').Distinct(), (p, word) => new { p, word })
+    .ToLookup(x => x.word, x => x.p);
+var results = query.Split(' ')
+    .Select(word => index[word])
+    .Aggregate((a, b) => a.Intersect(b));
 ```
-+------------------------------------------------------------------+
-|                       LINQ CHEAT SHEET                            |
-+------------------------------------------------------------------+
-| FILTERING                                                         |
-|  Where(pred)           - filter by predicate                     |
-|  OfType<T>()           - filter by type                          |
-|  Distinct()            - remove duplicates (uses default comparer)|
-+------------------------------------------------------------------+
-| PROJECTION                                                        |
-|  Select(mapper)        - transform each element                  |
-|  SelectMany(mapper)    - flatten nested collections               |
-|  Zip(second, func)     - pairwise combine                        |
-+------------------------------------------------------------------+
-| ORDERING                                                          |
-|  OrderBy(key)          - ascending sort                          |
-|  OrderByDescending(key)- descending sort                         |
-|  ThenBy(key)           - secondary sort                          |
-|  Reverse()             - reverse order                           |
-+------------------------------------------------------------------+
-| AGGREGATION                                                       |
-|  Count() / LongCount() - count elements                          |
-|  Sum(s)                - sum of numeric values                   |
-|  Min(s) / Max(s)       - min/max value                           |
-|  Average(s)            - arithmetic mean                         |
-|  Aggregate(seed, func) - custom accumulation                     |
-+------------------------------------------------------------------+
-| ELEMENT                                                           |
-|  First(pred)           - first (throws if none)                  |
-|  FirstOrDefault(pred)  - first or default                        |
-|  Last(pred)            - last element                            |
-|  Single(pred)          - exactly one (throws)                    |
-|  ElementAt(i)          - element at index                        |
-+------------------------------------------------------------------+
-| QUANTIFIERS                                                       |
-|  Any(pred)             - true if any match                       |
-|  All(pred)             - true if all match                       |
-|  Contains(item)        - true if contains item                   |
-+------------------------------------------------------------------+
-| SET OPERATIONS                                                    |
-|  Distinct()            - unique elements                         |
-|  Union(second)         - set union                               |
-|  Intersect(second)     - set intersection                        |
-|  Except(second)        - set difference                          |
-+------------------------------------------------------------------+
-| GROUPING & JOINING                                                |
-|  GroupBy(keySelector)  - group by key                            |
-|  ToLookup(keySelector) - 1:N lookup (immutable groups)           |
-|  Join(inner, outerKey, innerKey, result) - inner join            |
-|  GroupJoin(...)        - left outer join                         |
-+------------------------------------------------------------------+
-| CONVERSION                                                        |
-|  ToList()              - materialize to List<T>                  |
-|  ToArray()             - materialize to T[]                      |
-|  ToDictionary(k, v)    - materialize to Dictionary<K,V>          |
-|  ToHashSet()           - materialize to HashSet<T>               |
-|  AsEnumerable()        - switch from IQueryable to IEnumerable   |
-|  AsQueryable()         - wrap in IQueryable                      |
-+------------------------------------------------------------------+
-| EXECUTION TIPS                                                    |
-|  Deferred: Where, Select, SelectMany, Take, Skip, Distinct       |
-|  Immediate: ToList, ToArray, Count, First, Any, Sum             |
-|  Buffering: OrderBy, GroupBy, Distinct, Reverse, ToLookup        |
-+------------------------------------------------------------------+
+This reduces search from O(n) to O(m) where m is the number of products matching the rarest term. For prefix matching, use a trie data structure. For production, consider dedicated search (Elasticsearch, Azure Cognitive Search).
+
+7. **Q: You have a LINQ query that uses `Skip` and `Take` for paging, but performance degrades as page number increases. Why and how do you fix it?**
+   A: `Skip(10000).Take(20)` still reads and discards 10K rows — the database must scan and sort all rows to determine the correct offset. Fix: use keyset pagination (also called "seek method"):
+```csharp
+var lastSeenId = 0; // Store from the last item of the previous page
+var page = await _context.Products
+    .Where(p => p.Id > lastSeenId)
+    .OrderBy(p => p.Id)
+    .Take(20)
+    .ToListAsync();
+```
+This uses an index seek instead of a scan, O(log n) per page regardless of page number. Works best with a unique, sequential key. For non-sequential keys, use `ORDER BY` + `WHERE (col1, col2) > (@val1, @val2)`.
+
+8. **Q: You are using `Count()` in a loop over subsets of data. The database is hit 1000 times. How do you reduce this to a single query?**
+   A: Use `GroupBy` with conditional aggregation:
+```csharp
+var counts = await _context.Orders
+    .GroupBy(o => 1)
+    .Select(g => new
+    {
+        Total = g.Count(),
+        Pending = g.Count(o => o.Status == "Pending"),
+        Shipped = g.Count(o => o.Status == "Shipped"),
+        Cancelled = g.Count(o => o.Status == "Cancelled")
+    })
+    .FirstAsync();
+```
+This generates a single SQL query with `COUNT(*)` and `COUNT(CASE WHEN ...)` expressions. For multiple different groupings, use multiple `GroupBy` key selectors in separate queries, or use raw SQL with `SELECT COUNT(*) FILTER (WHERE ...)`.
+
+9. **Q: You are mixing `IQueryable` and `IEnumerable` in an EF Core query and it's pulling all data into memory before filtering. How do you detect and fix client evaluation?**
+   A: EF Core logs a warning when a query can't be translated and falls back to client evaluation. In EF Core 6+, enable `throwOnClientEvaluation: true` in `DbContextOptionsBuilder`. Common causes: using a custom C# method in `Where`, calling `ToList`/`AsEnumerable` too early, or using `Sum` on a non-translatable expression. Fix: ensure all filter expressions are composed on `IQueryable` before materialization. Move custom logic to a `Select` that translates (or use `FromSqlRaw` for complex logic).
+
+10. **Q: You need to stream 1M records from a database to a CSV file without loading all into memory. How do you use LINQ to achieve this?**
+    A: Use `AsAsyncEnumerable()` with streaming projection and write each row:
+```csharp
+await foreach (var record in _context.LargeTable
+    .AsNoTracking()
+    .Where(r => r.Date >= start)
+    .Select(r => new { r.Id, r.Name, r.Value })
+    .AsAsyncEnumerable()
+    .WithCancellation(ct))
+{
+    await writer.WriteLineAsync($"{record.Id},{EscapeCsv(record.Name)},{record.Value}");
+    Interlocked.Increment(ref count);
+}
+```
+This translates to a single SQL query with streaming (`CommandBehavior.SequentialAccess`). Never call `ToListAsync()` — it materializes all rows. Use `AsNoTracking()` to avoid change tracking overhead. For maximum throughput, use `SqlBulkCopy` or `CsvHelper` with streaming.
+
+---
+
+## Interview Questions
+
+1. **What is LINQ?**
+   A: Language Integrated Query — a set of language and runtime features for writing declarative, composable queries over data sources using a fluent API built on extension methods. Supports objects, XML, databases, and more.
+
+2. **What is the difference between `IEnumerable<T>` and `IQueryable<T>`?**
+   A: `IEnumerable<T>` works with delegates (compiled IL) — queries execute in memory. `IQueryable<T>` works with expression trees — queries are translated by a provider (e.g., EF Core to SQL) and executed on the server. `IQueryable<T>` extends `IEnumerable<T>` and adds a `Provider` and `Expression`.
+
+3. **What is deferred execution?**
+   A: Most LINQ operators don't execute until the query is enumerated. The query is built as a chain of iterators, and data flows through the pipeline only when `MoveNext()` is called (e.g., via `foreach`, `.ToList()`, `.Count()`). Multiple enumerations re-execute the query.
+
+4. **What is the difference between `Select` and `SelectMany`?**
+   A: `Select` projects each element to a single result: `IEnumerable<T> → IEnumerable<U>`. `SelectMany` projects each element to an `IEnumerable<U>` and flattens: `IEnumerable<T> → IEnumerable<U>`. Query syntax: `from c in customers from o in c.Orders` is `SelectMany`.
+
+5. **What is the difference between `First` and `Single`?**
+   A: `First` returns the first element (throws if empty). `Single` returns the only element (throws if empty OR more than one). Use `First` when the result may have multiple matches but you only need the first. Use `Single` when exactly one element is expected (acts as an assertion).
+
+6. **How does `GroupBy` work?**
+   A: It's a buffering operator that groups elements by a key selector. It creates a `Lookup<TKey, TElement>` internally, iterating the entire source and storing elements in hash buckets by key. It yields each `IGrouping<TKey, TElement>` (key + enumerable of elements). Memory is O(n).
+
+7. **What's the difference between `Count()` and `Any()`?**
+   A: `Count()` enumerates the entire sequence (unless `ICollection<T>` optimization applies). `Any()` short-circuits on the first match. Use `Any()` to check if any elements exist — it's O(1) when the first match is early, while `Count() > 0` is always O(n).
+
+8. **Explain streaming vs buffering operators.**
+   A: Streaming operators (Where, Select, Take, Any) process one element at a time with O(1) memory. Buffering operators (OrderBy, GroupBy, Distinct) consume the entire sequence before yielding results, using O(n) or more memory. Chain streaming operators first, buffering operators last.
+
+9. **What is the `AsEnumerable()` method used for?**
+   A: It casts an `IQueryable<T>` to `IEnumerable<T>`, switching from server-side (LINQ-to-SQL) to client-side (LINQ-to-Objects) evaluation. All subsequent operators execute in memory. Use it to force client evaluation when the server can't translate a query, but beware of pulling too much data.
+
+10. **How does `Join` work internally in LINQ?**
+    A: `Enumerable.Join` uses a hash join algorithm: it buffers the inner sequence into a `Lookup<TKey, TInner>`, then iterates the outer sequence, looking up matching elements. O(n+m) time, O(m) memory. `Queryable.Join` translates to SQL `JOIN` and lets the database choose the join algorithm.
+
+---
+
+## Developer Recommendations
+
+- **Prefer `Any()` over `Count() > 0`** — `Any()` short-circuits on the first match, while `Count()` enumerates the entire sequence (unless `ICollection<T>` optimization applies). The difference is meaningful for large sequences or database queries where `COUNT(*)` is more expensive than checking for existence.
+
+- **Avoid multiple enumeration of LINQ queries** — Each `foreach`, `.ToList()`, `.Count()`, or `.First()` on an `IEnumerable<T>` re-executes the query. Materialize with `.ToList()` once if you need multiple operations. For database queries, each enumeration hits the database. Use `.AsEnumerable()` only when you intend client-side execution.
+
+- **Filter with `Where` before sorting with `OrderBy`** — `Where` is streaming (O(1) memory), `OrderBy` is buffering (O(n) memory). Applying `Where` first reduces the data that needs sorting, improving performance and memory usage. This also applies to database queries — filters before sorts produce more efficient SQL.
+
+- **Use `ToListAsync()` instead of `.ToList()` in async contexts** — Blocking on a database query with `.ToList()` or `.Count()` ties up a thread pool thread. Always use the async variants (`ToListAsync()`, `CountAsync()`, `FirstAsync()`) in async methods to prevent thread pool starvation.
+
+- **Understand the `IQueryable`/`IEnumerable` boundary** — Calling `.AsEnumerable()` or `.ToList()` before a `.Where()` causes the filter to execute client-side, pulling all data from the database. Always apply filters to `IQueryable` before materializing. Use `ToQueryString()` (EF Core 5+) to inspect the generated SQL and verify translation.
+
+- **Prefer `Aggregate` over loops for cumulative operations** — `Aggregate` expresses accumulation declaratively and is often more readable:
+```csharp
+var result = numbers.Aggregate((a, b) => a + b); // Sum
+var csv = items.Aggregate("", (acc, item) => acc + "," + item)[1..]; // CSV
+```
+However, `Aggregate` is less readable for complex logic — use `foreach` when clarity matters.
+
+- **Use `ToLookup` for one-to-many dictionary patterns** — `ToLookup()` creates an `ILookup<TKey, TElement>` — an immutable dictionary of sequences. Unlike `GroupBy`, it's materialized immediately and provides O(1) key lookup. Unlike `ToDictionary`, it handles duplicate keys (returns all elements per key). Ideal for building index structures.
+
+---
+
+## Operator Performance
+
+| Operator | Behavior | Memory |
+|---|---|---|
+| `Where` / `Select` | Streaming | O(1) |
+| `SelectMany` | Streaming | O(1) |
+| `Take(n)` / `Skip(n)` | Streaming | O(1) |
+| `OrderBy` / `ThenBy` | Buffering | O(n) |
+| `GroupBy` | Buffering | O(n) |
+| `Distinct` | Buffering | O(n) |
+| `Union` / `Intersect` | Buffering | O(n+m) |
+| `Join` / `GroupJoin` | Buffering (inner) | O(m) |
+| `Reverse` | Buffering | O(n) |
+| `ToArray` / `ToList` | Buffering | O(n) |
+
+## LINQ vs SQL Mapping
+
+| LINQ | SQL |
+|---|---|
+| `.Where(p)` | `WHERE p` |
+| `.Select(m)` | `SELECT m` |
+| `.GroupBy(k)` | `GROUP BY k` |
+| `.OrderBy(k)` | `ORDER BY k` |
+| `.Join(...)` | `JOIN ... ON` |
+| `.SelectMany` | `CROSS APPLY` |

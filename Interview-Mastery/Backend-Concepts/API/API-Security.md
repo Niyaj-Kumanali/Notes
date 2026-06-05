@@ -1,52 +1,40 @@
 # API Security
 
-## 1. Executive Summary
+---
 
-API security encompasses the strategies, protocols, and practices designed to protect APIs from unauthorized access, data breaches, injection attacks, and abuse. With APIs becoming the primary interface for modern applications, securing them is critical. Key aspects include authentication, authorization, rate limiting, input validation, encryption, and monitoring. This guide covers the OWASP API Security Top 10, common attack vectors, and defense mechanisms using Java/Spring Boot.
+## Overview
 
-## 2. Core Theory
+- **Definition:** API security encompasses the strategies, protocols, and practices designed to protect APIs from unauthorized access, data breaches, injection attacks, and abuse. With APIs becoming the primary interface for modern applications, securing them is critical.
 
-### Authentication vs Authorization
+- **Why It Exists:** APIs expose application logic and data to external clients, making them a prime attack vector. Without proper security, APIs can be exploited for data theft, service abuse, denial of service, and unauthorized access.
 
-- **Authentication** (AuthN): Verifying the identity of a client (Who are you?)
-- **Authorization** (AuthZ): Determining what an authenticated client can do (What are you allowed to do?)
+- **Authentication vs Authorization:**
+  - **Authentication (AuthN)** — verifying identity (Who are you?)
+  - **Authorization (AuthZ)** — determining permissions (What can you do?)
 
-### The CIA Triad for APIs
+- **CIA Triad for APIs:**
+  - **Confidentiality** — data accessible only to authorized parties (encryption, access control)
+  - **Integrity** — data not tampered during transit or storage (signatures, HTTPS)
+  - **Availability** — API accessible when needed (rate limiting, DDoS protection)
 
-- **Confidentiality**: Data is accessible only to authorized parties (encryption, access control).
-- **Integrity**: Data is not tampered with during transit or storage (signatures, HTTPS).
-- **Availability**: The API is accessible when needed (rate limiting, DDoS protection).
+---
 
-### OWASP API Security Top 10 (2023)
+## OWASP API Security Top 10 (2023)
 
-1. Broken Object Level Authorization (BOLA)
-2. Broken Authentication
-3. Broken Object Property Level Authorization
-4. Unrestricted Resource Consumption
-5. Broken Function Level Authorization
-6. Unrestricted Access to Sensitive Business Flows
-7. Server Side Request Forgery (SSRF)
-8. Security Misconfiguration
-9. Improper Inventory Management
-10. Unsafe Consumption of APIs
+1. **Broken Object Level Authorization (BOLA)** — accessing objects without ownership verification
+2. **Broken Authentication** — weak or bypassed authentication mechanisms
+3. **Broken Object Property Level Authorization** — accessing/modifying unauthorized fields
+4. **Unrestricted Resource Consumption** — lack of rate limiting leading to resource exhaustion
+5. **Broken Function Level Authorization** — accessing admin functions as regular user
+6. **Unrestricted Access to Sensitive Business Flows** — abusing legitimate business flows
+7. **Server Side Request Forgery (SSRF)** — tricking the server into making internal requests
+8. **Security Misconfiguration** — default credentials, unpatched systems, exposed debug endpoints
+9. **Improper Inventory Management** — undocumented endpoints, old API versions still active
+10. **Unsafe Consumption of APIs** — trusting third-party API responses without validation
 
-### Security Layers
+---
 
-```
-Client -> WAF -> API Gateway -> Rate Limiter -> AuthN -> AuthZ -> Input Validation -> API Logic -> Database
-```
-
-## 3. Under-the-Hood Deep Dive
-
-### HTTPS/TLS Handshake
-
-1. Client sends a `ClientHello` with supported TLS versions and cipher suites.
-2. Server responds with `ServerHello`, its certificate, and selected cipher suite.
-3. Client verifies the certificate against a trusted CA.
-4. Client generates a pre-master secret, encrypts it with the server's public key.
-5. Both parties derive the session key from the pre-master secret.
-6. Client sends `Finished` message encrypted with the session key.
-7. Server sends `Finished` message. Secure channel established.
+## Production Code Examples
 
 ### Spring Security Filter Chain
 
@@ -54,7 +42,6 @@ Client -> WAF -> API Gateway -> Rate Limiter -> AuthN -> AuthZ -> Input Validati
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
-
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         return http
@@ -66,60 +53,44 @@ public class SecurityConfig {
                 .requestMatchers("/api/v1/users/**").hasAnyRole("USER", "ADMIN")
                 .anyRequest().authenticated()
             )
-            .oauth2ResourceServer(oauth2 -> oauth2
-                .jwt(Customizer.withDefaults())
-            )
+            .oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()))
             .addFilterBefore(new RateLimitFilter(), BasicAuthenticationFilter.class)
             .build();
     }
 }
 ```
 
-## 4. Production Code Examples
-
 ### JWT Authentication Filter
 
 ```java
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
-
     private final JwtTokenProvider tokenProvider;
     private final UserDetailsService userDetailsService;
 
-    public JwtAuthenticationFilter(JwtTokenProvider tokenProvider,
-                                  UserDetailsService userDetailsService) {
+    public JwtAuthenticationFilter(JwtTokenProvider tokenProvider, UserDetailsService userDetailsService) {
         this.tokenProvider = tokenProvider;
         this.userDetailsService = userDetailsService;
     }
 
     @Override
-    protected void doFilterInternal(HttpServletRequest request,
-                                   HttpServletResponse response,
-                                   FilterChain filterChain)
-            throws ServletException, IOException {
-
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
+            FilterChain filterChain) throws ServletException, IOException {
         String token = extractToken(request);
-
         if (token != null && tokenProvider.validateToken(token)) {
             String username = tokenProvider.getUsernameFromToken(token);
             UserDetails userDetails = userDetailsService.loadUserByUsername(username);
             UsernamePasswordAuthenticationToken authentication =
-                new UsernamePasswordAuthenticationToken(
-                    userDetails, null, userDetails.getAuthorities());
-            authentication.setDetails(
-                new WebAuthenticationDetailsSource().buildDetails(request));
+                new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+            authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
             SecurityContextHolder.getContext().setAuthentication(authentication);
         }
-
         filterChain.doFilter(request, response);
     }
 
     private String extractToken(HttpServletRequest request) {
         String bearerToken = request.getHeader(HttpHeaders.AUTHORIZATION);
-        if (bearerToken != null && bearerToken.startsWith("Bearer ")) {
-            return bearerToken.substring(7);
-        }
-        return null;
+        return (bearerToken != null && bearerToken.startsWith("Bearer ")) ? bearerToken.substring(7) : null;
     }
 }
 ```
@@ -134,66 +105,13 @@ public class MethodSecurityConfig {}
 @RestController
 @RequestMapping("/api/v1/admin")
 public class AdminController {
-
     @GetMapping("/users")
     @PreAuthorize("hasRole('ADMIN')")
-    public List<UserResponse> getAllUsers() {
-        return userService.findAll().stream()
-            .map(UserMapper::toResponse)
-            .collect(Collectors.toList());
-    }
+    public List<UserResponse> getAllUsers() { /* ... */ }
 
     @DeleteMapping("/users/{id}")
     @PreAuthorize("hasAuthority('USER_DELETE')")
-    public ResponseEntity<Void> deleteUser(@PathVariable Long id) {
-        userService.delete(id);
-        return ResponseEntity.noContent().build();
-    }
-
-    @PostMapping("/roles")
-    @PreAuthorize("hasRole('SUPER_ADMIN')")
-    public ResponseEntity<RoleResponse> createRole(@Valid @RequestBody CreateRoleRequest request) {
-        return ResponseEntity.status(201)
-            .body(RoleMapper.toResponse(roleService.create(request)));
-    }
-}
-```
-
-### Role and Permission Model
-
-```java
-@Entity
-@Table(name = "roles")
-public class Role {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    @Column(unique = true, nullable = false)
-    private String name;
-
-    @ManyToMany(fetch = FetchType.EAGER)
-    @JoinTable(
-        name = "role_permissions",
-        joinColumns = @JoinColumn(name = "role_id"),
-        inverseJoinColumns = @JoinColumn(name = "permission_id"))
-    private Set<Permission> permissions = new HashSet<>();
-}
-
-@Entity
-@Table(name = "permissions")
-public class Permission {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    @Column(unique = true, nullable = false)
-    private String name;
-
-    @Column
-    private String description;
+    public ResponseEntity<Void> deleteUser(@PathVariable Long id) { /* ... */ }
 }
 ```
 
@@ -203,40 +121,25 @@ public class Permission {
 @RestController
 @RequestMapping("/api/v1/orders")
 public class OrderController {
-
     private final OrderService orderService;
     private final AuthorizationService authService;
 
     @GetMapping("/{orderId}")
-    public ResponseEntity<OrderResponse> getOrder(
-            @PathVariable Long orderId,
+    public ResponseEntity<OrderResponse> getOrder(@PathVariable Long orderId,
             @AuthenticationPrincipal User user) {
-
         Order order = orderService.findById(orderId);
-
-        // Object-level authorization check
         if (!authService.canAccessOrder(user, order)) {
             return ResponseEntity.status(403).build();
         }
-
         return ResponseEntity.ok(OrderMapper.toResponse(order));
     }
 }
 
 @Component
 public class AuthorizationService {
-
     public boolean canAccessOrder(User user, Order order) {
-        // Admin can access any order
-        if (user.hasRole("ADMIN")) {
-            return true;
-        }
-        // Users can only access their own orders
+        if (user.hasRole("ADMIN")) return true;
         return order.getUserId().equals(user.getId());
-    }
-
-    public boolean canModifyResource(User user, Long resourceOwnerId) {
-        return user.hasRole("ADMIN") || user.getId().equals(resourceOwnerId);
     }
 }
 ```
@@ -246,234 +149,25 @@ public class AuthorizationService {
 ```java
 @Component
 public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
-
     private static final String API_KEY_HEADER = "X-API-Key";
     private final ApiKeyService apiKeyService;
 
-    public ApiKeyAuthenticationFilter(ApiKeyService apiKeyService) {
-        this.apiKeyService = apiKeyService;
-    }
+    public ApiKeyAuthenticationFilter(ApiKeyService apiKeyService) { this.apiKeyService = apiKeyService; }
 
     @Override
-    protected void doFilterInternal(HttpServletRequest request,
-                                   HttpServletResponse response,
-                                   FilterChain filterChain)
-            throws ServletException, IOException {
-
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
+            FilterChain filterChain) throws ServletException, IOException {
         String apiKey = request.getHeader(API_KEY_HEADER);
-
         if (apiKey != null && apiKeyService.isValidApiKey(apiKey)) {
             ApiKeyDetails keyDetails = apiKeyService.getKeyDetails(apiKey);
-            ApiKeyAuthenticationToken authToken =
-                new ApiKeyAuthenticationToken(keyDetails);
-            SecurityContextHolder.getContext().setAuthentication(authToken);
+            SecurityContextHolder.getContext().setAuthentication(new ApiKeyAuthenticationToken(keyDetails));
         }
-
         filterChain.doFilter(request, response);
     }
 }
 ```
 
-## 5. Real-World Scenarios
-
-### Scenario 1: Payment API Idempotency
-
-```java
-@PostMapping("/payments")
-public ResponseEntity<PaymentResponse> processPayment(
-        @RequestHeader("Idempotency-Key") String idempotencyKey,
-        @Valid @RequestBody PaymentRequest request) {
-
-    // Check if this request was already processed
-    Optional<PaymentResult> existing = idempotencyService
-        .getResult(idempotencyKey);
-    if (existing.isPresent()) {
-        return ResponseEntity.ok(PaymentMapper.toResponse(existing.get()));
-    }
-
-    // Process the payment
-    PaymentResult result = paymentService.process(request);
-
-    // Store the result for idempotency
-    idempotencyService.storeResult(idempotencyKey, result);
-
-    return ResponseEntity.status(201).body(PaymentMapper.toResponse(result));
-}
-```
-
-### Scenario 2: Multi-Tenant Data Isolation
-
-```java
-@Entity
-@Table(name = "documents")
-public class Document {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    @Column(nullable = false)
-    private String tenantId;
-
-    private String title;
-    private String content;
-
-    // Tenant ID is set automatically
-    @PrePersist
-    public void prePersist() {
-        if (tenantId == null) {
-            this.tenantId = TenantContext.getCurrentTenantId();
-        }
-    }
-}
-
-@Component
-public class TenantFilter implements Filter {
-
-    @Override
-    public void doFilter(ServletRequest request, ServletResponse response,
-                        FilterChain chain) throws IOException, ServletException {
-        HttpServletRequest httpRequest = (HttpServletRequest) request;
-        String tenantId = httpRequest.getHeader("X-Tenant-Id");
-
-        if (tenantId == null || tenantId.isBlank()) {
-            throw new BadRequestException("X-Tenant-Id header is required");
-        }
-
-        TenantContext.setCurrentTenantId(tenantId);
-        try {
-            chain.doFilter(request, response);
-        } finally {
-            TenantContext.clear();
-        }
-    }
-}
-```
-
-### Scenario 3: Secure File Upload
-
-```java
-@PostMapping("/files/upload")
-public ResponseEntity<FileResponse> uploadFile(
-        @RequestParam("file") MultipartFile file) {
-
-    // Validate file size
-    if (file.getSize() > MAX_FILE_SIZE) {
-        throw new BadRequestException("File exceeds maximum size of 10MB");
-    }
-
-    // Validate file extension
-    String filename = file.getOriginalFilename();
-    String extension = filename.substring(filename.lastIndexOf(".") + 1).toLowerCase();
-    if (!ALLOWED_EXTENSIONS.contains(extension)) {
-        throw new BadRequestException("File type not allowed: " + extension);
-    }
-
-    // Scan for malware (pseudo)
-    if (!virusScanner.isClean(file)) {
-        throw new BadRequestException("File failed security scan");
-    }
-
-    // Sanitize filename
-    String sanitizedFilename = sanitizeFilename(filename);
-
-    // Store with a random name to prevent path traversal
-    String storedName = UUID.randomUUID() + "." + extension;
-    Path targetPath = storageDir.resolve(storedName).normalize();
-
-    if (!targetPath.startsWith(storageDir)) {
-        throw new SecurityException("Path traversal detected");
-    }
-
-    file.transferTo(targetPath.toFile());
-
-    return ResponseEntity.status(201)
-        .body(new FileResponse(storedName, sanitizedFilename, file.getSize()));
-}
-
-private String sanitizeFilename(String filename) {
-    return filename.replaceAll("[^a-zA-Z0-9.-]", "_");
-}
-```
-
-## 6. Performance
-
-### Security Performance Considerations
-
-- **Token Validation Caching**: Cache JWT validation results to reduce CPU overhead.
-- **Rate Limiting**: Use distributed rate limiting (Redis) for multi-instance deployments.
-- **Connection Pooling**: Reuse HTTPS connections via connection pooling.
-- **Asymmetric Crypto**: Use ECDSA over RSA for faster JWT signing/verification.
-- **Read Replicas**: Offload authentication queries to read replicas.
-
-### JWT Token Validation with Caching
-
-```java
-@Component
-public class CachedJwtTokenProvider {
-
-    private final CacheManager cacheManager;
-
-    public CachedJwtTokenProvider(CacheManager cacheManager) {
-        this.cacheManager = cacheManager;
-    }
-
-    public boolean validateToken(String token) {
-        Cache cache = cacheManager.getCache("jwt-validation");
-        Cache.ValueWrapper cached = cache.get(token);
-
-        if (cached != null) {
-            return (boolean) cached.get();
-        }
-
-        boolean valid = performValidation(token);
-        cache.put(token, valid);
-        return valid;
-    }
-
-    private boolean performValidation(String token) {
-        try {
-            Jwts.parserBuilder()
-                .setSigningKey(publicKey)
-                .build()
-                .parseClaimsJws(token);
-            return true;
-        } catch (JwtException | IllegalArgumentException e) {
-            return false;
-        }
-    }
-}
-```
-
-### Optimized Rate Limiting with Redis
-
-```java
-@Component
-public class RedisRateLimiter {
-
-    private final StringRedisTemplate redisTemplate;
-    private final RedissonClient redisson;
-
-    public RedisRateLimiter(StringRedisTemplate redisTemplate,
-                           RedissonClient redisson) {
-        this.redisTemplate = redisTemplate;
-        this.redisson = redisson;
-    }
-
-    public boolean tryAcquire(String clientId, String endpoint) {
-        RRateLimiter rateLimiter = redisson.getRateLimiter(
-            "rate:" + clientId + ":" + endpoint);
-        rateLimiter.trySetRate(RateType.OVERALL, 100, 1, RateIntervalUnit.MINUTES);
-        return rateLimiter.tryAcquire();
-    }
-}
-```
-
-## 7. Security
-
-### Common Attack Vectors and Defenses
-
-### SQL Injection Prevention with JPA
+### SQL Injection Prevention
 
 ```java
 // UNSAFE - Never do this
@@ -484,411 +178,232 @@ List<User> findByNameUnsafe(String name);
 @Query("SELECT u FROM User u WHERE u.name = :name")
 List<User> findByName(@Param("name") String name);
 
-// SAFE - Use Spring Data JPA derived queries
+// SAFE - Spring Data JPA derived queries
 List<User> findByNameAndEmail(String name, String email);
 
-// SAFE - Use native queries with parameters
+// SAFE - Native queries with parameters
 @Query(value = "SELECT * FROM users WHERE name = ?1", nativeQuery = true)
 List<User> findByNameNative(String name);
-```
-
-### CSRF Protection
-
-```java
-@Configuration
-@EnableWebSecurity
-public class CsrfConfig {
-
-    @Bean
-    public SecurityFilterChain csrfFilterChain(HttpSecurity http) throws Exception {
-        return http
-            .csrf(csrf -> csrf
-                .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
-                .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
-            )
-            .build();
-    }
-}
-```
-
-### XSS Prevention
-
-```java
-@Component
-public class XSSFilter implements Filter {
-
-    @Override
-    public void doFilter(ServletRequest request, ServletResponse response,
-                        FilterChain chain) throws IOException, ServletException {
-        chain.doFilter(
-            new XSSRequestWrapper((HttpServletRequest) request),
-            response
-        );
-    }
-}
-
-public class XSSRequestWrapper extends HttpServletRequestWrapper {
-
-    public XSSRequestWrapper(HttpServletRequest request) {
-        super(request);
-    }
-
-    @Override
-    public String getParameter(String name) {
-        String value = super.getParameter(name);
-        return sanitize(value);
-    }
-
-    @Override
-    public String[] getParameterValues(String name) {
-        String[] values = super.getParameterValues(name);
-        if (values == null) return null;
-        return Arrays.stream(values)
-            .map(this::sanitize)
-            .toArray(String[]::new);
-    }
-
-    private String sanitize(String value) {
-        if (value == null) return null;
-        return value
-            .replaceAll("<script>", "")
-            .replaceAll("</script>", "")
-            .replaceAll("on\\w+\\s*=", "")
-            .replaceAll("javascript:", "");
-    }
-}
 ```
 
 ### Security Headers
 
 ```java
-@Configuration
-public class SecurityHeadersConfig {
-
-    @Bean
-    public WebMvcConfigurer securityHeaders() {
-        return new WebMvcConfigurer() {
-            @Override
-            public void addCorsMappings(CorsRegistry registry) {
-                registry.addMapping("/**")
-                    .allowedMethods("GET", "POST", "PUT", "DELETE");
-            }
-        };
-    }
-
-    @Bean
-    public FilterRegistrationBean<SecurityHeadersFilter> securityHeadersFilter() {
-        FilterRegistrationBean<SecurityHeadersFilter> registrationBean =
-            new FilterRegistrationBean<>();
-        registrationBean.setFilter(new SecurityHeadersFilter());
-        registrationBean.addUrlPatterns("/*");
-        return registrationBean;
-    }
-}
-
+@Component
 public class SecurityHeadersFilter implements Filter {
-
     @Override
     public void doFilter(ServletRequest request, ServletResponse response,
-                        FilterChain chain) throws IOException, ServletException {
+            FilterChain chain) throws IOException, ServletException {
         HttpServletResponse httpResponse = (HttpServletResponse) response;
         httpResponse.setHeader("X-Content-Type-Options", "nosniff");
         httpResponse.setHeader("X-Frame-Options", "DENY");
-        httpResponse.setHeader("X-XSS-Protection", "0");
         httpResponse.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
-        httpResponse.setHeader("Content-Security-Policy",
-            "default-src 'self'; script-src 'self'; style-src 'self'");
+        httpResponse.setHeader("Content-Security-Policy", "default-src 'self'");
         httpResponse.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
         chain.doFilter(request, response);
     }
 }
 ```
 
-### Secret Management
+### Rate Limiting with Redis
 
 ```java
 @Component
-public class SecretManager {
+public class RedisRateLimiter {
+    private final RedissonClient redisson;
 
-    private final Map<String, String> secrets = new ConcurrentHashMap<>();
+    public RedisRateLimiter(RedissonClient redisson) { this.redisson = redisson; }
 
-    public SecretManager() {
-        // In production, load from AWS Secrets Manager / HashiCorp Vault
-        loadSecrets();
-    }
-
-    private void loadSecrets() {
-        // Never hardcode secrets
-        String dbPassword = System.getenv("DB_PASSWORD");
-        String jwtSecret = System.getenv("JWT_SECRET");
-        String apiKey = System.getenv("API_KEY");
-
-        secrets.put("db.password", dbPassword);
-        secrets.put("jwt.secret", jwtSecret);
-        secrets.put("api.key", apiKey);
-    }
-
-    public String getSecret(String key) {
-        return secrets.get(key);
+    public boolean tryAcquire(String clientId, String endpoint) {
+        RRateLimiter rateLimiter = redisson.getRateLimiter("rate:" + clientId + ":" + endpoint);
+        rateLimiter.trySetRate(RateType.OVERALL, 100, 1, RateIntervalUnit.MINUTES);
+        return rateLimiter.tryAcquire();
     }
 }
 ```
 
-## 8. Common Mistakes
+---
 
-- **Exposing internal IDs**: Use UUIDs instead of auto-increment IDs in URLs.
-- **Missing object-level authorization**: Always verify the authenticated user owns the resource.
-- **Storing passwords in plaintext**: Use bcrypt/Argon2 for password hashing.
-- **Over-sharing error details**: Return generic error messages; log details internally.
-- **CORS misconfiguration**: Don't use `Access-Control-Allow-Origin: *` with credentials.
-- **Missing rate limiting**: Always implement rate limiting to prevent abuse.
-- **Using weak JWT secrets**: Use strong, randomly generated secrets (256+ bits).
-- **Not validating redirect URIs**: Open redirects can be used for phishing.
-- **Disabled security in profile**: Never `security.ignored=/**` even in dev.
-- **Hardcoded secrets**: Never commit secrets to version control.
+## Common Mistakes
 
-## 9. Senior Engineer Perspective
+- **Exposing internal IDs** — use UUIDs instead of auto-increment IDs in URLs
+- **Missing object-level authorization** — always verify resource ownership
+- **Storing passwords in plaintext** — use bcrypt/Argon2 for hashing
+- **Over-sharing error details** — return generic errors; log details internally
+- **CORS misconfiguration** — don't use `Access-Control-Allow-Origin: *` with credentials
+- **Missing rate limiting** — always implement rate limiting to prevent abuse
+- **Using weak JWT secrets** — use strong, randomly generated secrets (256+ bits)
+- **Hardcoded secrets** — never commit secrets to version control
 
-### Defense-in-Depth Strategy
+---
 
+## Key Design Considerations
+
+- **Defense-in-Depth Strategy:**
+  - Layer 1: Network Security (WAF, DDoS protection)
+  - Layer 2: Transport Security (TLS 1.2+, HSTS)
+  - Layer 3: Authentication (OAuth2, JWT, MFA)
+  - Layer 4: Authorization (RBAC, ABAC, object-level checks)
+  - Layer 5: Input Validation (sanitization, parameterized queries)
+  - Layer 6: Rate Limiting (per-user, per-endpoint, per-IP)
+  - Layer 7: Audit Logging (who, what, when, from where)
+  - Layer 8: Monitoring & Alerting (anomaly detection)
+
+- **Security Principles:**
+  - **Least Privilege** — grant minimum permissions needed
+  - **Default Deny** — deny by default; explicitly allow
+  - **Fail Secure** — when a security control fails, deny access
+  - **Never Trust User Input** — all input is potentially malicious
+
+- **Zero Trust Architecture:**
+  - Every request authenticated and authorized
+  - No trust based on network location
+  - Short-lived tokens with frequent rotation
+  - Encrypt everything in transit and at rest
+  - Continuous monitoring and anomaly detection
+
+---
+
+## Real-World Scenarios
+
+### Scenario 1: Broken Object Level Authorization (BOLA) Exploit
+**Context:** A social media app has `GET /api/v1/messages/{messageId}`. The endpoint fetches the message by ID without checking if the authenticated user is a participant. An attacker iterates through message IDs (1 to 100000) and reads private conversations between other users. Thousands of private messages are exposed.
+
+**Resolution:** Implement ownership checks in every resource endpoint. The message query must include the authenticated user's ID in the WHERE clause.
+
+```java
+// Vulnerable: No ownership check
+@GetMapping("/{messageId}")
+public MessageResponse getMessage(@PathVariable Long messageId) {
+    Message message = messageRepository.findById(messageId)
+        .orElseThrow(() -> new ResourceNotFoundException("Message not found"));
+    return MessageMapper.toResponse(message);
+}
+
+// Secure: Ownership check built into the query
+@GetMapping("/{messageId}")
+public MessageResponse getMessage(@PathVariable Long messageId,
+        @AuthenticationPrincipal User user) {
+    Message message = messageRepository.findByIdAndParticipantId(messageId, user.getId())
+        .orElseThrow(() -> new ResourceNotFoundException("Message not found"));
+    return MessageMapper.toResponse(message);
+}
 ```
-Layer 1: Network Security (WAF, DDoS protection, VPN)
-Layer 2: Transport Security (TLS 1.2+, HSTS)
-Layer 3: Authentication (OAuth2, JWT, MFA)
-Layer 4: Authorization (RBAC, ABAC, object-level checks)
-Layer 5: Input Validation (sanitization, parameterized queries)
-Layer 6: Rate Limiting (per-user, per-endpoint, per-IP)
-Layer 7: Audit Logging (who, what, when, from where)
-Layer 8: Monitoring & Alerting (anomaly detection)
-```
 
-### Security by Design Principles
+Use a centralized `AuthorizationService.canAccessResource(user, resourceId, resourceType)` to avoid duplicating checks. Apply at both the service and repository level for defense-in-depth.
 
-- **Least Privilege**: Grant the minimum permissions needed.
-- **Default Deny**: Deny access by default; explicitly allow.
-- **Secure by Default**: Security should be opt-out rather than opt-in.
-- **Fail Secure**: When a security control fails, deny access.
-- **Separation of Concerns**: Separate authentication, authorization, and business logic.
-- **Never Trust User Input**: All input is potentially malicious.
+### Scenario 2: Rate Limiting Bypass & Credential Stuffing
+**Context:** Your login endpoint has rate limiting at 5 attempts/minute per IP. An attacker uses a botnet of 10,000 IPs to perform credential stuffing — each IP tries 5 different password combinations per minute. 50,000 login attempts per minute pass through the rate limiter. User accounts with weak passwords are compromised.
 
-### Zero Trust Architecture for APIs
-
-- Every request must be authenticated and authorized.
-- No request is trusted based on network location.
-- Use short-lived tokens and rotate frequently.
-- Encrypt everything in transit and at rest.
-- Continuous monitoring and anomaly detection.
-
-## 10. Interview Questions (Easy)
-
-1. What is the difference between authentication and authorization?
-2. What is the purpose of HTTPS/TLS in API security?
-3. What is CORS and why is it needed?
-4. What is the difference between 401 and 403 HTTP status codes?
-5. What is CSRF and how do you prevent it?
-6. What is SQL injection and how do you prevent it?
-7. What is XSS and how do you prevent it?
-8. What are security headers and give three examples?
-9. What is the principle of least privilege?
-10. What is input validation and why is it important?
-
-## Medium
-
-1. How does JWT token validation work?
-2. What is the OWASP API Security Top 10?
-3. How do you implement role-based access control (RBAC)?
-4. What is the difference between symmetric and asymmetric encryption?
-5. How do you handle API key rotation?
-6. What is rate limiting and what algorithms are used?
-7. How do you implement secure password storage?
-8. What is the difference between authentication and session management?
-9. How does the Spring Security filter chain work?
-10. What is object-level authorization and how do you implement it?
-
-## 11. Advanced Interview Questions (Hard)
-
-1. How would you implement attribute-based access control (ABAC) in a Spring Boot application?
-2. Design a secure API key generation system with automatic rotation and revocation.
-3. How do you prevent brute force attacks on login endpoints while maintaining performance?
-4. Implement a secure file upload system resistant to all OWASP file upload attacks.
-5. How would you design a session management system for a distributed microservices architecture?
-6. Implement a defense against JWT replay attacks.
-7. How do you secure an API against SSRF (Server Side Request Forgery)?
-8. Design a multi-factor authentication system for a REST API.
-9. How would you implement a secure webhook delivery system with signature verification?
-10. Design a secrets management system for a microservices deployment on Kubernetes.
-
-## System Design
-
-1. Design an API security gateway that handles authentication, rate limiting, and auditing.
-2. Design a zero-trust API architecture for a multi-cloud deployment.
-3. Design a security monitoring and alerting system for a high-throughput API.
-4. Design a cross-origin authentication flow using OAuth2 and PKCE.
-5. Design a secure multi-tenant API with tenant isolation at the data and network level.
-6. Design an API security testing pipeline integrated with CI/CD.
-7. Design a distributed rate limiting system that works across data centers.
-8. Design a secure API for financial transactions with PCI DSS compliance.
-9. Design an API key management system with usage tracking and billing.
-10. Design a security incident response system for automated threat detection.
-
-## 12. Expert-Level Interview Questions (Architect-Level)
-
-1. Design a comprehensive API security strategy for a global financial platform serving millions of users across multiple jurisdictions with varying regulatory requirements (GDPR, PCI-DSS, SOC2).
-2. How would you implement a real-time threat detection system for API abuse using behavioral analysis and machine learning, without adding significant latency?
-3. Design a secure cross-service authentication system for a service mesh with 200+ microservices, where services may be written in different languages and deployed across multiple clouds.
-4. How do you balance security with developer experience? Design an API that is both highly secure and easy for third-party developers to integrate with.
-5. Design a system for managing API credentials at scale (millions of API keys) with automatic rotation, revocation, granular permissions, and usage auditing.
-6. How would you implement a defense-in-depth strategy for an API that processes sensitive PII data, including encryption at rest, in transit, and during processing (homomorphic encryption)?
-7. Design a security architecture for an API that exposes write operations to untrusted third-party clients while preventing data exfiltration, mass assignment, and parameter tampering.
-8. How do you handle security incident response for a compromised API? Design the complete incident response plan including detection, containment, recovery, and post-mortem.
-9. Design a federated identity system that allows users to authenticate across multiple independent API platforms using a single identity provider while maintaining tenant isolation.
-10. How would you design an API security compliance framework that automatically enforces security policies across all APIs in an organization and generates compliance reports for auditors?
-
-## 13. Debugging & Troubleshooting
-
-### Common Security Issues
-
-- **Authentication failures**: Check token expiration, signing keys, user status.
-- **Authorization denied**: Verify role/permission assignments, method security annotations.
-- **CORS errors**: Check allowed origins, methods, and credentials settings.
-- **Rate limit exceeded**: Check rate limit configuration and reset logic.
-- **SSL handshake failures**: Verify certificate chain, TLS version, cipher suites.
-
-### Security Audit Logging
+**Resolution:** Implement multi-layer rate limiting: (1) Per-IP: 5 attempts/minute (stops single-source brute force). (2) Per-account: 5 attempts/minute regardless of source IP (stops distributed credential stuffing). (3) Per-device fingerprint: detected via TLS fingerprint, headers, and timing patterns. (4) Global: 10,000 login attempts/minute across all sources. Additionally, require CAPTCHA after 3 failed attempts on any account.
 
 ```java
 @Component
-@Aspect
-public class SecurityAuditAspect {
+public class LoginRateLimiter {
+    private final RedisTemplate<String, String> redis;
 
-    private final AuditLogger auditLogger;
+    public boolean isAllowed(String username, String clientIp) {
+        String perIpKey = "rate:ip:" + clientIp;
+        String perUserKey = "rate:user:" + username;
 
-    @Around("@annotation(auditable)")
-    public Object audit(ProceedingJoinPoint joinPoint, Auditable auditable) throws Throwable {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        String username = auth != null ? auth.getName() : "anonymous";
+        // Per-IP limit: 5 per minute
+        Long ipAttempts = redis.opsForValue().increment(perIpKey);
+        if (ipAttempts == 1) redis.expire(perIpKey, 1, TimeUnit.MINUTES);
+        if (ipAttempts > 5) return false;
 
-        long start = System.currentTimeMillis();
-        try {
-            Object result = joinPoint.proceed();
-            auditLogger.log(AuditEvent.builder()
-                .action(auditable.action())
-                .resource(auditable.resource())
-                .username(username)
-                .success(true)
-                .duration(System.currentTimeMillis() - start)
-                .build());
-            return result;
-        } catch (Exception e) {
-            auditLogger.log(AuditEvent.builder()
-                .action(auditable.action())
-                .resource(auditable.resource())
-                .username(username)
-                .success(false)
-                .error(e.getMessage())
-                .duration(System.currentTimeMillis() - start)
-                .build());
-            throw e;
-        }
+        // Per-account limit: 5 per minute (regardless of IP)
+        Long userAttempts = redis.opsForValue().increment(perUserKey);
+        if (userAttempts == 1) redis.expire(perUserKey, 1, TimeUnit.MINUTES);
+        return userAttempts <= 5;
     }
 }
 ```
 
-## 14. Comparison Section
+### Scenario 3: Third-Party API Compromise Propagation
+**Context:** Your API aggregates weather data from a third-party service and forwards the response directly to clients. The third-party service is compromised — an attacker injects malicious JavaScript into the weather description field. Your API blindly forwards the response to all 10,000 concurrent users. XSS attack propagates through your trusted API.
 
-### JWT vs Session-Based Authentication
+**Resolution:** Never trust third-party API responses. Always validate, sanitize, and transform before forwarding. Implement response schema validation that strips unexpected fields and sanitizes string content.
 
-| Aspect | JWT | Session |
-|--------|-----|---------|
-| State | Stateless (client holds the token) | Stateful (server stores session) |
-| Scalability | Highly scalable (no server-side storage) | Requires shared session store (Redis) |
-| Revocation | Difficult (until token expires) | Instant (delete session) |
-| Payload | Can store user data in token | Only session ID stored client-side |
-| Size | Larger (contains claims) | Small (just session ID) |
-| Security | Token must be stored securely | Session cookie has HttpOnly flag |
+---
 
-### OAuth2 vs API Keys
+## Scenario-Based Questions
 
-| Aspect | OAuth2 | API Keys |
-|--------|--------|----------|
-| Use Case | Third-party access, delegated auth | Server-to-server, simple access |
-| Granularity | Scoped permissions | Typically all-or-nothing |
-| Rotation | Automatic via refresh tokens | Manual |
-| Complexity | High (multiple grant types) | Low |
-| Audit Trail | Yes (who authorized what) | Limited |
+1. **Q: A user discovers they can access other users' order details by changing the order ID in the URL (`GET /api/orders/123` -> `/api/orders/456`). What's the vulnerability, and how do you fix it comprehensively without adding checks to every endpoint?**
+   - A: This is Broken Object Level Authorization (BOLA), OWASP API Security #1. Fix: (1) Implement a centralized `AuthorizationService` with `canAccessOrder(userId, orderId)` that's automatically applied via AOP or a Spring Security `@PostAuthorize` annotation. (2) Use a base repository class that always filters by the authenticated user's ID. (3) For JPA: add `@EntityGraph` or `WHERE user_id = :principalId` to queries. (4) Never rely on the client to restrict access — always verify on the server. (5) Use UUIDs instead of sequential IDs to make guessing harder (defense-in-depth, not a replacement for authorization).
 
-### Security Headers
+2. **Q: Your login endpoint has rate limiting per IP, but attackers rotate through thousands of IPs to perform credential stuffing. How do you stop this without blocking legitimate users behind a shared NAT IP?**
+   - A: (1) Per-account rate limiting: track failed attempts per username, not per IP. Lock the account after 5 failures regardless of source IP. (2) Device fingerprinting: use TLS fingerprint, browser headers, and timing patterns to identify the client behind the IP. (3) CAPTCHA after 2 failed attempts — this stops automated tools while letting humans through. (4) Use WebAuthn/passkeys for high-value accounts. (5) Monitor for credential stuffing patterns: same username tried from many IPs in rapid succession — this is credential stuffing, not a single attacker.
 
-| Header | Purpose | Value |
-|--------|---------|-------|
-| Strict-Transport-Security | Enforce HTTPS | max-age=31536000 |
-| X-Content-Type-Options | Prevent MIME sniffing | nosniff |
-| X-Frame-Options | Prevent clickjacking | DENY |
-| Content-Security-Policy | Prevent XSS | default-src 'self' |
-| X-XSS-Protection | XSS filter (deprecated) | 0 |
+3. **Q: Your API returns `404 Not Found` for non-existent resources but `403 Forbidden` for resources the user doesn't own. An attacker can determine which resource IDs exist by comparing status codes. How do you fix this information leak?**
+   - A: Return `404 Not Found` for both cases. The user doesn't need to know the difference between "resource doesn't exist" and "you don't have access." Implementation: in the service layer, catch all authorization failures and throw a generic `ResourceNotFoundException`. This prevents ID enumeration. For audit purposes, log the actual reason (auth failure vs not found) internally but always return 404 to the client.
 
-## 15. Revision Notes
+4. **Q: A third-party API your service depends on is compromised. Your API blindly forwards the malicious response to clients, resulting in an XSS attack. How do you design your API to prevent this class of vulnerability?**
+   - A: This is OWASP #10 (Unsafe Consumption of APIs). (1) Validate third-party responses against a strict schema — reject any unexpected fields or content types. (2) Sanitize all string fields: strip HTML tags, encode special characters, reject executable content. (3) Never forward third-party responses directly — always transform them into your own response DTOs. (4) Treat the third-party API as an untrusted external system, subject to the same security controls as user input. (5) Implement a circuit breaker: if the third-party API returns malformed responses, fail closed rather than propagating potentially malicious data.
 
-- AuthN = verification, AuthZ = permissions
-- OWASP Top 10: BOLA is #1
-- Spring Security filter chain orders filters
-- Always use parameterized queries for SQL
-- Rate limiting prevents resource exhaustion
-- Use bcrypt/Argon2 for passwords (not MD5/SHA)
-- JWT: stateless but hard to revoke
-- Session: stateful but easy to revoke
-- Security headers add browser-level protection
-- Never trust user input
+5. **Q: Your file upload endpoint is used to upload profile pictures. An attacker uploads a file named `../../etc/passwd` with a PHP shell inside. How do you secure this endpoint?**
+   - A: (1) Validate file size: limit to 5MB for profile pictures. (2) Whitelist allowed MIME types: `image/jpeg`, `image/png`, `image/webp` only. (3) Validate magic bytes (not just extension): read the first bytes and verify they match the claimed format. (4) Sanitize filename: strip path traversal sequences (`../`, `..\\`), use a random UUID as the stored filename. (5) Store files outside the web root — serve through a controlled endpoint with authorization. (6) Run virus scanning on upload. (7) Re-encode the image server-side to strip any embedded payloads.
 
-## 16. Cheat Sheet
+6. **Q: Your API returns different error messages: "Invalid email" for unknown emails and "Invalid password" for known emails with wrong passwords. Attackers use this to enumerate valid user accounts. How do you fix this without degrading UX?**
+   - A: Return a single generic message: "Invalid email or password." For UX, you can differentiate on the client side with progressive disclosure. On the server: (1) Always hash the password, even if the user doesn't exist (constant-time response). (2) Use the same database query that checks both email existence and password validity together. (3) Log the actual failure reason internally for security monitoring but never expose it in the response. (4) Add a random delay to prevent timing attacks.
 
-```
-+------------------------------------------------------------------+
-| API SECURITY CHEAT SHEET                                         |
-+------------------------------------------------------------------+
-| AUTHENTICATION vs AUTHORIZATION                                  |
-|   AuthN = Who you are   AuthZ = What you can do                  |
-+------------------------------------------------------------------+
-| SPRING SECURITY FILTER CHAIN (order matters):                    |
-|   ChannelProcessingFilter                                        |
-|   SecurityContextPersistenceFilter                                |
-|   LogoutFilter                                                   |
-|   UsernamePasswordAuthenticationFilter                            |
-|   DefaultLoginPageGeneratingFilter                               |
-|   BasicAuthenticationFilter                                      |
-|   RequestCacheAwareFilter                                        |
-|   SecurityContextHolderAwareRequestFilter                         |
-|   AnonymousAuthenticationFilter                                  |
-|   SessionManagementFilter                                        |
-|   ExceptionTranslationFilter                                     |
-|   FilterSecurityInterceptor                                      |
-+------------------------------------------------------------------+
-| COMMON ANNOTATIONS                                               |
-|   @PreAuthorize("hasRole('ADMIN')")                              |
-|   @PreAuthorize("hasAuthority('USER_DELETE')")                   |
-|   @PostAuthorize("returnObject.owner == authentication.name")    |
-|   @Secured("ROLE_ADMIN")                                         |
-|   @RolesAllowed("ADMIN")                                         |
-+------------------------------------------------------------------+
-| PASSWORD HASHING                                                 |
-|   BCryptPasswordEncoder   -> bcrypt (adaptive)                   |
-|   SCryptPasswordEncoder   -> scrypt (memory-hard)                |
-|   Pbkdf2PasswordEncoder   -> PBKDF2                              |
-|   Argon2PasswordEncoder   -> Argon2 (recommended)                |
-+------------------------------------------------------------------+
-| SECURITY HEADERS                                                 |
-|   Strict-Transport-Security: max-age=31536000                    |
-|   X-Content-Type-Options: nosniff                                |
-|   X-Frame-Options: DENY                                          |
-|   Content-Security-Policy: default-src 'self'                    |
-|   Referrer-Policy: strict-origin-when-cross-origin               |
-+------------------------------------------------------------------+
-| COMMON ATTACKS & DEFENSES                                        |
-|   SQL Injection  -> Parameterized queries / JPA                  |
-|   XSS           -> Input sanitization / CSP headers              |
-|   CSRF          -> CSRF tokens / SameSite cookies                |
-|   BOLA          -> Object-level auth checks                      |
-|   Rate Abuse    -> Rate limiting / Throttling                    |
-|   MITM          -> HTTPS / TLS                                   |
-+------------------------------------------------------------------+
-```
+7. **Q: Your multi-tenant SaaS application must ensure Tenant A cannot access Tenant B's data. How do you enforce this at the architecture level, not just in application code?**
+   - A: (1) Database-level isolation: use a `tenant_id` column in every table and enforce it in a repository base class that automatically appends `WHERE tenant_id = ?` to every query. (2) Use separate database schemas per tenant (PostgreSQL schemas) for stronger isolation. (3) Set the tenant context in a `ThreadLocal` via a filter — extract `X-Tenant-Id` from the JWT. (4) Use Spring Data JPA's `@TenantFilter` annotation or Hibernate's multi-tenancy feature. (5) Add integration tests that specifically test cross-tenant access. (6) Audit: log all cross-tenant access attempts for detection. Never rely on developers remembering to add `WHERE tenant_id = ?` manually.
+
+8. **Q: Your API fetches user-provided URLs to generate previews (link preview feature). An attacker provides `http://169.254.169.254/latest/meta-data/` to access the cloud metadata service (SSRF). How do you prevent this?**
+   - A: (1) Whitelist allowed URL patterns: only allow `https://` URLs to known domains. (2) Block internal IP ranges: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, 169.254.0.0/16 (AWS metadata). (3) Resolve the hostname to an IP and check against blocklist before fetching. (4) Disable redirect following at the HTTP client level — attackers can use redirects to bypass the initial URL check. (5) Use a dedicated network segment for outbound requests with restrictive egress rules. (6) Set a timeout (5 seconds) to prevent slow loris attacks.
+
+9. **Q: Your API supports both cookie-based session auth (for web clients) and JWT bearer token auth (for mobile/API clients). How do you design the authentication architecture so authorization logic is shared?**
+   - A: (1) Use a `SecurityContextRepository` that tries multiple strategies: first check for a JWT in the `Authorization` header, then check for a session cookie. (2) Both strategies produce the same `Authentication` object (same principal, same authorities). (3) Authorization (role checks, `@PreAuthorize`) works identically regardless of how the user authenticated. (4) Spring Security supports this natively: configure both `oauth2ResourceServer` for JWT and `httpBasic` or `formLogin` for session auth. (5) The authentication filters are in a chain — the first to match sets the context. (6) Ensure the CORS and CSRF configuration is compatible with both auth methods.
+
+10. **Q: You discover that a developer accidentally committed a file containing database credentials to a public GitHub repository. What's your incident response plan?**
+    - A: (1) Immediately rotate the compromised credentials (database password, connection strings). (2) Use `git filter-branch` or BFG Repo-Cleaner to remove the file from git history. (3) Force-push the cleaned history (coordinate with the team to rebase any open PRs). (4) Check GitHub's audit log for any forks or clones of the repo between commit and removal. (5) Add the credential pattern to `.gitignore` and implement pre-commit hooks (git-secrets, truffleHog) to prevent recurrence. (6) Rotate ALL credentials, not just the leaked one — assume the entire credential store is compromised if the file contained multiple secrets. (7) Conduct a root cause analysis: why was the file in the repo? Improve secret management (vault, environment variables, Kubernetes secrets).
+
+---
+
+## Interview Questions
+
+1. **What is the OWASP API Security Top 10?**
+   - A: The top 10 API security risks including BOLA (#1), Broken Authentication (#2), Broken Object Property Level Authorization (#3), Unrestricted Resource Consumption (#4), Broken Function Level Authorization (#5), and others like SSRF, misconfiguration, and unsafe API consumption.
+
+2. **What is BOLA and how do you prevent it?**
+   - A: Broken Object Level Authorization — accessing resources without ownership verification. Prevent by always verifying the authenticated user owns the requested resource. Use centralized authorization checks, repository-level filtering, and never trust user-provided IDs without auth verification.
+
+3. **What is the difference between authentication and authorization?**
+   - A: Authentication (AuthN) verifies identity — "Who are you?" Authorization (AuthZ) determines permissions — "What can you do?" Authentication comes first, then authorization checks what the authenticated principal is allowed to access.
+
+4. **How do you protect against credential stuffing?**
+   - A: Per-account rate limiting (5 attempts/minute), CAPTCHA after failed attempts, account lockout, WebAuthn/passkeys, credential monitoring (Have I Been Pwned), and multi-factor authentication. Per-IP rate limiting alone is insufficient — attackers use botnets.
+
+5. **What is SSRF and how do you prevent it?**
+   - A: Server-Side Request Forgery — tricking the server into making requests to internal systems. Prevent by URL allowlisting, blocking internal IP ranges, disabling redirects, using a dedicated network segment for outbound requests, and never passing user input directly to URL fetchers.
+
+6. **How do you securely handle file uploads?**
+   - A: Validate file size and MIME type (check magic bytes, not just extension). Sanitize filenames (remove path traversal). Store outside web root with random filenames. Serve through controlled download endpoints with authorization. Run malware scanning.
+
+7. **What security headers should every API response include?**
+   - A: `Strict-Transport-Security` (HSTS), `X-Content-Type-Options: nosniff`, `Content-Security-Policy`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`. These prevent common browser-level attacks.
+
+8. **How do you implement multi-tenancy security?**
+   - A: Use a tenant ID in every query, extracted from the authentication context. Apply tenant filtering at the repository level (automatically appended to all queries). Use separate database schemas for stricter isolation. Never trust the client to specify their tenant ID.
+
+9. **How do you design a defense-in-depth security strategy?**
+   - A: Layer 1: Network (WAF, DDoS protection). Layer 2: Transport (TLS 1.2+). Layer 3: Authentication (OAuth2, JWT). Layer 4: Authorization (RBAC, object-level checks). Layer 5: Input validation. Layer 6: Rate limiting. Layer 7: Audit logging. Layer 8: Monitoring and alerting.
+
+10. **What should you do if credentials are accidentally committed to a public repository?**
+    - A: Immediately rotate the leaked credentials. Remove the file from git history (BFG Repo-Cleaner). Check for forks/clones. Implement pre-commit secret scanning. Add the credential pattern to `.gitignore`. Conduct root cause analysis.
+
+---
+
+## Developer Recommendations
+
+- **Always implement object-level authorization — it's the #1 API vulnerability** — BOLA (OWASP #1) affects most APIs because developers add authorization at the endpoint level but forget at the object level. Every resource lookup must verify the authenticated user owns or has access to that specific resource. Use a centralized `AuthorizationService` and apply it consistently. Never rely on obfuscation (UUIDs) as a substitute for authorization — UUIDs prevent guessing but don't prevent authenticated users from accessing data they shouldn't see.
+
+- **Implement per-account rate limiting, not just per-IP** — Per-IP rate limiting stops simple brute force but not distributed credential stuffing (attackers use botnets with thousands of IPs). Per-account rate limiting tracks failed attempts by username regardless of source IP, stopping distributed attacks cold. Combine both: 5 attempts/minute per IP AND 5 attempts/minute per account. Add CAPTCHA after 2 failures to allow legitimate users who forgot their password to retry.
+
+- **Never trust third-party API responses** — OWASP #10 (Unsafe Consumption of APIs) is often overlooked. A compromised third-party service can inject malicious data into your API. Always validate third-party responses against a strict schema, sanitize all string fields, and transform responses into your own DTOs. Treat third-party APIs as untrusted input sources — apply the same validation that you apply to user input.
+
+- **Use security headers from day one** — `Strict-Transport-Security`, `X-Content-Type-Options`, `Content-Security-Policy`, `X-Frame-Options`, and `Referrer-Policy` headers are zero-cost security improvements that prevent entire classes of attacks. Add them as a filter in your API gateway or web server configuration. These headers tell browsers how to handle your API responses safely.
+
+- **Implement a centralized audit logging system** — Every security-relevant action (login, logout, data access, permission changes, failed authorization attempts) should be logged with: who, what, when, from where (IP), and outcome (success/failure). Use structured logging (JSON) with correlation IDs. Store logs in a tamper-proof system (SIEM, immutable log store). Audit logs are essential for incident response, forensics, and compliance (PCI DSS, SOC 2, GDPR).
+
+- **Use a secrets management system, not environment variables** — Environment variables are better than hardcoded secrets but still leak through error messages, logs, and process listings. Use a dedicated secrets manager (HashiCorp Vault, AWS Secrets Manager, Azure Key Vault) with automatic rotation, access auditing, and encryption. Never commit secrets to version control — use pre-commit hooks to enforce this.

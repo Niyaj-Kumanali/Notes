@@ -1,307 +1,57 @@
 # Design Patterns
 
-## 1. Executive Summary
+---
 
-Design patterns are reusable, proven solutions to commonly occurring problems in software design. They represent best practices evolved over time by experienced developers. Cataloged by the "Gang of Four" (GoF) in 1994, patterns are categorized into Creational, Structural, and Behavioral types. In modern backend development, these patterns remain fundamental, with many Spring Boot frameworks implementing them internally.
+## Overview
 
-## 2. Core Theory
+- **Definition:** Reusable, proven solutions to commonly occurring problems in software design, cataloged by the Gang of Four (GoF) in 1994.
+- **Why It Exists:** Patterns provide a common vocabulary for developers, promote best practices, encourage loose coupling and high cohesion, and align with frameworks like Spring Boot which implement many patterns internally.
+- **Key Concepts:** **Creational Patterns** (Singleton, Factory, Builder — object creation), **Structural Patterns** (Adapter, Decorator, Proxy — object composition), **Behavioral Patterns** (Observer, Strategy, State — object communication)
 
-### Three Categories
+---
 
-**Creational Patterns:** Deal with object creation mechanisms, making the system independent of how objects are created, composed, and represented.
-- Singleton, Factory Method, Abstract Factory, Builder, Prototype
+## Core Concepts
 
-**Structural Patterns:** Concern class and object composition, forming larger structures while keeping them flexible and efficient.
-- Adapter, Bridge, Composite, Decorator, Facade, Flyweight, Proxy
-
-**Behavioral Patterns:** Characterize communication between objects, distributing responsibility and managing algorithms.
-- Chain of Responsibility, Command, Interpreter, Iterator, Mediator, Memento, Observer, State, Strategy, Template Method, Visitor
-
-### Why Patterns Matter in Backend Development
-
-- **Common vocabulary**: "We need a Strategy pattern here" communicates design intent clearly.
-- **Proven solutions**: Avoid reinventing the wheel.
-- **Code quality**: Patterns encourage loose coupling, high cohesion, and maintainability.
-- **Framework alignment**: Spring Boot itself is built on patterns (Singleton, Proxy, Template Method, etc.).
-
-## 3. Under-the-Hood Deep Dive
-
-### Creational Patterns
-
-**Singleton Pattern**
-Ensures a class has only one instance and provides a global access point.
+- **Singleton Pattern:** Ensures a class has only one instance with a global access point. Spring beans are singletons by default. Use Bill Pugh initialization holder pattern or enums for thread safety.
+- **Factory Method Pattern:** Defines an interface for creating objects but lets subclasses decide which class to instantiate. Spring's `@Bean` methods are a form of factory.
+- **Builder Pattern:** Separates construction of a complex object from its representation. Useful for objects with many optional parameters. Lombok's `@Builder` provides a concise alternative.
+- **Adapter Pattern:** Allows incompatible interfaces to work together by converting one interface to another. Used when integrating legacy systems or third-party libraries.
+- **Decorator Pattern:** Attaches additional responsibilities to an object dynamically without modifying its class. Layered decorators compose behaviors like encryption, compression, and logging.
+- **Proxy Pattern:** Provides a surrogate for another object to control access. Spring uses proxies for `@Transactional`, `@Cacheable`, and AOP. Caching proxies and security proxies are common.
+- **Observer Pattern:** Defines a one-to-many dependency where when one object changes state, all dependents are notified. Spring's `@EventListener` implements this pattern.
+- **Strategy Pattern:** Defines a family of interchangeable algorithms. Used for payment methods, shipping costs, tax calculations, and authentication providers.
+- **Template Method Pattern:** Defines the skeleton of an algorithm, deferring some steps to subclasses. Spring's `JdbcTemplate`, `RestTemplate`, and `JpaRepository` follow this pattern.
+- **State Pattern:** Allows an object to alter its behavior when its internal state changes. Order lifecycle management (Pending → Paid → Shipped → Delivered) is a classic example.
 
 ```java
-// Java Singleton (Bill Pugh)
-public class DatabaseConnectionPool {
-    private DatabaseConnectionPool() {}
-
-    private static class Holder {
-        private static final DatabaseConnectionPool INSTANCE =
-            new DatabaseConnectionPool();
-    }
-
-    public static DatabaseConnectionPool getInstance() {
-        return Holder.INSTANCE;
-    }
+// Strategy Pattern for shipping costs
+public interface ShippingCostStrategy {
+    BigDecimal calculate(Order order);
 }
 
-// Spring Singleton (default scope)
+public class StandardShipping implements ShippingCostStrategy {
+    public BigDecimal calculate(Order order) { return new BigDecimal("5.99"); }
+}
+
+public class ExpressShipping implements ShippingCostStrategy {
+    public BigDecimal calculate(Order order) { return new BigDecimal("14.99"); }
+}
+
 @Service
-@Scope("singleton") // Default in Spring
-public class UserService {
-    // One instance per Spring context
-}
+public class ShippingCalculator {
+    private final Map<String, ShippingCostStrategy> strategies;
 
-// Thread-safe Singleton
-public class ConfigManager {
-    private static volatile ConfigManager instance;
-    private final Properties config = new Properties();
-
-    private ConfigManager() {
-        loadConfig();
+    public ShippingCalculator(List<ShippingCostStrategy> strategyList) {
+        this.strategies = strategyList.stream()
+            .collect(Collectors.toMap(s -> s.getClass().getSimpleName().replace("Shipping", "").toLowerCase(), Function.identity()));
     }
 
-    public static ConfigManager getInstance() {
-        if (instance == null) {
-            synchronized (ConfigManager.class) {
-                if (instance == null) {
-                    instance = new ConfigManager();
-                }
-            }
-        }
-        return instance;
-    }
-}
-```
-
-**Factory Method Pattern**
-Defines an interface for creating an object but lets subclasses decide which class to instantiate.
-
-```java
-// Product interface
-public interface PaymentGateway {
-    PaymentResponse process(PaymentRequest request);
-}
-
-// Concrete products
-public class StripeGateway implements PaymentGateway {
-    public PaymentResponse process(PaymentRequest request) { /* Stripe */ }
-}
-
-public class PayPalGateway implements PaymentGateway {
-    public PaymentResponse process(PaymentRequest request) { /* PayPal */ }
-}
-
-// Creator
-public abstract class PaymentGatewayFactory {
-    public abstract PaymentGateway createGateway();
-
-    public PaymentResponse processPayment(PaymentRequest request) {
-        PaymentGateway gateway = createGateway();
-        return gateway.process(request);
+    public BigDecimal calculate(String type, Order order) {
+        return strategies.getOrDefault(type.toLowerCase(), new StandardShipping()).calculate(order);
     }
 }
 
-public class StripeFactory extends PaymentGatewayFactory {
-    @Override
-    public PaymentGateway createGateway() {
-        return new StripeGateway();
-    }
-}
-```
-
-**Builder Pattern**
-Separates the construction of a complex object from its representation.
-
-```java
-// Classic Builder
-public class Order {
-    private final String id;
-    private final String customerId;
-    private final List<OrderItem> items;
-    private final BigDecimal total;
-    private final String shippingAddress;
-    private final String couponCode;
-
-    private Order(Builder builder) {
-        this.id = builder.id;
-        this.customerId = builder.customerId;
-        this.items = builder.items;
-        this.total = builder.total;
-        this.shippingAddress = builder.shippingAddress;
-        this.couponCode = builder.couponCode;
-    }
-
-    public static class Builder {
-        private String id;
-        private String customerId;
-        private List<OrderItem> items = new ArrayList<>();
-        private BigDecimal total = BigDecimal.ZERO;
-        private String shippingAddress;
-        private String couponCode;
-
-        public Builder(String customerId) {
-            this.customerId = customerId;
-        }
-
-        public Builder id(String id) { this.id = id; return this; }
-        public Builder addItem(OrderItem item) { this.items.add(item); return this; }
-        public Builder total(BigDecimal total) { this.total = total; return this; }
-        public Builder shippingAddress(String addr) { this.shippingAddress = addr; return this; }
-        public Builder couponCode(String code) { this.couponCode = code; return this; }
-
-        public Order build() {
-            if (customerId == null) throw new IllegalStateException("customerId required");
-            return new Order(this);
-        }
-    }
-}
-
-// Usage
-Order order = new Order.Builder("cust-123")
-    .id("order-456")
-    .addItem(new OrderItem("product-1", 2))
-    .shippingAddress("123 Main St")
-    .build();
-
-// Lombok @Builder
-@Data
-@Builder
-public class UserProfile {
-    private String id;
-    private String name;
-    private String email;
-    private String phone;
-    private Address address;
-}
-```
-
-### Structural Patterns
-
-**Adapter Pattern**
-Allows incompatible interfaces to work together.
-
-```java
-// Target interface
-public interface PaymentProvider {
-    void pay(String amount, String currency);
-}
-
-// Adaptee - third-party library with different interface
-public class LegacyPaymentSystem {
-    public void makePayment(double amountInCents) {
-        // Process in cents
-    }
-}
-
-// Adapter
-public class LegacyPaymentAdapter implements PaymentProvider {
-    private final LegacyPaymentSystem legacySystem;
-
-    public LegacyPaymentAdapter(LegacyPaymentSystem legacySystem) {
-        this.legacySystem = legacySystem;
-    }
-
-    @Override
-    public void pay(String amount, String currency) {
-        double cents = Double.parseDouble(amount) * 100;
-        legacySystem.makePayment(cents);
-    }
-}
-
-// Usage
-@Service
-public class CheckoutService {
-    private final PaymentProvider paymentProvider;
-
-    public CheckoutService() {
-        this.paymentProvider = new LegacyPaymentAdapter(new LegacyPaymentSystem());
-    }
-
-    public void checkout(Order order) {
-        paymentProvider.pay(order.getTotal().toString(), "USD");
-    }
-}
-```
-
-**Decorator Pattern**
-Attaches additional responsibilities to an object dynamically.
-
-```java
-// Component interface
-public interface DataSource {
-    void write(String data);
-    String read();
-}
-
-// Concrete component
-public class FileDataSource implements DataSource {
-    private final String filename;
-
-    public FileDataSource(String filename) {
-        this.filename = filename;
-    }
-
-    public void write(String data) {
-        Files.write(Paths.get(filename), data.getBytes());
-    }
-
-    public String read() {
-        return new String(Files.readAllBytes(Paths.get(filename)));
-    }
-}
-
-// Base decorator
-public abstract class DataSourceDecorator implements DataSource {
-    protected DataSource wrappee;
-
-    public DataSourceDecorator(DataSource source) {
-        this.wrappee = source;
-    }
-
-    public void write(String data) {
-        wrappee.write(data);
-    }
-
-    public String read() {
-        return wrappee.read();
-    }
-}
-
-// Concrete decorators
-public class EncryptionDecorator extends DataSourceDecorator {
-    public EncryptionDecorator(DataSource source) { super(source); }
-
-    @Override
-    public void write(String data) {
-        super.write(encrypt(data));
-    }
-
-    @Override
-    public String read() {
-        return decrypt(super.read());
-    }
-
-    private String encrypt(String data) { /* AES encryption */ }
-    private String decrypt(String data) { /* AES decryption */ }
-}
-
-public class CompressionDecorator extends DataSourceDecorator {
-    public CompressionDecorator(DataSource source) { super(source); }
-
-    @Override
-    public void write(String data) {
-        super.write(compress(data));
-    }
-
-    @Override
-    public String read() {
-        return decompress(super.read());
-    }
-}
-
-// Usage: layered decorators
+// Decorator Pattern with layered behavior
 DataSource source = new FileDataSource("data.txt");
 source = new CompressionDecorator(source);
 source = new EncryptionDecorator(source);
@@ -309,781 +59,202 @@ source = new EncryptionDecorator(source);
 // Reading: file -> decompress -> decrypt
 ```
 
-**Proxy Pattern**
-Provides a surrogate or placeholder for another object to control access.
+---
+
+## Common Mistakes
+
+- **Pattern Overuse** — applying patterns where a simpler solution suffices. "Hello World" doesn't need Abstract Factory, Builder, Visitor, and Mediator.
+- **Singleton Abuse** — singletons cause hidden dependencies and testability issues. Let Spring manage singleton scope instead of implementing your own.
+- **Misapplying Inheritance** — using inheritance when composition is more appropriate. Prefer Strategy over subclassing for varying behaviors.
+- **Pattern Rigidity** — treating patterns as rigid rules instead of guidelines. Adapt the pattern to your specific context.
+- **Implementing Patterns From Scratch** — Spring Boot already implements Proxy, Template Method, Singleton, Factory, and Observer. Leverage the framework.
+
+---
+
+## Key Design Considerations
+
+- **Spring Boot Pattern Mapping** — Singleton (`@Service`, `@Component` default scope), Factory (`@Bean`, `BeanFactory`), Proxy (`@Transactional`, `@Cacheable`, AOP), Template Method (`JdbcTemplate`, `JpaRepository`), Observer (`@EventListener`), Chain of Responsibility (`SecurityFilterChain`), Strategy (`AuthenticationProvider`, `MessageConverter`).
+- **Modern Alternatives** — Strategy → lambda expressions and method references; Observer → reactive streams; Command → `Runnable`/`Callable`/`Supplier`; Template Method → functional interface composition; Builder → Lombok `@Builder` or Kotlin data classes.
+- **Patterns in Distributed Systems** — Circuit Breaker (Resilience4j), Saga (distributed transactions), CQRS (command/query separation), Event Sourcing (state as event stream), Bulkhead (resource isolation), Sidecar (service mesh deployment).
+- **Composition Over Inheritance** — prefer composing objects with interfaces over deep class hierarchies. Strategies, Decorators, and Adapters all use composition.
+
+---
+
+## Real-World Scenarios
+
+### Scenario 1: Payment Processing with Strategy Pattern
+**Context:** An e-commerce platform needs to support multiple payment methods (credit card, PayPal, Apple Pay, cryptocurrency). Each method has different validation, processing, and error handling flows.
+
+**Resolution:** Use the Strategy pattern. Define a `PaymentStrategy` interface with a `pay(Order order)` method. Each payment method is a separate implementation. The `PaymentService` selects the appropriate strategy at runtime based on user choice. Adding a new payment method requires only a new implementation class — zero changes to existing code.
 
 ```java
-// Subject interface
-public interface ProductService {
-    Product getProduct(String id);
+public interface PaymentStrategy {
+    PaymentResult pay(Order order);
 }
 
-// Real subject
-public class RealProductService implements ProductService {
-    public Product getProduct(String id) {
-        // Expensive DB call
-        return database.findProduct(id);
+@Component
+public class CreditCardStrategy implements PaymentStrategy {
+    public PaymentResult pay(Order order) {
+        // Validate card, charge via gateway, handle 3D Secure
     }
 }
 
-// Proxy - adds caching
-public class CachingProductServiceProxy implements ProductService {
-    private final RealProductService realService;
-    private final Map<String, Product> cache = new ConcurrentHashMap<>();
-
-    public CachingProductServiceProxy(RealProductService realService) {
-        this.realService = realService;
-    }
-
-    @Override
-    public Product getProduct(String id) {
-        return cache.computeIfAbsent(id, realService::getProduct);
-    }
-}
-```
-
-### Behavioral Patterns
-
-**Strategy Pattern**
-Defines a family of algorithms, encapsulates each one, and makes them interchangeable.
-
-```java
-// Strategy interface
-public interface ShippingCostStrategy {
-    BigDecimal calculate(Order order);
-}
-
-// Concrete strategies
-public class StandardShipping implements ShippingCostStrategy {
-    public BigDecimal calculate(Order order) {
-        return new BigDecimal("5.99");
-    }
-}
-
-public class ExpressShipping implements ShippingCostStrategy {
-    public BigDecimal calculate(Order order) {
-        return new BigDecimal("14.99");
-    }
-}
-
-public class FreeShipping implements ShippingCostStrategy {
-    public BigDecimal calculate(Order order) {
-        return order.getTotal().compareTo(new BigDecimal("50")) >= 0
-            ? BigDecimal.ZERO
-            : new BigDecimal("5.99");
-    }
-}
-
-// Context
-@Service
-public class ShippingCalculator {
-    private final Map<String, ShippingCostStrategy> strategies;
-
-    public ShippingCalculator(List<ShippingCostStrategy> strategyList) {
+@Component("paymentStrategyFactory")
+public class PaymentStrategyFactory {
+    private final Map<String, PaymentStrategy> strategies;
+    public PaymentStrategyFactory(List<PaymentStrategy> strategyList) {
         this.strategies = strategyList.stream()
-            .collect(Collectors.toMap(
-                s -> s.getClass().getSimpleName()
-                    .replace("Shipping", "").toLowerCase(),
-                Function.identity()
-            ));
+            .collect(Collectors.toMap(s -> s.getClass().getSimpleName()
+                .replace("Strategy", "").toLowerCase(), Function.identity()));
     }
-
-    public BigDecimal calculate(String type, Order order) {
-        return strategies.getOrDefault(type.toLowerCase(), new StandardShipping())
-            .calculate(order);
+    public PaymentStrategy getStrategy(String type) {
+        return strategies.getOrDefault(type.toLowerCase(), 
+            strategies.get("default"));
     }
 }
 ```
 
-**Observer Pattern**
-Defines a one-to-many dependency between objects so that when one changes state, all dependents are notified.
+### Scenario 2: Order Processing Pipeline with Chain of Responsibility
+**Context:** An order processing system needs to apply multiple validation and enrichment steps: validate inventory → check fraud → apply discounts → calculate tax → charge payment. Each step can stop the pipeline.
+
+**Resolution:** Use the Chain of Responsibility pattern. Each order handler implements `OrderHandler` with `handle(Order, OrderContext)` and a reference to the next handler. The chain is assembled in the correct order. Spring's `SecurityFilterChain` follows the same pattern.
 
 ```java
-// Observer interface
-public interface OrderObserver {
-    void onOrderCreated(Order order);
-    void onOrderShipped(Order order);
-    void onOrderCancelled(Order order);
-}
-
-// Concrete observers
-@Component
-public class EmailNotificationObserver implements OrderObserver {
-    public void onOrderCreated(Order order) {
-        sendEmail(order.getCustomerEmail(), "Order Confirmation");
-    }
-
-    public void onOrderShipped(Order order) {
-        sendEmail(order.getCustomerEmail(), "Order Shipped");
-    }
-
-    public void onOrderCancelled(Order order) {
-        sendEmail(order.getCustomerEmail(), "Order Cancelled");
-    }
+public interface OrderHandler {
+    void handle(Order order, OrderContext context);
+    OrderHandler setNext(OrderHandler next);
 }
 
 @Component
-public class AuditLogObserver implements OrderObserver {
-    public void onOrderCreated(Order order) {
-        log.info("Order created: {}", order.getId());
-    }
-    // ... other methods
-}
+@Order(1)
+public class InventoryCheckHandler implements OrderHandler { /* ... */ }
 
-// Subject
 @Component
-public class OrderSubject {
-    private final List<OrderObserver> observers;
+@Order(2)
+public class FraudDetectionHandler implements OrderHandler { /* ... */ }
 
-    public OrderSubject(List<OrderObserver> observers) {
-        this.observers = observers;
+@Bean
+public OrderHandler orderPipeline(List<OrderHandler> handlers) {
+    // Spring injects ordered handlers, chain them
+    for (int i = 0; i < handlers.size() - 1; i++) {
+        handlers.get(i).setNext(handlers.get(i + 1));
     }
-
-    public void notifyOrderCreated(Order order) {
-        observers.forEach(o -> o.onOrderCreated(order));
-    }
-
-    public void notifyOrderShipped(Order order) {
-        observers.forEach(o -> o.onOrderShipped(order));
-    }
-}
-
-// Usage in service
-@Service
-public class OrderService {
-    private final OrderSubject subject;
-
-    @Transactional
-    public Order createOrder(CreateOrderRequest request) {
-        Order order = new Order(request);
-        orderRepository.save(order);
-        subject.notifyOrderCreated(order);
-        return order;
-    }
+    return handlers.get(0);
 }
 ```
 
-**Template Method Pattern**
-Defines the skeleton of an algorithm, deferring some steps to subclasses.
+### Scenario 3: Notification System with Observer Pattern
+**Context:** A banking application must notify multiple channels (email, SMS, push, audit log) when a transaction occurs. New notification channels are added frequently.
+
+**Resolution:** Use the Observer pattern. A `TransactionSubject` publishes `TransactionEvent`. Multiple `NotificationObserver` implementations (EmailNotifier, SMSNotifier, AuditLogger) subscribe to events. Spring's `@EventListener` makes this trivial.
 
 ```java
-// Abstract class with template method
-public abstract class PaymentFlow {
-    // Template method - defines algorithm skeleton
-    public final PaymentResult execute(PaymentRequest request) {
-        validateRequest(request);
-        PaymentAuthorization auth = authorize(request);
-        PaymentCapture capture = capture(auth);
-        notify(request, capture);
-        return buildResult(capture);
-    }
-
-    // Steps with default implementation
-    protected void validateRequest(PaymentRequest request) {
-        if (request.getAmount() == null || request.getAmount().signum() <= 0) {
-            throw new ValidationException("Invalid amount");
-        }
-    }
-
-    // Steps that subclasses must implement
-    protected abstract PaymentAuthorization authorize(PaymentRequest request);
-    protected abstract PaymentCapture capture(PaymentAuthorization auth);
-
-    // Hook method - optional override
-    protected void notify(PaymentRequest request, PaymentCapture capture) {
-        // Default: no notification
-    }
-
-    private PaymentResult buildResult(PaymentCapture capture) {
-        return new PaymentResult(capture.getId(), capture.getStatus());
-    }
-}
-
-// Concrete implementation
-public class CreditCardPaymentFlow extends PaymentFlow {
-    @Override
-    protected PaymentAuthorization authorize(PaymentRequest request) {
-        // Call credit card authorization API
-        return paymentGateway.authorize(request);
-    }
-
-    @Override
-    protected PaymentCapture capture(PaymentAuthorization auth) {
-        return paymentGateway.capture(auth);
-    }
-
-    @Override
-    protected void notify(PaymentRequest request, PaymentCapture capture) {
-        emailService.sendPaymentConfirmation(request.getEmail(), capture);
-    }
-}
-```
-
-**State Pattern**
-Allows an object to alter its behavior when its internal state changes.
-
-```java
-// State interface
-public interface OrderState {
-    void next(Order order);
-    void cancel(Order order);
-    String getStatus();
-}
-
-// Concrete states
-public class PendingState implements OrderState {
-    public void next(Order order) {
-        order.setState(new PaidState());
-    }
-
-    public void cancel(Order order) {
-        order.setState(new CancelledState());
-    }
-
-    public String getStatus() { return "PENDING"; }
-}
-
-public class PaidState implements OrderState {
-    public void next(Order order) {
-        order.setState(new ShippedState());
-    }
-
-    public void cancel(Order order) {
-        order.setState(new RefundingState());
-    }
-
-    public String getStatus() { return "PAID"; }
-}
-
-public class ShippedState implements OrderState {
-    public void next(Order order) {
-        order.setState(new DeliveredState());
-    }
-
-    public void cancel(Order order) {
-        throw new IllegalStateException("Cannot cancel shipped order");
-    }
-
-    public String getStatus() { return "SHIPPED"; }
-}
-
-// Context
-@Entity
-public class Order {
-    @Id
-    private Long id;
-    private String status;
-
-    @Transient
-    private OrderState state;
-
-    public Order() {
-        this.state = new PendingState();
-        this.status = state.getStatus();
-    }
-
-    public void setState(OrderState state) {
-        this.state = state;
-        this.status = state.getStatus();
-    }
-
-    public void next() {
-        state.next(this);
-    }
-
-    public void cancel() {
-        state.cancel(this);
-    }
-}
-```
-
-## 4. Production Code Examples
-
-### Spring Boot Framework Patterns
-
-```java
-// Factory Pattern in Spring: @Bean creates objects
-@Configuration
-public class AppConfig {
-    @Bean
-    public RestTemplate restTemplate() {
-        return new RestTemplateBuilder()
-            .setConnectTimeout(Duration.ofMillis(500))
-            .build();
-    }
-}
-
-// Proxy Pattern in Spring: @Transactional creates proxy
-@Service
-public class UserService {
-    @Transactional // Spring creates a transactional proxy
-    public void updateUser(User user) {
-        userRepository.save(user);
-    }
-}
-
-// Template Method in Spring: JdbcTemplate, JpaRepository
-public interface UserRepository extends JpaRepository<User, Long> {
-    // Spring Data JPA provides implementation
-}
-
-// Observer Pattern in Spring: @EventListener
 @Component
-public class OrderEventListener {
+public class TransactionEventPublisher {
+    private final ApplicationEventPublisher publisher;
+    public void publish(Transaction transaction) {
+        publisher.publishEvent(new TransactionCompleteEvent(transaction));
+    }
+}
+
+@Component
+public class EmailNotifier {
     @EventListener
-    public void handleOrderCreated(OrderCreatedEvent event) {
-        // React to event
+    public void handle(TransactionCompleteEvent event) {
+        // Send email receipt
     }
 }
 
-// Strategy Pattern in Spring: authentication providers
-@Configuration
-public class SecurityConfig {
-    @Bean
-    public AuthenticationManager authenticationManager(
-            List<AuthenticationProvider> providers) {
-        return new ProviderManager(providers);
-    }
-}
-```
-
-### Command Pattern for Request Processing
-
-```java
-// Command interface
-public interface Command<R> {
-    R execute();
-}
-
-// Concrete commands
-public class CreateUserCommand implements Command<User> {
-    private final UserRepository repository;
-    private final CreateUserRequest request;
-
-    public CreateUserCommand(UserRepository repo, CreateUserRequest req) {
-        this.repository = repo;
-        this.request = req;
-    }
-
-    @Override
-    public User execute() {
-        return repository.save(new User(request));
-    }
-}
-
-// Command invoker
-public class CommandInvoker {
-    private final List<Command<?>> history = new ArrayList<>();
-
-    public <R> R executeCommand(Command<R> command) {
-        R result = command.execute();
-        history.add(command);
-        return result;
+@Component
+public class SMSNotifier {
+    @EventListener
+    @Order(2) // Runs after email
+    public void handle(TransactionCompleteEvent event) {
+        // Send SMS alert
     }
 }
 ```
 
-## 5. Real-World Scenarios
-
-### E-Commerce Checkout Pipeline
-- **Builder**: Build Order from multiple steps (items, shipping, payment).
-- **Strategy**: Different shipping cost calculations, payment methods.
-- **State**: Order lifecycle (Pending -> Paid -> Shipped -> Delivered).
-- **Observer**: Notify email, SMS, analytics on order changes.
-- **Chain of Responsibility**: Validation pipeline (user -> items -> payment -> fraud).
-
-### API Gateway Architecture
-- **Proxy**: Gateway proxies requests to backend services.
-- **Decorator**: Add authentication, rate limiting, logging to requests.
-- **Chain of Responsibility**: Request filter chain.
-- **Factory**: Create service-specific client adapters.
-
-### Caching Layer
-- **Proxy**: Caching proxy for expensive operations.
-- **Decorator**: Layered caching (L1 Caffeine, L2 Redis).
-- **Flyweight**: Share cached objects across requests.
-- **Strategy**: Different eviction policies (LRU, LFU, TTL).
-
-## 6. Performance
-
-### Pattern Overhead
-
-| Pattern | Overhead | When to Use |
-|---------|----------|-------------|
-| Singleton | None | Always (shared state) |
-| Factory | Low (method call) | When creation varies |
-| Builder | Low (object creation) | Complex objects |
-| Proxy | Low-Medium (indirection) | Lazy loading, caching |
-| Decorator | Low (wrapper chain) | Dynamic behavior |
-| Observer | Low (list iteration) | Event handling |
-| Strategy | Low (interface call) | Algorithm selection |
-| State | Low (state delegation) | State machine |
-
-## 7. Security
-
-### Security-Related Pattern Usage
-
-- **Proxy**: Authentication proxy, authorization proxy.
-- **Decorator**: Add encryption/decryption to data streams.
-- **Chain of Responsibility**: Security filter chain in Spring Security.
-- **Factory**: Create different security providers (OAuth, SAML, LDAP).
+---
 
-```java
-// Chain of Responsibility in Spring Security
-@Configuration
-@EnableWebSecurity
-public class SecurityConfig {
-    @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) {
-        return http
-            .addFilterBefore(new RateLimitFilter(), BasicAuthenticationFilter.class)
-            .addFilterAfter(new AuditLogFilter(), BasicAuthenticationFilter.class)
-            .build();
-    }
-}
-```
+## Scenario-Based Questions
 
-## 8. Common Mistakes
+1. **Q: You are building a notification system where the same event (e.g., order placed) needs to trigger email, SMS, push notification, and audit logging. New channels are added every quarter. How do you design this?**
+   - A: Use the Observer pattern. Define a domain event (`OrderPlacedEvent`) published by the order service. Each notification channel is a separate observer/event listener that reacts independently. Spring's `@EventListener` or a message broker (Kafka/RabbitMQ) can implement this. Adding a new channel means adding one class with zero changes to existing code. This follows OCP.
 
-### Mistake 1: Pattern Overuse
-"Hello World" doesn't need Abstract Factory, Builder, Visitor, and Mediator. Apply patterns where the problem matches the pattern's intent.
+2. **Q: Your team is building a PDF report generator that creates reports in HTML then converts to PDF. Some reports need digital signatures, others need watermarks, others need both. You don't know what future enhancements will be needed. What pattern do you use?**
+   - A: The Decorator pattern. Define a `Report` interface with `generate()`. A `BaseReport` generates the core PDF. `SignedReportDecorator` adds digital signatures. `WatermarkedReportDecorator` adds watermarks. Compose them at runtime: `new SignedReportDecorator(new WatermarkedReportDecorator(new BaseReport(data)))`. This gives unlimited combinations without subclass explosion.
 
-### Mistake 2: Singleton Abuse
-Singletons can cause hidden dependencies and testability issues. Spring manages singletons for you.
+3. **Q: Your application has a complex object with 15 optional parameters (database connection: host, port, credentials, pool size, SSL config, etc.). Constructors with 15 parameters are unreadable and error-prone. How do you solve this?**
+   - A: Builder pattern. Create a `DatabaseConfigBuilder` with fluent setter methods that return `this`. A `build()` method validates all required fields and constructs the immutable `DatabaseConfig`. Lombok's `@Builder` annotation auto-generates this. The builder also catches configuration errors at build time rather than runtime.
 
-### Mistake 3: Misapplying Inheritance
-Using inheritance when composition is more appropriate. Prefer Strategy over subclassing.
+4. **Q: Your REST API needs to run the same request through authentication, rate limiting, request logging, and input validation before reaching the controller. How does Spring implement this, and what pattern is it?**
+   - A: Chain of Responsibility pattern. Spring Security's `SecurityFilterChain` passes the request through a chain of filter objects (`AuthenticationFilter` → `RateLimitFilter` → `LoggingFilter` → `ValidationFilter`). Each filter decides to process the request and/or pass it to the next filter. Filters are ordered and can short-circuit by throwing exceptions.
 
-### Mistake 4: Pattern Rigidity
-Patterns are guidelines, not rules. Adapt the pattern to your context.
+5. **Q: You have a legacy `XMLOrderService` that your new system needs to use, but your system works with `Order` objects, not XML. You can't modify the legacy service. What pattern bridges this gap?**
+   - A: Adapter pattern. Create an `OrderServiceAdapter` that implements your `OrderService` interface. Internally, it converts `Order` objects to XML, calls `XMLOrderService`, and converts the XML response back to `Order`. The adapter encapsulates the conversion logic, making the legacy system invisible to the rest of your code.
 
-### Mistake 5: Implementing Patterns From Scratch
-Spring Boot already implements many patterns (Proxy, Template, Singleton, Factory). Leverage the framework.
+6. **Q: A controller method is called from 10 different places. You need to add caching to this method without modifying it or its callers. What pattern does Spring use for this?**
+   - A: Proxy pattern. Adding `@Cacheable("products")` to the method causes Spring to create a runtime proxy (CGLIB or JDK Dynamic Proxy). The proxy intercepts calls, checks the cache, and either returns cached data or executes the method and caches the result. The original method and callers are completely unaware of the caching.
 
-## 9. Senior Engineer Perspective
+7. **Q: Your order processing system needs to execute different tax calculation algorithms based on the customer's country, and new countries are added monthly. How do you avoid a giant if-else chain?**
+   - A: Strategy pattern. Define a `TaxCalculator` interface with `calculateTax(Order)`. Each country has its own implementation (`USTaxCalculator`, `EUTaxCalculator`, `UKTaxCalculator`). A factory selects the right strategy based on the customer's country code. Adding a new country is a single new class — the if-else chain is eliminated.
 
-### Patterns in Modern Backend Development
+8. **Q: A document workflow system has states: DRAFT → PENDING_REVIEW → APPROVED → PUBLISHED. The behavior of `publish()` differs in each state. What pattern models this cleanly?**
+   - A: State pattern. Each state is a separate class implementing `DocumentState` interface with methods like `publish()`, `reject()`, `submitForReview()`. The `Document` class delegates to its current state object. State transitions happen inside the state methods. This isolates state-specific behavior and makes adding new states straightforward.
 
-**Patterns Everywhere in Spring Boot:**
-- Singleton: Beans (default scope)
-- Proxy: @Transactional, @Cacheable, AOP
-- Template Method: JdbcTemplate, JmsTemplate, RestTemplate
-- Factory: BeanFactory, @Bean methods
-- Observer: @EventListener, ApplicationListener
-- Chain of Responsibility: filter chains, HandlerInterceptor
-- Strategy: authentication providers, message converters
+9. **Q: Your application needs to support multiple data export formats (CSV, JSON, Excel, PDF). Currently, you have a `DataExporter` with a switch statement. New formats are requested every sprint. What pattern do you refactor to?**
+   - A: Strategy pattern combined with Factory. Create a `FileExporter` interface with `export(Data data, OutputStream out)`. Implementations: `CsvExporter`, `JsonExporter`, `ExcelExporter`, `PdfExporter`. A factory or registry selects the exporter based on format string. The switch statement disappears. OCP is satisfied — extend by adding classes, not modifying existing ones.
 
-### Patterns in Distributed Systems
-- **Circuit Breaker**: Resilience pattern (Resilience4j).
-- **Saga**: Distributed transaction pattern.
-- **CQRS**: Command/query separation pattern.
-- **Event Sourcing**: State change as event stream.
-- **Bulkhead**: Resource isolation pattern.
-- **Sidecar**: Deployment pattern (service mesh).
+10. **Q: How would you design a request-scoped cache that caches user details during a single HTTP request to avoid N+1 database calls, but clears at the end of the request?**
+    - A: Proxy pattern with request scope. Create a `UserCacheProxy` that implements `UserRepository`. It holds a `HashMap<String, User>` that checks before calling the real repository. Configure the proxy as request-scoped in Spring (`@Scope("request")`). The proxy wraps the real repository transparently — callers don't know caching exists.
 
-### When NOT to Use a Pattern
-- The solution is simpler without the pattern.
-- The pattern adds overhead without benefit.
-- The team doesn't understand the pattern.
-- The framework already handles the concern.
+---
 
-## 10. Interview Questions (20: 10 easy + 10 medium)
+## Interview Questions
 
-### Easy
+1. **What are the three categories of Gang of Four design patterns?**
+   - A: Creational (object creation mechanisms — Singleton, Factory, Builder), Structural (object composition — Adapter, Decorator, Proxy), Behavioral (object communication — Observer, Strategy, State).
 
-1. **Q:** What are design patterns?
-   **A:** Reusable solutions to common software design problems. They are templates for how to solve problems, not finished code.
+2. **What is the difference between Factory Method and Abstract Factory?**
+   - A: Factory Method creates a single product through inheritance — subclasses override a factory method. Abstract Factory creates families of related products through composition — a factory interface has methods for each product type.
 
-2. **Q:** Who wrote the original design patterns catalog?
-   **A:** The "Gang of Four" (GoF): Erich Gamma, Richard Helm, Ralph Johnson, John Vlissides.
+3. **How does the Proxy pattern differ from the Decorator pattern?**
+   - A: Proxy controls access to an object (lazy loading, security, caching). Decorator adds behavior to an existing object. Proxy often creates the underlying object; Decorator wraps an already-existing instance.
 
-3. **Q:** What are the three categories of design patterns?
-   **A:** Creational, Structural, and Behavioral.
+4. **What pattern does Spring Data JPA's Repository use?**
+   - A: Template Method pattern. `JpaRepository` and `SimpleJpaRepository` define the algorithm skeleton (save, find, delete) with abstract query methods. Custom `findBy*` methods fill in the specifics via derived query generation.
 
-4. **Q:** What is the Singleton pattern?
-   **A:** Ensures a class has only one instance and provides a global point of access to it.
+5. **How does the State pattern differ from the Strategy pattern?**
+   - A: State changes the object's behavior when its internal state changes — the context delegates to a state object that can transition to other states. Strategy lets the client select an algorithm at runtime — the strategy is set once and doesn't change the context's state.
 
-5. **Q:** What is the Factory pattern?
-   **A:** Defines an interface for creating objects but lets subclasses decide which class to instantiate.
+6. **Give an example of the Builder pattern in the Java standard library or popular frameworks.**
+   - A: `StringBuilder`, `Stream.Builder`, Lombok's `@Builder`, Spring's `UriComponentsBuilder`, and `MockMvcRequestBuilders` in Spring MVC testing.
 
-6. **Q:** What is the Observer pattern?
-   **A:** A one-to-many dependency where when one object changes state, all its dependents are notified.
+7. **How does Spring implement the Proxy pattern for @Transactional?**
+   - A: Spring creates a CGLIB or JDK Dynamic Proxy for the bean. When `@Transactional` methods are called, the proxy intercepts the call, begins a transaction, invokes the actual method, and commits/rolls back based on the outcome. The method itself is unaware of the transaction management.
 
-7. **Q:** What is the Strategy pattern?
-   **A:** Defines a family of interchangeable algorithms, encapsulating each one and making them interchangeable.
+8. **What is the Chain of Responsibility pattern and where is it used in Spring?**
+   - A: Passes a request along a chain of handlers until one processes it. Spring Security's `SecurityFilterChain` is the prime example — each filter (authentication, CSRF, CORS, etc.) decides to process or pass to the next.
 
-8. **Q:** What is the Decorator pattern?
-   **A:** Attaches additional responsibilities to an object dynamically. Provides a flexible alternative to subclassing.
+9. **What pattern would you use for a plugin architecture where plugins can be added at runtime?**
+   - A: Strategy pattern for the plugin interface, Factory pattern for plugin discovery (Java `ServiceLoader`), Decorator for plugin composition, and Observer for plugin lifecycle events.
 
-9. **Q:** What is the Adapter pattern?
-   **A:** Allows incompatible interfaces to work together by converting one interface to another.
+10. **How do design patterns improve testability?**
+    - A: Patterns like Strategy, Observer, and DIP encourage programming to interfaces rather than concrete classes. This loose coupling makes it trivial to mock dependencies in unit tests and test components in isolation.
 
-10. **Q:** Give an example of Singleton in Spring Boot.
-    **A:** All Spring beans are singletons by default (@Scope("singleton")).
+---
 
-### Medium
+## Developer Recommendations
 
-11. **Q:** Explain the difference between Factory Method and Abstract Factory.
-    **A:** Factory Method creates one product via inheritance. Abstract Factory creates families of related products via composition.
+- **Prefer composition over inheritance** — Inheritance creates rigid hierarchy: a change to a base class ripples through all subclasses. Composition (Strategy, Decorator, Adapter) lets you assemble behavior from interchangeable components. Test components in isolation and replace them without side effects. The mantra "favor composition over inheritance" is the single most impactful design principle.
 
-12. **Q:** How does the Proxy pattern differ from the Decorator pattern?
-    **A:** Proxy controls access to an object (lazy loading, security). Decorator adds behavior to an object. Proxy creates the object; Decorator wraps an existing object.
+- **Use the Strategy pattern instead of switch/if-else chains for varying algorithms** — A switch on `paymentType` or `exportFormat` violates OCP — adding a new case requires modifying existing code. Strategy extracts each algorithm into its own class. Spring injection makes this seamless: inject a `List<PaymentStrategy>` and map by type. New strategies = new classes, zero modifications.
 
-13. **Q:** What pattern does Spring Data JPA's Repository use?
-    **A:** Template Method pattern (the framework provides the algorithm skeleton; custom queries fill in the details).
+- **Leverage Spring's built-in pattern implementations** — Spring already implements Proxy (`@Transactional`, `@Cacheable`), Template Method (`JdbcTemplate`, `JpaRepository`), Factory (`@Bean`, `BeanFactory`), and Observer (`@EventListener`). Don't reimplement these patterns. Instead, understand which pattern Spring uses and extend it. For custom proxies, use Spring AOP rather than generating CGLIB proxies manually.
 
-14. **Q:** How does the State pattern differ from the Strategy pattern?
-    **A:** State changes the object's behavior when its internal state changes (state transitions). Strategy lets the client select an algorithm at runtime.
+- **Don't force patterns where simpler solutions work** — A simple `if-else` for 2-3 cases is more readable than a full Strategy pattern with interfaces, implementations, and a factory. Add patterns as complexity grows, not preemptively. YAGNI applies to design patterns too — premature abstraction adds indirection without benefit.
 
-15. **Q:** What is the Chain of Responsibility pattern?
-    **A:** Passes a request along a chain of handlers. Each handler decides to process the request or pass it to the next handler.
+- **Use Builder for objects with >4 parameters, especially when many are optional** — Telescoping constructors (one for each parameter combination) are unreadable and error-prone. The Builder pattern with fluent API makes construction self-documenting. Lombok's `@Builder` eliminates boilerplate. Validation in `build()` catches configuration errors early. Examples: HTTP request builders, query specifications, configuration objects.
 
-16. **Q:** Give an example of the Builder pattern in Java standard library.
-    **A:** StringBuilder, StringBuffer, Stream.Builder, Optional.IntBuilder.
-
-17. **Q:** How does Spring implement the Proxy pattern?
-    **A:** Using CGLIB or JDK dynamic proxies. @Transactional, @Cacheable create proxy objects that intercept method calls.
-
-18. **Q:** What is the difference between Composition and Inheritance?
-    **A:** Composition: has-a relationship (object contains another object). Inheritance: is-a relationship (class extends another class). Favor composition over inheritance.
-
-19. **Q:** What pattern does the Command pattern represent?
-    **A:** Encapsulates a request as an object, parameterizing clients with queues, requests, and operations.
-
-20. **Q:** How do design patterns improve testability?
-    **A:** Patterns like Strategy, Observer, and DIP encourage loose coupling, making it easier to mock dependencies and test in isolation.
-
-## 11. Advanced Interview Questions (20: 10 hard + 10 system design)
-
-### Hard
-
-1. **Q:** Implement a thread-safe Singleton in Java without synchronization overhead for reads.
-    **A:** Using Bill Pugh initialization holder pattern or enum Singleton.
-    ```java
-    public enum DataSource {
-        INSTANCE;
-        public Connection getConnection() { ... }
-    }
-    ```
-
-2. **Q:** How would you implement a Flyweight pattern for an e-commerce product catalog?
-    **A:** Share immutable product metadata (name, description, specs) across all product instances. Vary only mutable state (price, inventory) per product.
-
-3. **Q:** Design a validation framework using Chain of Responsibility.
-    **A:** Validator interface with `validate(T input) throws ValidationException`. Each validator checks one rule and passes to next. CompositeValidator chains validators.
-
-4. **Q:** What pattern would you use for plugin architecture?
-    **A:** Strategy pattern for plugin interface. Factory pattern for plugin discovery (ServiceLoader). Decorator for plugin composition. Observer for plugin events.
-
-5. **Q:** How does Spring's @Async use the Proxy pattern?
-    **A:** Spring creates a CGLIB proxy. When you call @Async method, the proxy submits the call to a TaskExecutor and returns immediately.
-
-6. **Q:** Implement a Mediator pattern for a chat room.
-    **A:** Mediator interface: `sendMessage(User, String)`. ChatRoom (mediator) receives messages and broadcasts to all users. Users don't know about each other.
-
-7. **Q:** How would you refactor a God class using patterns?
-    **A:** Extract: Strategy (for algorithms), Command (for operations), Observer (for notifications), Facade (for complex subsystems), State (for state-dependent behavior).
-
-8. **Q:** Compare Visitor pattern with Pattern Matching in Java 17+.
-    **A:** Visitor separates algorithm from object structure (GoF). Pattern matching with sealed classes provides similar functionality with less boilerplate.
-
-9. **Q:** Design a retry mechanism using the Decorator pattern.
-    **A:** RetryDecorator wraps any service. On failure, retries N times with backoff. Can wrap any interface implementation.
-    ```java
-    public class RetryDecorator<T> implements T {
-        private final T delegate;
-        private final int maxRetries;
-        // Proxy method call with retry logic
-    }
-    ```
-
-10. **Q:** What is the Memento pattern and where is it useful?
-    **A:** Captures and externalizes an object's internal state without violating encapsulation. Useful for undo/redo, checkpoints in long-running processes, snapshots.
-
-### System Design
-
-11. **Q:** Design a notification system using the Observer pattern.
-    **A:** Subject: OrderService. Observers: EmailNotifier, SMSNotifier, PushNotifier, AnalyticsTracker. On order creation, subject notifies all observers.
-
-12. **Q:** Design a flexible tax calculation system using patterns.
-    **A:** Strategy pattern per tax type (VAT, GST, SalesTax). Decorator for compound tax calculation. Factory for creating tax strategies per region.
-
-13. **Q:** Design a document processing pipeline using patterns.
-    **A:** Chain of Responsibility for document validation. Strategy for different output formats (PDF, HTML, DOCX). Decorator for adding headers, footers, watermarks.
-
-14. **Q:** Design a caching system using the Proxy and Strategy patterns.
-    **A:** CachingProxy wraps data access. Strategy for cache eviction (LRU, LFU, TTL). Decorator for multi-level cache (L1 local, L2 distributed).
-
-15. **Q:** Design an authentication system using patterns.
-    **A:** Strategy for authentication methods (OAuth, JWT, Basic). Chain of Responsibility for auth filters. Factory for creating auth providers. Proxy for securing resource access.
-
-16. **Q:** Design a workflow engine using the State and Strategy patterns.
-    **A:** State pattern for workflow state (Pending, Active, Completed, Failed). Strategy for task execution. Command for workflow actions.
-
-17. **Q:** Design an API rate limiter using patterns.
-    **A:** Strategy for rate limiting algorithms (Token Bucket, Leaky Bucket, Sliding Window). Proxy pattern wraps API calls with rate limit check. Decorator for adding rate limiting to any service.
-
-18. **Q:** Design a data export service using Template Method.
-    **A:** AbstractExport defines skeleton: query data, transform, format, write. Subclasses: CsvExport, JsonExport, ExcelExport. Hook methods for format-specific processing.
-
-19. **Q:** Design an event sourcing system using patterns.
-    **A:** Command pattern for commands. Event pattern for events. Observer for event handlers. Builder for event reconstruction. Memento for aggregate snapshots.
-
-20. **Q:** Design a multi-tenant SaaS platform using patterns.
-    **A:** Strategy for tenant isolation strategies. Factory for creating tenant-specific services. Proxy for tenant context resolution. Decorator for adding tenant filtering to queries.
-
-## 12. Expert-Level Interview Questions (10: architect-level)
-
-1. **Q:** Design a pattern-based framework for microservice orchestration.
-    **A:** Command pattern for saga steps. Observer/Event for choreography. State pattern for saga state machine. Strategy for compensation strategies. Builder for saga definition.
-
-2. **Q:** How do design patterns map to cloud-native patterns?
-    **A:** Singleton -> Kubernetes Pod (one instance). Factory -> Helm Charts. Proxy -> Service Mesh sidecar. Observer -> Event-driven with Kafka. Strategy -> Feature flags. Decorator -> Envoy filters.
-
-3. **Q:** Analyze Spring Framework's use of patterns and how they interact.
-    **A:** BeanFactory (Factory, Singleton). AOP (Proxy, Decorator). Events (Observer). Transaction (Template Method, Proxy). MVC (Front Controller, View Helper). Security (Chain of Responsibility). The patterns compose: @Transactional uses Proxy, which uses Template Method for transaction management.
-
-4. **Q:** Design a pattern-based refactoring strategy for a legacy monolith.
-    **A:** Phase 1: Extract interfaces (Strategy, DIP). Phase 2: Add caching (Proxy, Decorator). Phase 3: Extract modules (Facade). Phase 4: Add event hooks (Observer). Phase 5: Strangler Fig (Proxy for migration).
-
-5. **Q:** How do design patterns relate to reactive programming?
-    **A:** Observer pattern is fundamental to reactive streams. Strategy pattern for backpressure strategies. Decorator for reactive operators (map, filter, flatMap). Factory for creating publishers.
-
-6. **Q:** What patterns are anti-patterns in microservices?
-    **A:** Singleton (centralized state doesn't scale). In-process Observer becomes distributed event bus. State pattern becomes Saga. Proxy becomes API Gateway.
-
-7. **Q:** Design a pattern-based approach to adding observability to an existing system.
-    **A:** Decorator pattern wraps services with logging/metrics/tracing. Proxy for auto-instrumentation. Observer for event-driven monitoring. Strategy for different monitoring backends.
-
-8. **Q:** How do functional programming concepts replace traditional patterns?
-    **A:** Strategy -> Higher-order functions. Command -> Lambda/Function. Observer -> Reactive streams. Template Method -> Function composition. Factory -> Supplier. Builder -> Currying.
-
-9. **Q:** Design a pattern catalog for a specific domain (e-commerce).
-    **A:** Creational: ProductBuilder, PaymentGatewayFactory. Structural: InventoryProxy, PricingDecorator. Behavioral: ShippingStrategy, OrderState, CartObserver, DiscountStrategy, CheckoutCommand.
-
-10. **Q:** How do you document and govern design pattern usage across a large organization?
-    **A:** Architecture Decision Records (ADRs). Pattern library with examples. Code review checklist for pattern usage. Automated checks (ArchUnit). Training and office hours.
-
-## 13. Debugging & Troubleshooting
-
-### Pattern-Related Issues
-
-**Singleton Issues:** Hidden global state, thread safety, test difficulties.
-**Proxy Issues:** Stack traces showing proxy lines, debugger skipping proxy.
-**Decorator Issues:** Deep wrapper chains hard to debug.
-**Observer Issues:** Unexpected notification order, memory leaks (unregistered observers).
-**State Issues:** Missing state transitions, invalid states.
-
-### Debugging Patterns in Spring
-```yaml
-# Enable proxy debugging
-logging:
-  level:
-    org.springframework.aop: DEBUG
-    org.springframework.cglib: DEBUG
-
-# See proxy details in health endpoint
-management:
-  endpoints:
-    web:
-      exposure:
-        include: beans, caches, beans
-```
-
-## 14. Comparison Section
-
-### GoF Patterns vs Modern Alternatives
-
-| GoF Pattern | Modern Alternative |
-|-------------|-------------------|
-| Singleton | DI container (Spring manages scope) |
-| Factory | @Bean, Supplier<T>, constructors |
-| Builder | Lombok @Builder, Kotlin data classes |
-| Observer | @EventListener, Reactive Streams |
-| Strategy | Lambda expressions, method references |
-| Command | Runnable, Callable, Supplier |
-| Iterator | Stream API, for-each loop |
-| Template Method | Functional interface composition |
-| Proxy | AOP, @Transactional, service mesh |
-| Adapter | Functional interfaces, method references |
-
-### Pattern Category Summary
-
-| Category | Focus | Key Patterns |
-|----------|-------|--------------|
-| Creational | Object creation | Singleton, Factory, Builder |
-| Structural | Object composition | Adapter, Decorator, Proxy |
-| Behavioral | Object communication | Observer, Strategy, State |
-
-## 15. Revision Notes
-
-### Quick Recap
-- **Singleton**: One instance (Spring default scope).
-- **Factory**: Delegate object creation to subclasses.
-- **Builder**: Step-by-step complex object construction.
-- **Adapter**: Make incompatible interfaces work together.
-- **Decorator**: Add behavior dynamically (wrapper).
-- **Proxy**: Control access to an object.
-- **Observer**: Event notification to multiple listeners.
-- **Strategy**: Interchangeable algorithms.
-- **Template Method**: Algorithm skeleton with overridable steps.
-- **State**: Object behavior changes with its state.
-
-### Framework Mappings
-- Spring Beans: Singleton, Factory, Proxy
-- Spring Data: Template Method, Proxy
-- Spring AOP: Proxy, Decorator
-- Spring Events: Observer
-- Spring Security: Chain of Responsibility, Strategy
-
-## 16. Cheat Sheet
-
-```
-+-------------------------------------------------------------------+
-|                    DESIGN PATTERNS CHEAT SHEET                     |
-+-------------------------------------------------------------------+
-| CREATIONAL    | STRUCTURAL     | BEHAVIORAL                        |
-+---------------+----------------+-----------------------------------+
-| Singleton     | Adapter        | Chain of Responsibility           |
-| Factory       | Bridge         | Command                           |
-| Abstract      | Composite      | Interpreter                       |
-|   Factory     | Decorator      | Iterator                          |
-| Builder       | Facade         | Mediator                          |
-| Prototype     | Flyweight      | Memento                           |
-|               | Proxy          | Observer                          |
-|               |                | State                             |
-|               |                | Strategy                          |
-|               |                | Template Method                   |
-|               |                | Visitor                           |
-+---------------+----------------+-----------------------------------+
-| COMMON SPRING BOOT PATTERNS                                        |
-+-------------------------------------------------------------------+
-| Singleton     | @Bean, @Service, @Component (default scope)        |
-| Factory       | @Bean methods, ApplicationContext.getBean()        |
-| Proxy         | @Transactional, @Cacheable, @Async                |
-| Template      | JdbcTemplate, RestTemplate, JmsTemplate           |
-| Method        | JpaRepository, MongoRepository, etc.              |
-| Observer      | @EventListener, ApplicationListener, Application- |
-|               | EventPublisher                                    |
-| Chain of      | SecurityFilterChain, HandlerInterceptor            |
-| Responsibility|                                                    |
-| Strategy      | AuthenticationProvider, MessageConverter          |
-| Decorator     | HttpMessageConverter customization                |
-| Adapter       | WebMvcConfigurer, HandlerAdapter                  |
-+-------------------------------------------------------------------+
-| WHEN TO USE                                                       |
-+-------------------------------------------------------------------+
-| Pattern       | Use When                                           |
-+---------------+----------------------------------------------------+
-| Singleton     | Exactly one instance needed (caches, factories)    |
-| Factory       | Object creation varies by type/configuration       |
-| Builder       | Object has many optional parameters               |
-| Adapter       | Existing class has wrong interface                 |
-| Decorator     | Need to add responsibilities dynamically           |
-| Proxy         | Need to control access to an object               |
-| Observer      | Multiple objects need to react to events           |
-| Strategy      | Multiple interchangeable algorithms exist          |
-| Template      | Algorithm steps vary but structure is fixed        |
-| State         | Object behavior depends on internal state          |
-+-------------------------------------------------------------------+
-```
+- **Match the pattern to the volatility point** — Identify what changes most frequently in your system and apply the appropriate pattern there. If payment methods change quarterly, use Strategy. If notification channels change, use Observer. If database access patterns change, use Template Method. Over-engineering stable code with patterns adds complexity without payoff.

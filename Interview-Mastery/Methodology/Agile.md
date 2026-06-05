@@ -1,19 +1,25 @@
-# Agile Study Guide
+# Agile
 
-## 1. Executive Summary
+---
 
-Agile is a software development methodology based on iterative development, cross-functional teams, and continuous feedback. Rooted in the Agile Manifesto (2001), it emphasizes individuals and interactions, working software, customer collaboration, and responding to change. Agile encompasses multiple frameworks (Scrum, Kanban, XP, SAFe) that share common values but differ in practices. It has become the dominant approach to software development, adopted by organizations of all sizes worldwide.
+## Overview
 
-## 2. Core Theory
+- **Definition:** Agile is a software development methodology based on iterative development, cross-functional teams, and continuous feedback. Rooted in the Agile Manifesto (2001).
+- **Why It Exists:** Traditional waterfall approaches failed to handle changing requirements, had long feedback cycles, and delivered software that no longer met user needs. Agile enables rapid adaptation, early delivery, and continuous customer involvement.
+- **Key Concepts:** **Agile Manifesto** (4 values, 12 principles), **Iterations** (timeboxed development cycles), **Ceremonies** (standups, planning, review, retro), **User Stories**, **Velocity**, **Definition of Done**.
 
-### 2.1 Agile Manifesto - Four Values
+---
+
+## Core Concepts
+
+### Agile Manifesto — Four Values
 
 1. **Individuals and interactions** over processes and tools
 2. **Working software** over comprehensive documentation
 3. **Customer collaboration** over contract negotiation
 4. **Responding to change** over following a plan
 
-### 2.2 12 Agile Principles
+### 12 Agile Principles
 
 1. Satisfy customer through early/continuous delivery
 2. Welcome changing requirements, even late in development
@@ -24,172 +30,29 @@ Agile is a software development methodology based on iterative development, cros
 7. Working software is primary measure of progress
 8. Sustainable development, constant pace
 9. Continuous attention to technical excellence
-10. Simplicity - maximizing work not done
+10. Simplicity — maximizing work not done
 11. Self-organizing teams produce best architectures
 12. Regularly reflect and tune behavior
 
-### 2.3 Agile Methodologies
+### Agile Methodologies
 
 | Methodology | Key Practices | Best For |
 |------------|---------------|----------|
-| Scrum | Sprints, standups, retrospectives | Complex product development |
-| Kanban | Visualize flow, WIP limits, continuous delivery | Support, maintenance |
-| XP (Extreme Programming) | TDD, pair programming, CI | Engineering excellence |
-| Lean | Value stream mapping, eliminate waste | Process optimization |
-| SAFe | PI planning, ARTs, Lean Portfolio Mgmt | Enterprise scaling |
+| **Scrum** | Sprints, standups, retros | Complex product development |
+| **Kanban** | Visualize flow, WIP limits, continuous delivery | Support, maintenance |
+| **XP** | TDD, pair programming, CI | Engineering excellence |
+| **Lean** | Value stream mapping, eliminate waste | Process optimization |
+| **SAFe** | PI planning, ARTs, Lean Portfolio Mgmt | Enterprise scaling |
 
-## 3. Under-the-Hood Deep Dive
+### Estimation Techniques
 
-### 3.1 Agile vs Waterfall
+- **Planning Poker:** Fibonacci (1, 2, 3, 5, 8, 13, 21)
+- **T-Shirt Sizing:** XS, S, M, L, XL
+- **Affinity Mapping:** Group similar-sized items
+- **Dot Voting:** Team votes on complexity
+- **Bucket System:** Sort into predefined size buckets
 
-| Aspect | Agile | Waterfall |
-|--------|-------|-----------|
-| Requirements | Evolutionary | Fixed upfront |
-| Delivery | Incremental | Single release |
-| Customer involvement | Continuous | At milestones |
-| Team structure | Cross-functional | Siloed |
-| Change response | Adaptive | Resistant |
-| Documentation | Just enough | Comprehensive |
-| Risk | Early visibility | Late discovery |
-
-### 3.2 Estimation Techniques
-
-- **Planning Poker**: Fibonacci sequence (1, 2, 3, 5, 8, 13, 21)
-- **T-Shirt Sizing**: XS, S, M, L, XL
-- **Affinity Mapping**: Group similar-sized items
-- **Dot Voting**: Team votes on complexity
-- **Bucket System**: Sort into predefined size buckets
-
-### 3.3 Story Points vs Hours
-
-| Factor | Story Points | Hours |
-|--------|-------------|-------|
-| Granularity | Coarse (relative) | Fine (absolute) |
-| Precision | Low | High |
-| Team dependency | Team-specific | Universal |
-| Time to estimate | Fast | Slow |
-| Useful for | Planning | Scheduling |
-
-## 4. Production Code Examples
-
-### 4.1 Jira Board Configuration
-
-```yaml
-board:
-  name: "Sprint Board"
-  columns:
-    - name: Backlog
-      status: [Backlog]
-      wipLimit: 0
-    - name: In Progress
-      status: [In Progress, Selected for Dev]
-      wipLimit: 5
-    - name: In Review
-      status: [In Review, Code Review]
-      wipLimit: 3
-    - name: Done
-      status: [Done, Closed]
-      wipLimit: 0
-  swimlanes:
-    - name: Expedite
-      wipLimit: 2
-    - name: Normal
-```
-
-### 4.2 Sprint Planning Template
-
-```markdown
-## Sprint Planning: Sprint [N]
-
-**Goal:** [One-line sprint goal]
-
-## Capacity
-- Team members: [count]
-- Days in sprint: [10]
-- Planned velocity: [X] points
-
-## Backlog Items
-| ID | Story | Points | Owner |
-|----|-------|--------|-------|
-| 1  |       |        |       |
-
-## Risks
-- Risk 1
-- Risk 2
-```
-
-### 4.3 Definition of Done
-
-```yaml
-definition_of_done:
-  code:
-    - Code reviewed by peer
-    - Linting passes
-    - Unit tests pass (coverage >= 80%)
-    - No debug statements
-  testing:
-    - Integration tests pass
-    - E2E tests pass
-    - Security scan completed
-  deployment:
-    - Deployed to staging
-    - Smoke tests pass
-    - Feature flag configured
-    - Rollback plan documented
-```
-
-### 4.4 Velocity Calculator
-
-```python
-def calculate_velocity(historical_sprints):
-    points = [s['total_points'] for s in historical_sprints]
-    if len(points) < 3:
-        return sum(points) / len(points)
-
-    sorted_points = sorted(points)
-    trimmed = sorted_points[1:-1]  # Remove outliers
-
-    avg = sum(trimmed) / len(trimmed)
-    variance = sum((p - avg) ** 2 for p in trimmed) / len(trimmed)
-    std_dev = variance ** 0.5
-
-    return {
-        'average': avg,
-        'std_dev': std_dev,
-        'range_low': avg - std_dev,
-        'range_high': avg + std_dev
-    }
-```
-
-## 5. Real-World Scenarios
-
-### 5.1 Enterprise Agile Adoption
-
-Challenges:
-- Resistance to change from traditional teams
-- Integrating with existing PMO processes
-- Scaling across multiple teams
-- Maintaining agile values in bureaucracy
-
-Solutions:
-- Executive sponsorship and agile champions
-- Start with pilot teams, expand gradually
-- Use SAFe or LeSS for scaling
-- Adapt ceremonies to org culture
-
-### 5.2 Distributed Agile Teams
-
-Best Practices:
-- Overlap working hours by 4+ hours
-- Use async communication for updates
-- Record ceremonies for absent members
-- Rotate meeting times across timezones
-- Invest in video conferencing tools
-- Quarterly face-to-face gatherings
-
-## 6. Performance
-
-### 6.1 Agile Metrics
+### Key Metrics
 
 | Metric | What It Measures | Target |
 |--------|-----------------|--------|
@@ -200,274 +63,128 @@ Best Practices:
 | Throughput | Items per sprint | Increasing |
 | Burndown | Work remaining vs time | On track |
 
-## 7. Security
+---
 
-### 7.1 Agile Security Practices
+## Common Mistakes
 
-- Security requirements in user stories
-- Threat modeling in sprint planning
-- Security review as definition of done
-- Penetration testing per release
-- Security training for all team members
+- **Standups become status reports** — Focus on blockers instead of updates
+- **Retros without action** — Track action items, no improvement without follow-through
+- **Story points as performance metric** — Leads to gaming; use only for planning
+- **Too many WIP items** — Context switching kills productivity; enforce WIP limits
+- **Mid-sprint changes** — Loss of focus; protect the sprint goal
+- **No DoD** — Technical debt accumulates; create and enforce Definition of Done
+- **PO unavailable** — Wrong priorities result; PO must be accessible daily
+- **Team too large (over 9)** — Communication overhead; split the team
+- **No automated testing** — Slow regression; invest in CI/CD
+- **Zombie Scrum** — Going through ceremonies without agile mindset; revisit values
 
-### 7.2 DevSecOps in Agile
+---
 
-- **Planning**: Security stories prioritized
-- **Daily standup**: Security blockers raised
-- **Review**: Security demo included
-- **Retro**: Security improvements identified
+## Key Design Considerations
 
-## 8. Common Mistakes
+- **Scaling frameworks:** SAFe (50+ teams), LeSS (3-8 teams), Nexus (3-9 teams), Spotify Model (tribes, squads, chapters, guilds)
+- **When Agile fails:** No executive buy-in, teams not cross-functional, technical debt prevents rapid iteration, org structure conflicts with agility, too much process
+- **Distributed teams:** Overlap working hours by 4+ hours, async communication, record ceremonies, rotate meeting times, quarterly face-to-face
+- **DevSecOps in Agile:** Security stories prioritized, threat modeling in planning, security review in DoD, penetration testing per release
+- **Waterfall vs Agile:** Evolutionary vs fixed requirements; incremental vs single release; continuous vs milestone customer involvement
 
-| Mistake | Impact | Solution |
-|---------|--------|----------|
-| Standups become status reports | Waste of time | Focus on blockers |
-| Retros without action | No improvement | Track action items |
-| Story points as performance metric | Gaming the system | Planning only |
-| Too many WIP items | Context switching | Enforce WIP limits |
-| Mid-sprint changes | Loss of focus | Protect sprint goal |
-| No DoD | Technical debt | Create and enforce DoD |
-| PO unavailable | Wrong priorities | PO must be available |
-| Team too large (over 9) | Communication overhead | Split team |
-| No automated testing | Slow regression | CI/CD investment |
+---
 
-## 9. Senior Engineer Perspective
+## Real-World Scenarios
 
-### 9.1 Scaling Frameworks
+### Scenario 1: Startup Transitioning from Waterfall to Agile
+A 50-person startup with 6-month release cycles realizes they ship features users don't want. Competitors ship weekly. **Transition:** Start with 2-week sprints, a PO from product, and an SM from engineering. The first 3 sprints are chaotic — estimates are off, the PO is overwhelmed, and standups are status reports. **Fix:** Reduce sprint to 1 week for faster feedback, add backlog refinement twice per week, train the PO on story writing, and enforce 15-min standup timeboxing. After 4 sprints, velocity stabilizes and predictability improves.
 
-- **SAFe**: 50+ teams in large enterprises
-- **LeSS**: 3-8 teams on same product
-- **Nexus**: 3-9 teams, Scrum.org framework
-- **Spotify Model**: Tribes, squads, chapters, guilds
+### Scenario 2: Distributed Team Across 4 Timezones
+A team has members in San Francisco (UTC-8), London (UTC+1), Bangalore (UTC+5:30), and Sydney (UTC+11). Standups at 9 AM SF time are at 2:30 AM for Sydney. **Fix:** Establish 4-hour overlapping core hours (14:00-18:00 UTC). Rotate standup times weekly so each region shares the early/late pain half the time. Use async daily updates via Slack for non-overlap hours. Record sprint reviews and retros for those who can't attend live. Quarterly face-to-face for relationship building.
 
-### 9.2 When Agile Fails
+### Scenario 3: Velocity Drop After Microservices Migration
+A team's velocity dropped 50% after migrating from a monolith to microservices. Sprints used to deliver 30 story points; now they deliver 12. **Diagnosis:** The team underestimated the learning curve for new tech (Docker, Kubernetes, event-driven patterns). DevOps overhead (CI/CD pipelines, service discovery, monitoring) was not accounted for. **Fix:** Dedicate one sprint to infrastructure (observability, deployment automation, developer experience). Reduce Definition of Done temporarily. Track velocity trend over 4 sprints — it should recover as the team gains proficiency.
 
-1. No executive buy-in for cultural change
-2. Teams not truly cross-functional
-3. Technical debt prevents rapid iteration
-4. Org structure conflicts with agile values
-5. Too much process, not enough agility
+---
 
-## 10. Interview Questions (Easy)
+## Scenario-Based Questions
 
-1. What is Agile software development?
-2. What are the four values of the Agile Manifesto?
-3. What is a sprint in Scrum?
-4. What is a user story?
-5. What is a daily standup?
-6. What is a product backlog?
-7. Agile vs Waterfall?
-8. What is a sprint retrospective?
-9. What is velocity?
-10. What is the role of a Product Owner?
+1. **Q: You are the SM for a team where the PO keeps adding stories mid-sprint because "the CEO needs it by Friday." The team is demoralized. How do you handle this?**
+   A: Protect the sprint goal as non-negotiable. Have a private conversation with the PO explaining that mid-sprint changes undermine the team's autonomy and focus. Propose: the PO brings urgent items to the SM; if truly critical, the team swaps equal-sized stories (not adds). Escalate to management only after repeated violations. Track and report how many mid-sprint changes happen to build the case.
 
-## 10. Interview Questions (Medium)
+2. **Q: You join a team that's been doing agile for 2 years, but every retrospective comes up with the same action items and nothing changes. How do you break the cycle?**
+   A: Stop the retro on talk — move to action. Use the "Start/Stop/Continue" format with one binding action per person for the next sprint. Track actions in a visible board. Start each retro reviewing previous actions: "Did we do it? If not, why?" If organizational blockers prevent change, escalate with data (velocity impact, team satisfaction scores).
 
-11. Scrum vs Kanban differences?
-12. How do you estimate user stories?
-13. What is technical debt and how to manage it?
-14. How to handle changing requirements mid-sprint?
-15. What is Definition of Done and why important?
-16. How to scale Agile across multiple teams?
-17. What Agile metrics matter?
-18. What is a spike?
-19. How to handle poorly estimated stories?
-20. Velocity vs capacity?
+3. **Q: Management wants to measure developer productivity using story points per person. How do you respond?**
+   A: Story points are a team-relative estimate, not an individual productivity metric. Comparing points across individuals creates perverse incentives: (1) people inflate estimates, (2) people avoid complex work, (3) collaboration drops. Propose alternative metrics: cycle time, deployment frequency, team happiness, customer satisfaction. Point out that individual velocity doesn't exist in agile frameworks.
 
-## 11. Advanced Interview Questions (Hard)
+4. **Q: Your team uses 2-week sprints but consistently finishes all work by day 8, then sits idle waiting for the sprint to end. What's happening and how do you fix it?**
+   A: The team is under-committing (sandbagging) or the PO isn't filling the backlog with enough refined items. Fix: (1) During sprint planning, use historical velocity as a guide, not a ceiling. (2) If work finishes early, pull the next item from the backlog (after PO confirms). (3) Consider shortening the sprint to 1 week to better match capacity. (4) Validate estimation — maybe the team has improved but estimates haven't adjusted.
 
-1. Implement Agile in regulated industry (finance, healthcare).
-2. Design scaling strategy for 500-person org.
-3. Balance technical debt with feature delivery.
-4. Design metrics system that prevents gaming.
-5. Handle team missing sprint commitments consistently.
-6. Design Agile adoption roadmap for waterfall org.
-7. Integrate UX design into Agile sprints.
-8. Distributed Agile across 10 timezones.
-9. Maintain architectural vision in Agile.
-10. Continuous improvement program from retro data.
+5. **Q: A regulated fintech company wants to adopt agile but auditors demand requirements traceability, sign-offs, and documentation. How do you reconcile?**
+   A: Agile doesn't mean no documentation — it means the right documentation. Trace user stories → acceptance tests → test results. Use BDD (Gherkin scenarios) as living documentation. Automated CI/CD pipelines provide audit trails. Regulatory sign-offs become acceptance criteria in the Definition of Done. The key: documentation should be a byproduct of development, not a separate activity.
 
-## 11. Advanced Interview Questions (System Design)
+6. **Q: Your product owner is excellent at writing stories but terrible at prioritizing. The team builds perfect features that nobody uses. What do you recommend?**
+   A: Train the PO on value-based prioritization using Weighted Shortest Job First (WSJF) or Opportunity Scoring. Introduce outcome-based metrics (user adoption, task completion rate) instead of output-based (features shipped). Run user research sessions where the team observes real users. If the PO still can't prioritize, escalate — an incapable PO is a systemic risk.
 
-11. Agile portfolio management for 200+ teams.
-12. Automated Agile estimation from historical data.
-13. Real-time Agile analytics dashboard.
-14. Dependency management for multi-team Agile.
-15. Agile coaching platform for 1000+ teams.
-16. Automated retrospective analysis system.
-17. Predict sprint success from historical patterns.
-18. Cross-team coordination for large-scale Agile.
-19. Agile transformation measurement system.
-20. Feature flag management with Agile delivery.
+7. **Q: A team of senior developers insists they don't need agile because "we already communicate well." They've been doing waterfall with 6-month releases. How do you convince them?**
+   A: Don't sell agile — sell outcomes. Ask: "How long does it take from idea to deployed software?" "When was the last time you pivoted based on user feedback?" "How much rework happens?" Run a 1-month pilot with a single product feature: 2-week sprint delivery vs their usual timeline. When they see user feedback after 2 weeks instead of 6 months, the value becomes self-evident.
 
-## 12. Expert-Level Interview Questions (Architect)
+8. **Q: Your 3 teams share one product backlog. Every sprint, the same high-priority items appear but nobody finishes them because each team picks partial work. How do you fix this?**
+   A: Split into team-specific backlogs organized by feature area or subsystem. Each team owns end-to-end delivery of items in their area. Use a shared Product Goal that aligns the teams. Have a weekly alignment meeting where teams negotiate dependencies. For items that cross teams, have one team own the item and the other team contributes as a dependency.
 
-1. Design enterprise Agile transformation for 10,000-person org across 50 countries with regulatory requirements.
+9. **Q: The organization has a "blameless culture" but retro action items never name specific people. The same problems recur. How do you make retros effective without violating psychological safety?**
+   A: Retros should focus on systems and processes, not individuals. Ask: "What in our process allowed this to happen?" instead of "Who made the mistake?" If naming is needed, use the "I" statement: "I feel we need clearer criteria for the Definition of Done." Assign action items to roles (SM, PO, Dev Team) rather than individuals. If issues persist, the SM should take system-level actions.
 
-2. Architect measurement system correlating Agile practices with business outcomes (revenue, customer satisfaction, time-to-market).
+10. **Q: Your team adopted agile but the rest of the organization is still waterfall. The team delivers working software every 2 weeks, but it sits in QA for 4 weeks before release. What do you do?**
+    A: This is Water-Scrum-Fall. Fix: (1) Include QA in the sprint — shift testing left. (2) Automate regression tests so QA focuses on exploratory testing. (3) Create a release train — every sprint end triggers a deployment to a staging environment. (4) Negotiate with operations to allow continuous deployment or at least bi-weekly releases. (5) Make the case to management: the team delivers value in 2 weeks, but the organization delivers in 6 — the bottleneck is not the team.
 
-3. Design system auto-identifying cross-team dependencies, bottlenecks, coordination failures across 200+ teams.
+---
 
-4. Learning organization model where retro insights from 1000+ teams are captured, analyzed, redistributed.
+## Interview Questions
 
-5. Value stream management platform connecting strategic objectives to team backlogs with alignment verification.
+1. **What is the Agile Manifesto?**
+   A: Four values: individuals and interactions over processes and tools, working software over comprehensive documentation, customer collaboration over contract negotiation, responding to change over following a plan.
 
-6. Compensation system rewarding agile behaviors (collaboration, learning, adaptability) over individual metrics.
+2. **What are the 3 key roles in Scrum?**
+   A: Product Owner (maximizes value), Scrum Master (coaches/coaches process), Development Team (self-organizing, builds the product).
 
-7. AI-assisted sprint planning optimizing story selection based on capacity, dependencies, risk, value.
+3. **What is the difference between velocity and capacity?**
+   A: Velocity is historical — points delivered per sprint (past). Capacity is forecast — how much the team can do in the upcoming sprint considering leave, ceremonies, etc. (future).
 
-8. Transparency platform providing stakeholder visibility without creating surveillance culture.
+4. **What is a user story? What is INVEST?**
+   A: A user story describes a feature from the user's perspective: "As a [user], I want [goal] so that [reason]." INVEST: Independent, Negotiable, Valuable, Estimable, Small, Testable.
 
-9. Contract model enabling true agile partnerships in fixed-budget, fixed-scope corporate environment.
+5. **What is the purpose of a sprint retrospective?**
+   A: Inspect the team's process and adapt. The team discusses what went well, what could improve, and commits to concrete action items for the next sprint.
 
-10. Redesign physical/digital workplace maximizing flow, collaboration, creativity in hybrid world.
+6. **What is technical debt and how does agile address it?**
+   A: Technical debt is the implied cost of future rework caused by taking shortcuts. Agile addresses it with continuous refactoring, Definition of Done, and allocating time in each sprint for quality improvements.
 
-## 13. Debugging & Troubleshooting
+7. **What is the difference between Kanban and Scrum?**
+   A: Scrum uses fixed-length sprints with commitments. Kanban uses continuous flow with WIP limits. Scrum prescribes roles and ceremonies; Kanban is more flexible. Scrum is better for product development; Kanban for support/maintenance.
 
-### 13.1 Common Anti-Patterns
+8. **What is a "Definition of Done" and why is it important?**
+   A: A checklist of criteria that must be met for a product increment to be considered done (e.g., code reviewed, tested, documented, deployed to staging). It ensures quality and transparency.
 
-| Symptom | Diagnosis | Fix |
-|---------|-----------|-----|
-| Standups 30+ min | Status reporting | Focus on blockers |
-| Velocity drops | Overcommitment | Historical data planning |
-| Same retro issues | No follow-through | Track action items |
-| PO is bottleneck | PO overloaded | APIO role |
+9. **What is the difference between a burndown and a burnup chart?**
+   A: Burndown shows remaining work vs time (does it trend to zero?). Burnup shows completed work vs total work (can show scope changes). Burndown is more common but burnup better communicates scope growth.
 
-### 13.2 Sprint Rescue
+10. **What is the role of a Scrum Master?**
+    A: A servant leader who coaches the team on Scrum, removes impediments, facilitates ceremonies, protects the team from external disruptions, and helps the organization adopt agile values.
 
-```yaml
-critical_sprint_fixes:
-  scope_reduction:
-    - Identify minimum viable sprint goal
-    - Move non-critical stories back
-  team_intervention:
-    - Remove interruptions
-    - Swarm on critical stories
-    - Pair programming
-  blocker_escalation:
-    - Find root cause
-    - Escalate to management
-```
+---
 
-## 14. Comparison Section
+## Developer Recommendations
 
-### Scrum vs Kanban
+- **Keep estimates relative, not absolute** — Use story points (Fibonacci sequence) to compare effort, not hours. Absolute estimates are almost always wrong. Relative estimation accounts for uncertainty. Trade-off: points are meaningless outside the team; don't compare across teams.
 
-| Aspect | Scrum | Kanban |
-|--------|-------|--------|
-| Cadence | Fixed sprints | Continuous flow |
-| Roles | SM, PO, Dev Team | None prescribed |
-| Estimation | Required | Optional |
-| WIP Limits | Implicit (sprint scope) | Explicit |
-| Changes | No mid-sprint | Anytime |
-| Metrics | Velocity, burndown | Cycle time, throughput |
-| Best for | Complex products | Support, operations |
+- **Protect the sprint goal at all costs** — Every mid-sprint change dilutes focus and demoralizes the team. The PO and SM must be gatekeepers. Trade-off: sometimes you genuinely need to pivot (security emergency, customer outage). In those rare cases, cancel the sprint rather than corrupt it.
 
-### Agile vs Waterfall
+- **Enforce the Definition of Done strictly** — Skipping tests or code review to "go faster" creates technical debt that compounds. A relaxed DoD in sprint 1 leads to 50% rework in sprint 5. Trade-off: initially slower delivery velocity. Benefit: sustained velocity and quality over time.
 
-| Aspect | Agile | Waterfall |
-|--------|-------|-----------|
-| Approach | Iterative, incremental | Sequential, phase-gate |
-| Requirements | Emergent | Fully defined upfront |
-| Customer | Continuous involvement | At milestones |
-| Risk | Early discovery | Late discovery |
-| Adaptability | High | Low |
+- **Invest in automated testing and CI/CD** — Without automation, agile is just "fast waterfall." Automated regression tests enable the confidence to release every sprint. Trade-off: significant upfront investment in test infrastructure. Benefit: regression testing goes from 3 days to 3 minutes.
 
-## 15. Revision Notes
+- **Use retros for genuine improvement, not ritual** — Action items without owners and follow-through create cynicism. Each retro should produce at least one concrete, tracked action. Trade-off: retros take 60-90 minutes from delivery. Benefit: continuous improvement compounds — 5% better each sprint is 2.8x better in a year.
 
-```
-AGILE MANIFESTO (4 Values)
-1. Individuals & interactions > Processes & tools
-2. Working software > Comprehensive documentation
-3. Customer collaboration > Contract negotiation
-4. Responding to change > Following a plan
+- **Cross-functional teams are non-negotiable** — If every sprint requires a dependency on another team (DBAs, QA, DevOps), you're not agile. Build these capabilities into the team. Trade-off: harder to hire (T-shaped people). Benefit: no external dependencies block delivery.
 
-12 PRINCIPLES (Summary)
-- Customer satisfaction, welcome changes, deliver frequently
-- Business + dev daily, motivated teams, face-to-face
-- Working software = progress, sustainable pace
-- Technical excellence, simplicity, self-organizing teams
-- Reflect and adjust regularly
+- **Use metrics to improve, not to judge** — Velocity trends help with planning. Cycle time helps identify bottlenecks. Use them for team introspection, not management scorecards. Trade-off: metrics can be gamed. Benefit: data-driven process improvement.
 
-COMMON CEREMONIES
-- Sprint Planning (2 hrs/week)
-- Daily Standup (15 min)
-- Sprint Review (1 hr/week)
-- Retrospective (1 hr/week)
-- Backlog Refinement (10% sprint)
-
-KEY ROLES
-- Product Owner: Value maximizer
-- Scrum Master: Process guardian
-- Development Team: Builders
-```
-
-## 16. Cheat Sheet
-
-```text
-+======================================================================+
-|                     AGILE CHEAT SHEET                                |
-+======================================================================+
-
-  AGILE MANIFESTO VALUES
-+----------------------------------------------------------------------+
-| Individuals & Interactions  >  Processes & Tools                     |
-| Working Software            >  Comprehensive Documentation           |
-| Customer Collaboration      >  Contract Negotiation                  |
-| Responding to Change        >  Following a Plan                      |
-+----------------------------------------------------------------------+
-
-  SCRUM ROLES
-+----------------------------------------------------------------------+
-| Product Owner  | Maximizes value, manages backlog                    |
-| Scrum Master   | Coaches team, removes impediments                  |
-| Dev Team       | Self-organizing, cross-functional, 3-9 members     |
-+----------------------------------------------------------------------+
-
-  SCRUM CEREMONIES
-+----------------------------------------------------------------------+
-| Sprint Planning     | What + How for sprint (max 4 hrs/2wk)          |
-| Daily Standup       | Sync + plan next 24h (15 min)                 |
-| Sprint Review       | Demo completed work to stakeholders           |
-| Retrospective       | Inspect + adapt team process                  |
-| Backlog Refinement  | Keep backlog groomed (10% sprint time)         |
-+----------------------------------------------------------------------+
-
-  KANBAN PRINCIPLES
-+----------------------------------------------------------------------+
-| 1. Visualize the workflow                                            |
-| 2. Limit Work In Progress (WIP)                                      |
-| 3. Manage flow                                                       |
-| 4. Make process policies explicit                                    |
-| 5. Implement feedback loops                                          |
-| 6. Improve collaboratively, evolve experimentally                   |
-+----------------------------------------------------------------------+
-
-  AGILE ESTIMATION
-+----------------------------------------------------------------------+
-| Story Points: Relative sizing (Fibonacci: 1, 2, 3, 5, 8, 13, 21)   |
-| Planning Poker: Team estimates simultaneously                        |
-| T-Shirt Sizes: XS, S, M, L, XL                                       |
-| Affinity Mapping: Group similar items                                |
-+----------------------------------------------------------------------+
-
-  DEFINITION OF DONE CHECKLIST
-+----------------------------------------------------------------------+
-| [ ] Code reviewed                                                    |
-| [ ] Unit tests pass & meet coverage threshold                        |
-| [ ] Integration tests pass                                           |
-| [ ] Acceptance criteria met                                          |
-| [ ] Documentation updated (if needed)                               |
-| [ ] Deployed to staging                                              |
-| [ ] Smoke tests pass                                                 |
-| [ ] PO approved                                                      |
-+----------------------------------------------------------------------+
-
-+======================================================================+
-|  PRO TIPS: Protect the sprint goal. Keep retros blameless.           |
-|  Velocity is for planning, NOT performance evaluation.              |
-|  WIP limits are the most impactful Kanban practice.                 |
-|  Invest in automated testing for sustainable pace.                  |
-|  Self-organizing teams need trust, not control.                     |
-+======================================================================+
-```
+- **Start agile adoption with 2-3 pilot teams** — Don't mandate org-wide agile transformation overnight. Pilot teams demonstrate value, develop coaches, and create patterns others can follow. Trade-off: slower rollout. Benefit: higher adoption rates and fewer "zombie Scrum" failures.

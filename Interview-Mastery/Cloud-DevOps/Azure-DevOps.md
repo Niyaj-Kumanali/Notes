@@ -1,689 +1,208 @@
-# Azure DevOps Study Guide
+# Azure DevOps
 
-## 1. Executive Summary
+---
 
-Azure DevOps is Microsoft's end-to-end DevOps platform providing developer services for planning, developing, delivering, and maintaining applications. It includes Azure Boards (work tracking), Azure Repos (Git repos), Azure Pipelines (CI/CD), Azure Test Plans (testing), and Azure Artifacts (package management). With deep integration into Azure cloud services, Microsoft tooling, and broad third-party ecosystem support, Azure DevOps is a comprehensive platform for teams of any size.
+## Overview
 
-## 2. Core Theory
+- **Definition:** Azure DevOps is Microsoft's end-to-end DevOps platform providing integrated services for planning, developing, delivering, and maintaining applications.
+- **Why It Exists:** It unifies the entire software delivery lifecycle — work tracking, Git repos, CI/CD, testing, and package management — with deep Azure integration, broad extensibility, and both cloud and self-hosted options.
+- **Key Concepts:** **Organization** (top-level container with all resources), **Project** (logical container for code, work items, pipelines), **Team** (subset with area paths), **Agent Pool** (collection of build/release agents), **Variable Group** (shared variables across pipelines), **Service Connection** (secure external service access), **Environment** (deployment target with approvals and gates)
 
-### 2.1 Azure DevOps Services
+---
 
-```
-+=============================================================+
-|                    AZURE DEVOPS                             |
-|  +--------+ +--------+ +--------+ +--------+ +----------+  |
-|  | Boards | | Repos  | |Pipelines| |Test Plans| Artifacts| |
-|  +--------+ +--------+ +--------+ +--------+ +----------+  |
-+=============================================================+
-```
+## Core Services
 
-### 2.2 Key Concepts
-
-- **Organization**: Top-level container for all Azure DevOps resources
-- **Project**: A logical container for code, work items, pipelines
-- **Team**: A subset of project members with specific area paths
-- **Agent Pool**: Collection of build/release agents
-- **Variable Group**: Shared variables across pipelines
-- **Service Connection**: Securely connect to external services
-- **Environment**: Target deployment location with approvals
-
-### 2.3 Organization Structure
-
-```
-Organization (mycompany)
-  +-- Project A (Shopping Cart)
-  |     +-- Repos (Git)
-  |     +-- Pipelines (Builds + Releases)
-  |     +-- Boards (Work Items)
-  |     +-- Test Plans
-  |     +-- Artifacts
-  +-- Project B (User Mgmt)
-        +-- Repos + Pipelines + Boards
-```
-
-## 3. Under-the-Hood Deep Dive
-
-### 3.1 Agent Architecture
-
-Pipeline -> Agent Job -> Agent Pool -> Agent VM -> Job Runner -> Steps
-
-| Agent Type | Maintenance | Scaling | Capabilities |
-|------------|-------------|---------|--------------|
-| Microsoft-hosted | None | Automatic | Ubuntu, Windows, macOS |
-| Self-hosted (VM) | Manual | Manual | Custom tools, network access |
-| Self-hosted (K8s) | Automated | Auto-scaling | Ephemeral, containerized |
-| VM Scale Set | Automated | Auto-scaling | Windows/Linux VMs |
-
-### 3.2 Pipeline Structure (YAML)
-
-```yaml
-trigger:                    # CI trigger
-pr:                         # PR trigger
-schedules:                  # Scheduled triggers
-variables:                  # Pipeline variables
-stages:
-  - stage: Build
-    displayName: Build
-    dependsOn: []
-    condition: succeeded()
-    variables:              # Stage-scoped variables
-    jobs:
-      - job: BuildJob
-        pool:
-          vmImage: ubuntu-latest
-        strategy:
-          matrix:
-            Release:
-              config: Release
-            Debug:
-              config: Debug
-        steps:
-          - script: echo Hello
-          - task: DotNetCoreCLI@2
-```
-
-### 3.3 Classic vs YAML Pipelines
-
-| Aspect | Classic Editor | YAML |
-|--------|---------------|------|
-| Definition | UI-based | Code in repository |
-| Versioning | Manual | Git-tracked |
-| Review | N/A | Pull requests |
-| Reusability | Task groups | Templates, extends |
-| Portability | Azure DevOps only | Multi-platform |
-
-## 4. Production Code Examples
-
-### 4.1 Multi-Stage Build and Deploy Pipeline
+- **Azure Boards:** Work tracking with Kanban boards, backlogs, sprints, dashboards. Supports Scrum, Agile, CMMI. Customizable work item types and workflows.
+- **Azure Repos:** Git repositories with branch policies, PRs, code reviews. Supports TFVC. Integrates with Boards for automatic work item linking.
+- **Azure Pipelines:** CI/CD with multi-stage YAML pipelines. Container support, matrix builds, deployment strategies (canary, blue-green, rolling). Microsoft-hosted or self-hosted agents.
+- **Azure Test Plans:** Manual and exploratory testing. Test case management with requirement traceability. Rich execution reporting.
+- **Azure Artifacts:** Package management for NuGet, npm, Maven, Python. Proxies upstream feeds. Integrates with pipelines for automated publishing.
 
 ```yaml
 trigger:
-  branches:
-    include: [main, develop, release/*]
-  paths:
-    exclude: [docs/*, README.md]
+  branches: { include: [main, develop] }
+  paths: { exclude: [docs/*, README.md] }
 
 variables:
   - group: 'Global-Variables'
   - name: buildConfiguration
     value: 'Release'
-  - name: version
-    value: '2.$(Build.BuildId)'
 
 stages:
   - stage: CI
-    displayName: 'Continuous Integration'
     jobs:
-      - job: Lint
-        steps:
-          - script: |
-              npm ci
-              npm run lint
-              npm run format-check
-            displayName: 'Run linters'
-
       - job: Build
-        dependsOn: Lint
-        strategy:
-          matrix:
-            Node18: { nodeVersion: '18.x' }
-            Node20: { nodeVersion: '20.x' }
         steps:
-          - task: NodeTool@0
-            inputs: { versionSpec: '$(nodeVersion)' }
           - script: npm ci && npm run build
-          - script: npm run test:ci -- --coverage
-          - task: PublishTestResults@2
-            inputs:
-              testResultsFormat: 'JUnit'
-              testResultsFiles: '**/junit.xml'
-          - task: PublishCodeCoverageResults@2
-            inputs:
-              summaryFileLocation: '$(System.DefaultWorkingDirectory)/coverage/cobertura-coverage.xml'
           - task: PublishBuildArtifacts@1
-            inputs:
-              pathToPublish: 'dist'
-              artifactName: 'drop'
-
-      - job: Security
-        dependsOn: Lint
-        steps:
-          - task: DependencyCheck@0
-            inputs:
-              projectName: 'MyApp'
-              scanPath: '$(System.DefaultWorkingDirectory)'
-              format: 'SARIF'
-          - task: PublishSecurityAnalysisLogs@1
-            condition: always()
 
   - stage: Deploy_Dev
     dependsOn: CI
     condition: succeeded()
     jobs:
       - deployment: Deploy
-        environment: 'dev'
+        environment: dev
         strategy:
           runOnce:
             deploy:
               steps:
-                - download: current
-                  artifact: drop
                 - task: AzureWebApp@1
-                  inputs:
-                    azureSubscription: '$(AZURE_SERVICE_CONNECTION)'
-                    appName: 'app-dev'
-                    package: '$(Pipeline.Workspace)/drop/**/*.zip'
-                - script: |
-                    curl -f --retry 5 --retry-delay 10 https://dev.myapp.com/api/health
-
-  - stage: Deploy_Staging
-    dependsOn: Deploy_Dev
-    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/develop'))
-    jobs:
-      - deployment: Deploy
-        environment: 'staging'
-        strategy:
-          runOnce:
-            deploy:
-              steps:
-                - download: current
-                  artifact: drop
-                - task: AzureWebApp@1
-                  inputs:
-                    azureSubscription: '$(AZURE_SERVICE_CONNECTION)'
-                    appName: 'app-staging'
-                    package: '$(Pipeline.Workspace)/drop/**/*.zip'
-                - task: AzurePowerShell@5
-                  inputs:
-                    azureSubscription: '$(AZURE_SERVICE_CONNECTION)'
-                    Inline: |
-                      Swap-AzWebAppSlot -ResourceGroupName 'rg-staging' `
-                        -Name 'app-staging' `
-                        -SourceSlot 'staging' -DestinationSlot 'production'
 
   - stage: Deploy_Prod
-    dependsOn: Deploy_Staging
-    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    dependsOn: Deploy_Dev
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/main')
     jobs:
       - deployment: Deploy
-        environment: 'prod'
+        environment: prod
         strategy:
           canary:
             increments: [10, 50, 100]
-            deploy:
-              steps:
-                - download: current
-                  artifact: drop
-                - task: AzureWebApp@1
-                  inputs:
-                    azureSubscription: '$(AZURE_SERVICE_CONNECTION)'
-                    appName: 'app-prod'
-                    package: '$(Pipeline.Workspace)/drop/**/*.zip'
-            on:
-              failure:
-                steps:
-                  - script: |
-                      echo "Rolling back..."
-                      az webapp deployment slot swap -g rg-prod -n app-prod --slot staging --action swap
 ```
 
-### 4.2 Terraform Pipeline
+---
+
+## Common Mistakes
+
+- **Using classic pipelines** — Not code-as-config; migrate to YAML pipelines
+- **No variable groups** — Secret sprawl; centralize secrets in Library linked to Key Vault
+- **Hardcoding subscription IDs** — Fragile; use service connections
+- **No deployment slots** — Downtime on deploy; use staging slots with swap
+- **No path filtering** — Slow CI in monorepo; use path triggers
+- **No environment approvals** — Accidental deploys; add approval gates
+- **No artifact retention policies** — Storage costs; set retention policies
+- **No YAML templates** — Duplicate pipeline code; use templates for reuse
+- **Single agent pool for all** — Resource contention; separate pools by workload
+- **No pipeline caching** — Slow builds; cache npm/Maven/Docker layers
+
+---
+
+## Key Design Considerations
+
+- **YAML over Classic** — Define pipelines as code in repository for versioning, code review, and reusability. Use templates for shared patterns across projects and teams
+- **Agent Strategy** — Microsoft-hosted for standard builds (zero maintenance). Self-hosted for custom tools, network access, or cost optimization. VM scale set agents for auto-scaling based on queue depth
+- **Secrets Management** — Variable groups linked to Azure Key Vault. Service connections with managed identities. Secure files for certificates. Never hardcode secrets in YAML
+- **Deployment Strategies** — runOnce for simple deploys, canary for gradual traffic shift, rolling for batch update, blueGreen for instant switch. Use deployment slots on App Service
+- **Governance** — Branch policies with required reviewers, environment approvals (manual gates), YAML templates enforced by security team, artifact promotion with security gates, audit logging
+- **Enterprise Setup** — Single org with multiple projects per domain. Managed identities for service connections. Self-hosted agents with auto-scaling. Standardized templates and variable groups
+
+---
+
+## Real-World Scenarios
+
+**Scenario 1: Enterprise Migration from Classic to YAML Pipelines**
+A large enterprise has 500+ classic build/release pipelines that are unversioned and fragile. Migration strategy: create a YAML template library in a central repository with shared job templates for build, test, scan, and deploy. Each team converts their pipelines incrementally, starting with the simplest. Use Pipeline Decorators for org-wide governance (enforce required steps). Use variable groups linked to Key Vault for secrets. Retire classic pipelines after 6 months with a deprecation dashboard.
 
 ```yaml
-trigger:
-  branches: { include: [main] }
-  paths: { include: [infrastructure/*] }
+# Central template: deploy-template.yml
+parameters:
+- name: environment
+  type: string
+  values: [dev, staging, prod]
+- name: approvalRequired
+  type: boolean
+  default: true
 
-stages:
-  - stage: Validate
-    jobs:
-      - job: Validate
-        steps:
-          - task: TerraformInstaller@1
-            inputs: { terraformVersion: '1.7.0' }
-          - task: TerraformTaskV4@4
-            inputs:
-              provider: 'azurerm'
-              command: 'init'
-              workingDirectory: 'infrastructure'
-              backendServiceArm: '$(AZURE_SERVICE_CONNECTION)'
-              backendAzureRmResourceGroupName: 'rg-terraform-state'
-              backendAzureRmStorageAccountName: 'stterraformstate'
-              backendAzureRmContainerName: 'tfstate'
-              backendAzureRmKey: 'terraform.tfstate'
-          - task: TerraformTaskV4@4
-            inputs:
-              provider: 'azurerm'
-              command: 'validate'
-              workingDirectory: 'infrastructure'
-          - task: TerraformTaskV4@4
-            inputs:
-              provider: 'azurerm'
-              command: 'plan'
-              workingDirectory: 'infrastructure'
-              commandOptions: '-out=tfplan'
-
-  - stage: Deploy
-    dependsOn: Validate
-    condition: succeeded()
-    jobs:
-      - deployment: Apply
-        environment: 'terraform'
-        strategy:
-          runOnce:
-            deploy:
-              steps:
-                - task: TerraformTaskV4@4
-                  inputs:
-                    provider: 'azurerm'
-                    command: 'apply'
-                    workingDirectory: 'infrastructure'
-                    commandOptions: 'tfplan'
-```
-
-### 4.3 AKS Deployment Pipeline
-
-```yaml
-trigger:
-  branches: { include: [main] }
-
-variables:
-  - group: 'Kubernetes-Variables'
-  - name: imageRepository
-    value: 'myacr.azurecr.io/myapp'
-  - name: tag
-    value: '$(Build.BuildId)'
-
-stages:
-  - stage: Build
-    jobs:
-      - job: Build
-        steps:
-          - task: Docker@2
-            inputs:
-              containerRegistry: '$(DOCKER_REGISTRY_SERVICE_CONNECTION)'
-              repository: 'myapp'
-              command: 'buildAndPush'
-              tags: '$(tag)'
-
-  - stage: Deploy
-    dependsOn: Build
-    jobs:
-      - deployment: Deploy
-        environment: 'aks-production'
-        strategy:
-          blueGreen:
-            deploy:
-              steps:
-                - task: KubernetesManifest@1
-                  inputs:
-                    action: 'deploy'
-                    kubernetesServiceConnection: '$(AKS_SERVICE_CONNECTION)'
-                    namespace: 'production'
-                    manifests: 'k8s/deployment.yaml'
-                    containers: '$(imageRepository):$(tag)'
-```
-
-### 4.4 Variable Groups and Key Vault
-
-```yaml
-variables:
-  - group: 'Production-Secrets'        # Linked to Azure Key Vault
-  - group: 'Alert-Webhooks'
-  - name: connectionString
-    value: $(SQL-CONNECTION-STRING)     # Fetched from Key Vault automatically
-```
-
-## 5. Real-World Scenarios
-
-### 5.1 Self-Hosted Agent Setup
-
-```bash
-#!/bin/bash
-AGENT_VERSION="3.234.0"
-AGENT_URL="https://vstsagentpackage.azureedge.net/agent/${AGENT_VERSION}/vsts-agent-linux-x64-${AGENT_VERSION}.tar.gz"
-ORG_URL="https://dev.azure.com/myorg"
-AGENT_POOL="Production-Agents"
-
-curl -O $AGENT_URL
-tar xzf vsts-agent-linux-x64-${AGENT_VERSION}.tar.gz -C $HOME/agent
-cd $HOME/agent
-
-./config.sh --unattended \
-    --url $ORG_URL \
-    --auth PAT --token "<PAT>" \
-    --pool "$AGENT_POOL" \
-    --agent "prod-agent-$(hostname)" \
-    --replace --work "_work" --runAsService --once
-
-sudo ./svc.sh install && sudo ./svc.sh start
-```
-
-### 5.2 Approval Gates
-
-```yaml
-environment: 'production'
-approvals:
-  - group: 'Release-Managers'
-    minimumApprovers: 2
-    timeout: 43200
-
-gates:
-  - name: 'Security Gate'
-    conditions:
-      - type: 'AzureMonitorQuery'
-        metricNamespace: 'azuremonitor'
-        metricName: 'vulnerability-severity'
-        operator: 'lessThan'
-        threshold: 3
-```
-
-## 6. Performance
-
-### 6.1 Pipeline Optimization
-
-```yaml
-# Path filtering for monorepo
-trigger:
-  paths:
-    include: [src/api/*]
-    exclude: [tests/*, docs/*]
-
-# Parallel execution
 jobs:
-  - job: Lint
-  - job: UnitTests
-    dependsOn: []
-  - job: IntegrationTests
-    dependsOn: []
-
-# Self-hosted agents for faster builds
-pool:
-  name: 'Production-Agents'
-  demands:
-    - Agent.OS -equals Linux
-    - CPU -equals 8
+- deployment: Deploy
+  environment: ${{ parameters.environment }}
+  strategy:
+    runOnce:
+      deploy:
+        steps:
+        - task: AzureWebApp@1
+          inputs:
+            azureSubscription: 'service-connection-${{ parameters.environment }}'
+            appName: 'myapp-${{ parameters.environment }}'
+        - script: smoke-test.sh ${{ parameters.environment }}
 ```
 
-### 6.2 Caching
+**Scenario 2: Multi-Environment Release with Compliance Gates**
+A FinTech company requires multi-person approval, security scanning, and compliance verification before production releases. Each environment promotes the same build artifact. Dev: auto-deploy, CI validation. Staging: security scan (Trivy, OWASP ZAP), integration tests. Pre-Prod: manual approval from QA lead + compliance officer, Azure Monitor query gate verifying error rates < 0.1%. Prod: change advisory board approval, canary deployment with auto-rollback.
 
-```yaml
-- task: Cache@2
-  inputs:
-    key: 'npm | "$(Agent.OS)" | package-lock.json'
-    path: '$(npm_config_cache)'
-    cacheHitVar: 'CACHE_RESTORED'
-    restoreKeys: |
-      npm | "$(Agent.OS)"
-      npm
-```
+**Scenario 3: Monorepo CI/CD with 80+ Microservices**
+A product team uses a single repository with 80 microservices. Each service in its own folder. Use path triggers so only changed services build. Use a YAML template matrix that generates jobs dynamically based on changed paths. Use pipeline caching for npm/Maven/Docker layers. Fan-out pattern: one trigger pipeline, multiple parallel build jobs, fan-in to deploy only what changed.
 
-## 7. Security
+---
 
-### 7.1 Secrets Management
+## Scenario-Based Questions
 
-```yaml
-# Variable group linked to Azure Key Vault
-variables:
-  - group: 'App-Secrets'
-  - name: DbPassword
-    value: $(DB-PASSWORD)
+1. **Q: Design a PCI-compliant CI/CD pipeline using Azure DevOps.**
+   A: Use self-hosted agents in restricted network, variable groups linked to Key Vault, environment approvals with 2-person minimum, YAML templates from central repo, artifact retention policies, audit logging, and signed commits.
 
-# Secure files
-- task: DownloadSecureFile@1
-  name: certificate
-  inputs:
-    secureFile: 'wildcard-myapp-com.pfx'
-```
+2. **Q: How do you implement blue-green deployment with App Service slots?**
+   A: Use two deployment slots (staging, production). Deploy to staging, run smoke tests, swap slots. Auto-swap option available. Rollback is a swap back. Slot-specific settings remain sticky.
 
-### 7.2 Pipeline Permissions
+3. **Q: Design a multi-region deployment pipeline with release gates.**
+   A: Multi-stage pipeline with environment-specific jobs. Deploy to Region 1 first, run integration tests, then deploy to Region 2. Azure Monitor query gates verify health before proceeding. Manual approval for production.
 
-```yaml
-# Managed identity for Azure resources
-variables:
-  - name: ARM_USE_MSI
-    value: true
-```
+4. **Q: How would you manage Terraform infrastructure as code in Azure DevOps?**
+   A: Use Terraform task in pipeline. Backend state in Azure Storage with locking. Validate stage (init, validate, plan). Apply stage with deployment environment and approvals. Separate state files per environment.
 
-## 8. Common Mistakes
+5. **Q: Design a self-hosted agent auto-scaling solution.**
+   A: Use Azure VM Scale Set agents — auto-scales based on pipeline queue depth. Or use Kubernetes-based agents with the Kubernetes agent provider. Scale-to-zero when idle. Custom VM image with pre-cached tools.
 
-| Mistake | Impact | Solution |
-|---------|--------|----------|
-| Classic pipelines | No code-as-config | Migrate to YAML |
-| No variable groups | Secret sprawl | Centralize in Library |
-| Hardcoding subscription IDs | Fragile | Use service connections |
-| No deployment slots | Downtime | Use staging slots |
-| No path filtering | Slow CI | Use path triggers |
-| No environment approvals | Accidental deploys | Add approval gates |
-| No artifact retention | Storage costs | Set retention policies |
+6. **Q: How do you handle database migrations in CI/CD pipelines?**
+   A: Use Flyway or EF Core migrations as a pipeline step. Run migrations before app deployment. Include rollback scripts. Use environment-specific connection strings from Key Vault. Validate migration scripts in CI.
 
-## 9. Senior Engineer Perspective
+7. **Q: Explain how Azure DevOps integrates with Azure Key Vault.**
+   A: Create a variable group linked to Key Vault. Secrets are fetched at runtime and mapped to pipeline variables. Managed identity authenticates the pipeline. Secrets are masked in logs automatically.
 
-### 9.1 Migration Classic to YAML
+8. **Q: Design a container CI/CD with Azure DevOps and AKS.**
+   A: Pipeline builds Docker image, pushes to ACR, then deploys to AKS. Use Kubernetes manifest task or Helm. Blue-green deployment via AKS. Container scanning in CI. ACR geo-replication for multi-region.
 
-1. Export classic pipeline to JSON
-2. Use YAML assistant to translate
-3. Create template for shared steps
-4. Test alongside classic pipeline
-5. Remove classic after migration
+9. **Q: What are YAML templates and how do you use them?**
+   A: Templates are reusable YAML snippets. Job templates for common steps (build, test). Stage templates for deployment patterns. Template parameters for customization. Stored in a central repository.
 
-### 9.2 Enterprise Setup
+10. **Q: How do you implement artifact promotion with security gates?**
+    A: Each environment promotes the same build artifact. Staging runs security scan (Trivy, OWASP). Only if scan passes and gates (approvals, monitor queries) succeed, artifact promotes to production. Immutable artifact stored in Azure Artifacts.
 
-- Structure: One org, multiple projects per domain
-- Security: Managed identities for service connections
-- Governance: Branch policies, required reviewers
-- Standardization: YAML templates, variable groups
-- Scalability: Self-hosted agents with auto-scaling
 
-## 10. Interview Questions (Easy)
+---
 
-1. What is Azure DevOps and its services?
-2. What is the difference between build and release pipeline?
-3. What is an agent pool?
-4. How do you trigger a pipeline on push?
-5. What is a variable group?
-6. What is a service connection?
-7. How do you publish build artifacts?
-8. What is Azure Boards?
-9. What is the difference between project and organization?
-10. How do you view pipeline logs?
+## Interview Questions
 
-## 10. Interview Questions (Medium)
+1. **What is the difference between a Variable Group and a Variable in Azure DevOps?**
+   A: Variables are simple key-value pairs defined per pipeline. Variable Groups are shared across pipelines, can link to Azure Key Vault for secrets, and are managed in the Library hub. Use variables for pipeline-specific values, variable groups for shared/secret values.
 
-11. What is the difference between YAML and classic pipelines?
-12. How do you implement multi-stage pipelines?
-13. What are deployment groups?
-14. How do you set up environment approvals?
-15. How does Azure DevOps integrate with Key Vault?
-16. What is a YAML template?
-17. How do you implement canary deployments?
-18. What are pipeline caching strategies?
-19. How do you handle database migrations?
-20. Microsoft-hosted vs self-hosted agents?
+2. **What is a YAML template and why use it?**
+   A: A reusable YAML file that contains jobs, steps, or stages. Templates enable DRY pipelines, enforce governance (security teams control deploy templates), and simplify multi-team adoption. Pass parameters to customize behavior. Store in a central repository with version tags.
 
-## 11. Advanced Interview Questions (Hard)
+3. **What is the difference between a Microsoft-hosted and self-hosted agent?**
+   A: Microsoft-hosted agents are managed by Azure (zero maintenance), have common tools pre-installed, but limited to 60 minutes/job and no VNet access. Self-hosted agents require maintenance but offer custom tooling, network access, unlimited execution time, and cost savings at scale.
 
-1. Design a PCI-compliant CI/CD pipeline using Azure DevOps.
-2. Implement blue-green deployment with App Service slots.
-3. Design multi-region deployment with release gates.
-4. Manage infrastructure as code with Terraform.
-5. Self-hosted agent auto-scaling solution.
-6. Feature flag deployments across environments.
-7. Container CI/CD with Azure DevOps and AKS.
-8. Artifact promotion with security gates.
-9. Database-first deployment with backward compatibility.
-10. Secrets rotation in Azure DevOps pipelines.
+4. **What is a deployment group?**
+   A: A logical set of target machines for deployment. Used in classic release pipelines. Each machine has an agent that runs deployment tasks. Supports rolling deployments with health checks. Being replaced by YAML environments with VM resources.
 
-## 11. Advanced Interview Questions (System Design)
+5. **How do you implement canary deployments in Azure DevOps?**
+   A: In a YAML pipeline, set the deployment strategy to `canary` with traffic increments (e.g., 10%, 50%, 100%). Deploy to canary instances, run validation, then gradually increase traffic. Auto-rollback on health check failure via Azure Monitor gates.
 
-11. Multi-tenant Azure DevOps for 500+ teams.
-12. Global deployment pipeline across 10 regions.
-13. Compliance and audit system for regulated deployments.
-14. Cost-optimized pipeline infrastructure.
-15. Disaster recovery for Azure DevOps itself.
-16. GitOps with Azure DevOps and ArgoCD.
-17. Pipeline managing app + DB changes.
-18. Release management with auto-rollback.
-19. Cross-project dependency management.
-20. Mobile app CI/CD with Azure DevOps.
+6. **What is a service connection and how do you secure it?**
+   A: A service connection stores credentials for external services (Azure, GitHub, Docker Hub). Secure by using Managed Identity where possible, limit scope to specific resources, use Workload Identity Federation for automatic credential rotation, and restrict service connection permissions in Project Settings.
 
-## 12. Expert-Level Interview Questions (Architect)
+7. **What is Azure Artifacts and how does it support CI/CD?**
+   A: A package management service for NuGet, npm, Maven, Python, and Universal Packages. Supports upstream sources (proxies public feeds). Integrates with pipelines for automated publish and consume. Enables immutable, versioned artifacts for Build Once Deploy Many.
 
-1. Design an enterprise Azure DevOps platform for 10,000+ developers with federated identity, compliance controls, and global agent pools.
+8. **What is the difference between Continuous Delivery and Continuous Deployment in Azure DevOps?**
+   A: Continuous Delivery means every commit is automatically built and tested, deployment to production requires manual approval. Continuous Deployment is fully automated — every commit that passes all stages goes to production without human intervention. Choose CDelivery for risk-sensitive apps, CDeployment for mature DevOps practices.
 
-2. Architect migration from Jenkins to Azure DevOps YAML for 2,000+ pipelines, 500+ repos, 100+ teams.
+9. **What is a pipeline decorator?**
+   A: A pipeline decorator is a YAML template automatically injected into every pipeline in the organization by an admin. Used to enforce compliance: add a mandatory security scan step, require approval gates, inject anti-tampering checks. Defined in the `.azdevops` folder of a repository.
 
-3. Design multi-cloud deployment orchestration (AWS, GCP, Azure) with unified approvals.
+10. **What is the difference between `trigger` and `pr` triggers in Azure Pipelines?**
+   A: `trigger` defines which branches trigger CI on push. `pr` defines which branches trigger a PR validation pipeline. Use CI triggers for main/develop branches, PR triggers for validating pull requests before merge. Configure path filters in both to limit scope.
 
-4. Design an Azure DevOps extension for policy enforcement, cost tracking, and governance.
+---
 
-5. Pipeline composition framework from approved building blocks with security enforcement.
+## Developer Recommendations
 
-6. Real-time pipeline analytics identifying slow stages, flaky tests, cost optimization.
+- **Always use YAML pipelines over Classic** — Classic pipelines are not versionable, not reviewable, and cannot be stored in Git. YAML pipelines live in the repository alongside code, enabling peer review, branching, and audit trail. Migration is one-time effort; the long-term gain in traceability and automation is immense.
 
-7. Zero-trust security model for Azure DevOps pipelines with attestation.
+- **Link variable groups to Key Vault for all secrets** — Hardcoded secrets in pipeline YAML or library variables are a security breach waiting to happen. Key Vault-linked variable groups fetch secrets at runtime, log them as masked, and support automatic rotation. Use Managed Identity for authentication. Trade-off: pipeline startup takes 1-2 seconds longer for secret fetch.
 
-8. Cross-organization DevOps topology supporting M&A scenarios.
+- **Use environment-specific service connections** — Using a single service connection across environments is risky — a dev deployment mistake could affect production. Create separate service connections per environment with scoped permissions. Use Azure AD conditions to restrict each connection to its environment. Add manual approval gates on production connections.
 
-9. AI-powered pipeline failure prediction and auto-remediation.
+- **Adopt templates early, enforce via decorators** — Without templates, every team writes their own pipeline logic — leading to inconsistent quality, missing security steps, and maintenance nightmares. Create a central template repository with standardized build/test/deploy stages. Use Pipeline Decorators to inject mandatory steps (security scan, artifact publish) into every pipeline.
 
-10. Universal deployment abstraction layer for on-premise, cloud, and edge.
+- **Cache dependencies aggressively** — npm/node_modules, Maven/.m2, Docker layers, and NuGet packages rebuild on every pipeline run without caching. Use the Cache task (`CacheBeta@2`) with a restore key based on lock file hash. For Docker, use Docker layer caching with `--cache-from`. This can reduce build times by 60-80%.
 
-## 13. Debugging & Troubleshooting
-
-### 13.1 Pipeline Issues
-
-```yaml
-variables:
-  - name: System.Debug
-    value: true
-
-- script: |
-    echo "Agent OS: $(Agent.OS)"
-    echo "Build ID: $(Build.BuildId)"
-    echo "Source Version: $(Build.SourceVersion)"
-```
-
-### 13.2 Agent Issues
-
-```bash
-cd $HOME/agent
-sudo ./svc.sh status
-cat $HOME/agent/_diag/Agent_*.log | grep -i error
-sudo ./svc.sh restart
-curl -I https://dev.azure.com/myorg
-```
-
-### 13.3 API Queries
-
-```powershell
-$url = "https://dev.azure.com/myorg/myproject/_apis/pipelines/123/runs?api-version=7.0"
-$runs = Invoke-RestMethod -Uri $url -Headers @{Authorization="Basic $base64AuthInfo"}
-$runs.value | Select id, result, createdDate
-```
-
-## 14. Comparison Section
-
-### Azure DevOps vs GitHub Actions
-
-| Feature | Azure DevOps | GitHub Actions |
-|---------|-------------|---------------|
-| Work Tracking | Azure Boards (rich) | Issues (basic) |
-| CI/CD | Azure Pipelines | GitHub Actions |
-| Package Mgmt | Azure Artifacts | GitHub Packages |
-| Test Plans | Yes | Basic |
-| Marketplace | Extensions | Actions |
-| Hosted Agents | Linux/Windows/macOS | Linux/Windows/macOS |
-| Secrets | Variable groups + Key Vault | Encrypted secrets |
-| Environments | Approvals + Gates | Protection rules |
-
-### Azure DevOps vs Jenkins
-
-| Feature | Azure DevOps | Jenkins |
-|---------|-------------|---------|
-| Hosting | Cloud + self-hosted | Self-hosted |
-| Setup | 5 minutes | 30+ min |
-| Maintenance | Zero (cloud) | Significant |
-| Scalability | Built-in | Manual |
-| Pipeline as Code | YAML | Groovy |
-
-## 15. Revision Notes
-
-```
-Azure DevOps = Boards + Repos + Pipelines + Test Plans + Artifacts
-
-Organization -> Project -> Repo/Pipeline/Board
-Agent Pool -> Agent -> Job -> Step
-Service Connection -> External Service
-Variable Group -> Shared Variables
-Environment -> Deployment Target + Approvals
-
-Common YAML Keywords:
-  trigger, pr, schedules, variables, stages, stage,
-  dependsOn, condition, jobs, job, pool, steps, task, script
-```
-
-## 16. Cheat Sheet
-
-```text
-+======================================================================+
-|                    AZURE DEVOPS CHEAT SHEET                           |
-+======================================================================+
-
-  PIPELINE TRIGGERS
-+----------------------------------------------------------------------+
-| trigger: branches: { include: [main] }    | CI on branch push        |
-| pr: branches: { include: [main] }         | PR trigger               |
-| trigger: none                              | Manual only              |
-| schedules: - cron: '0 2 * * *'            | Scheduled                |
-+----------------------------------------------------------------------+
-
-  COMMON TASKS
-+----------------------------------------------------------------------+
-| DotNetCoreCLI@2      | .NET build, test, publish                     |
-| Npm@1                | npm install, custom                          |
-| Docker@2             | Docker build, push                           |
-| AzureWebApp@1        | Deploy to App Service                        |
-| KubernetesManifest@1 | Deploy to AKS                               |
-| Cache@2              | Cache dependencies                           |
-+----------------------------------------------------------------------+
-
-  VARIABLE SYNTAX
-+----------------------------------------------------------------------+
-| $(variableName)              | Macro syntax                          |
-| ${{ variables.var }}         | Template expression (compile time)    |
-| variables:                   | Define inline                         |
-|   - name: VAR value: val     |                                      |
-| variables:                   | Reference group                      |
-|   - group: 'MyGroup'         |                                      |
-+----------------------------------------------------------------------+
-
-  CONDITIONS
-+----------------------------------------------------------------------+
-| succeeded(), failed(), always()                                      |
-| eq(variables['var'], 'val'), in(variables['var'], 'a','b')           |
-| startsWith(variables['var'], 'refs/heads/')                          |
-+----------------------------------------------------------------------+
-
-  DEPLOYMENT STRATEGIES
-+----------------------------------------------------------------------+
-| runOnce:                     | Deploy once                           |
-| canary: increments: [10,50,100] | Gradual traffic shift            |
-| rolling: maxParallel: 2     | Rolling update                        |
-| blueGreen:                   | Blue-green deployment                 |
-+----------------------------------------------------------------------+
-
-  AGENT POOLS
-+----------------------------------------------------------------------+
-| pool: vmImage: ubuntu-latest  | Microsoft-hosted                     |
-| pool: name: 'MyPool'          | Self-hosted                         |
-| demands: - Agent.OS -equals Linux | Agent capabilities              |
-+----------------------------------------------------------------------+
-
-+======================================================================+
-|  PRO TIPS: Use YAML, not classic. Store secrets in Key Vault.        |
-|  Use managed identities. Branch policies for production.             |
-|  Deployment slots for zero-downtime. Set artifact retention.         |
-|  Use YAML templates for reusable patterns.                          |
-+======================================================================+
-```
+- **Implement artifact promotion with immutability** — Rebuilding artifacts for each environment guarantees inconsistency. Build once, promote the exact same artifact through Dev -> Staging -> Pre-Prod -> Prod. Each environment validates the artifact but never rebuilds it. Use retention policies to clean old artifacts but keep the production version indefinitely for traceability.

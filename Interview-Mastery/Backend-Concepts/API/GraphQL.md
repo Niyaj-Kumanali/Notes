@@ -1,30 +1,24 @@
 # GraphQL
 
-## 1. Executive Summary
+---
 
-GraphQL is a query language and runtime for APIs developed by Meta in 2012 and open-sourced in 2015. Unlike REST, where the server defines the response structure, GraphQL allows clients to specify exactly which data they need. This eliminates over-fetching and under-fetching, enabling more efficient data loading. GraphQL operates through a single endpoint, uses a type system for schema definition, and supports queries, mutations, and subscriptions.
+## Overview
 
-## 2. Core Theory
+- **Definition:** GraphQL is a query language and runtime for APIs developed by Meta in 2012 and open-sourced in 2015. Unlike REST where the server defines the response structure, GraphQL allows clients to specify exactly which data they need, eliminating over-fetching and under-fetching.
 
-### GraphQL Fundamentals
+- **Why It Exists:** REST APIs often force clients to make multiple requests or receive excessive data. GraphQL solves this with a single endpoint, a strong type system, and client-driven queries that request only the needed fields.
 
-- **Schema**: Defines the types, queries, mutations, and subscriptions available.
-- **Queries**: Read operations (equivalent to GET).
-- **Mutations**: Write operations (equivalent to POST/PUT/DELETE).
-- **Subscriptions**: Real-time operations (equivalent to WebSockets).
-- **Resolver**: Function that fetches data for a specific field.
-- **Type System**: Strongly typed schema defining all possible data shapes.
-- **Query Language**: Client specifies the exact fields needed.
+- **Core Concepts:**
+  - **Schema** — defines types, queries, mutations, and subscriptions
+  - **Queries** — read operations (equivalent to GET)
+  - **Mutations** — write operations (equivalent to POST/PUT/DELETE)
+  - **Subscriptions** — real-time operations (equivalent to WebSockets)
+  - **Resolvers** — functions that fetch data for specific fields
+  - **Type System** — strongly typed schema defining all possible data shapes
 
-### Core Concepts
+---
 
-```
-Query (read)       -> { user(id: "1") { name email } }
-Mutation (write)  -> mutation { createUser(name: "John") { id } }
-Subscription      -> subscription { userUpdated { name } }
-```
-
-### GraphQL Type System
+## GraphQL Type System
 
 ```graphql
 type User {
@@ -44,17 +38,10 @@ type Post {
   comments: [Comment!]!
 }
 
-type Comment {
-  id: ID!
-  text: String!
-  author: User!
-}
-
 type Query {
   user(id: ID!): User
   users(page: Int, size: Int): [User!]!
   post(id: ID!): Post
-  posts: [Post!]!
 }
 
 type Mutation {
@@ -63,66 +50,31 @@ type Mutation {
   deleteUser(id: ID!): Boolean!
 }
 
-input CreateUserInput {
-  name: String!
-  email: String!
-  age: Int
+type Subscription {
+  userCreated: User!
+  userUpdated: User!
 }
 
-input UpdateUserInput {
-  name: String
-  email: String
-  age: Int
-}
+input CreateUserInput { name: String!, email: String!, age: Int }
+input UpdateUserInput { name: String, email: String, age: Int }
 ```
 
-## 3. Under-the-Hood Deep Dive
+---
 
-### Query Execution Pipeline
+## Execution Pipeline
 
-1. Client sends a GraphQL query (POST to `/graphql`).
-2. Server parses the query string into an AST (Abstract Syntax Tree).
-3. Server validates the query against the schema.
-4. Server executes each field's resolver, starting from the root.
-5. Resolvers can fetch data from any source (DB, REST, gRPC).
-6. Results are collected and serialized into the response shape.
+1. Client sends a GraphQL query (POST to `/graphql`)
+2. Server parses the query string into an AST (Abstract Syntax Tree)
+3. Server validates the query against the schema
+4. Server executes each field's resolver, starting from the root
+5. Resolvers fetch data from any source (DB, REST, gRPC)
+6. Results are collected and serialized into the response shape
 
-### N+1 Problem in GraphQL
+---
 
-GraphQL is susceptible to the N+1 problem when resolving lists:
+## Production Code Examples
 
-```java
-// Inefficient resolver - N+1 queries
-public List<Post> posts(User user) {
-    return postRepository.findByUserId(user.getId()); // N queries for N users
-}
-```
-
-### Solving N+1 with DataLoader
-
-```java
-@Component
-public class UserBatchLoader {
-
-    private final UserRepository userRepository;
-
-    public DataLoader<Long, User> createUserLoader() {
-        return DataLoader.newMappedDataLoader(new MappedBatchLoader<>() {
-            @Override
-            public CompletionStage<Map<Long, User>> load(Set<Long> ids) {
-                return CompletableFuture.supplyAsync(() ->
-                    userRepository.findAllById(ids).stream()
-                        .collect(Collectors.toMap(User::getId, Function.identity()))
-                );
-            }
-        });
-    }
-}
-```
-
-## 4. Production Code Examples
-
-### Spring Boot GraphQL Setup
+### Spring Boot Setup
 
 ```xml
 <dependency>
@@ -131,90 +83,11 @@ public class UserBatchLoader {
 </dependency>
 ```
 
-### Schema Definition (graphql/schema.graphqls)
-
-```graphql
-type Query {
-    user(id: ID!): User
-    users(page: Int = 0, size: Int = 20): UserConnection!
-    searchUsers(name: String): [User!]!
-}
-
-type Mutation {
-    createUser(input: CreateUserInput!): UserPayload!
-    updateUser(id: ID!, input: UpdateUserInput!): UserPayload!
-    deleteUser(id: ID!): DeletePayload!
-}
-
-type Subscription {
-    userCreated: User!
-    userUpdated: User!
-    userDeleted: ID!
-}
-
-type User {
-    id: ID!
-    name: String!
-    email: String!
-    age: Int
-    posts: [Post!]!
-    createdAt: DateTime!
-}
-
-type Post {
-    id: ID!
-    title: String!
-    body: String!
-    author: User!
-    createdAt: DateTime!
-}
-
-type UserConnection {
-    edges: [UserEdge!]!
-    pageInfo: PageInfo!
-}
-
-type UserEdge {
-    node: User!
-    cursor: String!
-}
-
-type PageInfo {
-    hasNextPage: Boolean!
-    hasPreviousPage: Boolean!
-    startCursor: String
-    endCursor: String
-}
-
-type UserPayload {
-    user: User!
-    success: Boolean!
-}
-
-type DeletePayload {
-    id: ID!
-    success: Boolean!
-}
-
-input CreateUserInput {
-    name: String!
-    email: String!
-    age: Int
-}
-
-input UpdateUserInput {
-    name: String
-    email: String
-    age: Int
-}
-```
-
-### Controller-Based GraphQL (Spring for GraphQL)
+### Controller-Based GraphQL
 
 ```java
 @Controller
 public class UserGraphQLController {
-
     private final UserService userService;
     private final PostService postService;
 
@@ -224,30 +97,16 @@ public class UserGraphQLController {
     }
 
     @QueryMapping
-    public User user(@Argument Long id) {
-        return userService.findById(id);
-    }
+    public User user(@Argument Long id) { return userService.findById(id); }
 
     @QueryMapping
     public List<User> users(@Argument int page, @Argument int size) {
         return userService.findAll(PageRequest.of(page, size)).getContent();
     }
 
-    @QueryMapping
-    public List<User> searchUsers(@Argument String name) {
-        return userService.searchByName(name);
-    }
-
     @MutationMapping
     public UserPayload createUser(@Argument CreateUserInput input) {
-        User user = userService.create(mapToUser(input));
-        return new UserPayload(user, true);
-    }
-
-    @MutationMapping
-    public UserPayload updateUser(@Argument Long id, @Argument UpdateUserInput input) {
-        User user = userService.update(id, mapToUser(input));
-        return new UserPayload(user, true);
+        return new UserPayload(userService.create(mapToUser(input)), true);
     }
 
     @MutationMapping
@@ -257,54 +116,23 @@ public class UserGraphQLController {
     }
 
     @SchemaMapping(typeName = "User", field = "posts")
-    public List<Post> getPosts(User user) {
-        return postService.findByUserId(user.getId());
-    }
+    public List<Post> getPosts(User user) { return postService.findByUserId(user.getId()); }
 }
 ```
 
-### Resolver Pattern
-
-```java
-@Component
-public class UserResolver implements GraphQlResolver<User> {
-
-    private final PostService postService;
-    private final CommentService commentService;
-
-    public UserResolver(PostService postService, CommentService commentService) {
-        this.postService = postService;
-        this.commentService = commentService;
-    }
-
-    public List<Post> posts(User user) {
-        return postService.findByUserId(user.getId());
-    }
-
-    public int postCount(User user) {
-        return postService.countByUserId(user.getId());
-    }
-
-    public String displayName(User user) {
-        return user.getName() + " (" + user.getEmail() + ")";
-    }
-}
-```
-
-### Batch Loading with DataLoader
+### Batch Loading with DataLoader (N+1 Prevention)
 
 ```java
 @Controller
 public class PostGraphQLController {
-
     private final PostService postService;
-    private final DataLoader<Long, User> userLoader;
+    private final UserService userService;
 
-    public PostGraphQLController(PostService postService,
-                                BatchLoaderRegistry batchLoaderRegistry) {
+    public PostGraphQLController(PostService postService, UserService userService,
+            BatchLoaderRegistry batchLoaderRegistry) {
         this.postService = postService;
+        this.userService = userService;
 
-        // Register a DataLoader for User
         batchLoaderRegistry.forType(Long.class, User.class)
             .registerMappedBatchLoader((ids, environment) -> {
                 Map<Long, User> users = userService.findAllById(ids).stream()
@@ -314,60 +142,11 @@ public class PostGraphQLController {
     }
 
     @QueryMapping
-    public List<Post> posts() {
-        return postService.findAll();
-    }
+    public List<Post> posts() { return postService.findAll(); }
 
     @SchemaMapping
-    public CompletableFuture<User> author(Post post,
-                                          DataLoader<Long, User> loader) {
+    public CompletableFuture<User> author(Post post, DataLoader<Long, User> loader) {
         return loader.load(post.getAuthorId());
-    }
-}
-```
-
-### Exception Handling
-
-```java
-@ControllerAdvice
-public class GraphQLExceptionHandler {
-
-    @ExceptionHandler(ResourceNotFoundException.class)
-    public void handleNotFound(ResourceNotFoundException ex) {
-        throw new GraphQLErrorException(
-            GraphQLError.newError()
-                .message(ex.getMessage())
-                .errorType(ErrorType.NOT_FOUND)
-                .build()
-        );
-    }
-
-    @ExceptionHandler(ConstraintViolationException.class)
-    public void handleValidation(ConstraintViolationException ex) {
-        List<GraphQLError> errors = ex.getConstraintViolations().stream()
-            .map(violation -> GraphQLError.newError()
-                .message(violation.getMessage())
-                .errorType(ErrorType.BAD_REQUEST)
-                .location(violation.getPropertyPath().toString())
-                .build())
-            .collect(Collectors.toList());
-
-        throw new GraphQLErrorException(errors);
-    }
-}
-```
-
-### Custom Scalar Type
-
-```java
-@Component
-public class DateTimeScalarConfiguration implements RuntimeWiringConfigurer {
-
-    @Override
-    public void configure(RuntimeWiring.Builder builder) {
-        builder.scalar(new ExtendedScalars.Date());
-        builder.scalar(new ExtendedScalars.DateTime());
-        builder.scalar(new ExtendedScalars.LocalTime());
     }
 }
 ```
@@ -377,568 +156,253 @@ public class DateTimeScalarConfiguration implements RuntimeWiringConfigurer {
 ```java
 @Controller
 public class UserSubscriptionController {
-
-    private final UserService userService;
     private final Sinks.Many<User> userSink;
 
-    public UserSubscriptionController(UserService userService) {
-        this.userService = userService;
+    public UserSubscriptionController() {
         this.userSink = Sinks.many().multicast().onBackpressureBuffer();
     }
 
     @SubscriptionMapping
-    public Publisher<User> userCreated() {
-        return userSink.asFlux().filter(user -> true);
-    }
+    public Publisher<User> userCreated() { return userSink.asFlux(); }
 
-    @SubscriptionMapping
-    public Publisher<User> userUpdated() {
-        return userSink.asFlux();
-    }
-
-    @SubscriptionMapping
-    public Publisher<Long> userDeleted() {
-        return userSink.asFlux().map(User::getId);
-    }
-
-    // Called by service when user is created
-    public void onUserCreated(User user) {
-        userSink.tryEmitNext(user);
-    }
+    public void onUserCreated(User user) { userSink.tryEmitNext(user); }
 }
 ```
 
-### GraphQL Client with WebClient
+### Exception Handling
 
 ```java
-@Service
-public class GraphQLClient {
-
-    private final WebClient webClient;
-
-    public GraphQLClient(WebClient.Builder builder) {
-        this.webClient = builder
-            .baseUrl("https://api.example.com/graphql")
-            .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-            .build();
-    }
-
-    public <T> T query(String query, Map<String, Object> variables,
-                      Class<T> responseType) {
-        Map<String, Object> body = new HashMap<>();
-        body.put("query", query);
-        body.put("variables", variables);
-
-        return webClient.post()
-            .bodyValue(body)
-            .retrieve()
-            .bodyToMono(responseType)
-            .block();
-    }
-
-    public UserResponse getUserById(Long id) {
-        String query = """
-            query getUser($id: ID!) {
-                user(id: $id) {
-                    id
-                    name
-                    email
-                    posts {
-                        id
-                        title
-                    }
-                }
-            }
-            """;
-
-        Map<String, Object> variables = Map.of("id", id);
-        return query(query, variables, UserResponse.class);
+@ControllerAdvice
+public class GraphQLExceptionHandler {
+    @ExceptionHandler(ResourceNotFoundException.class)
+    public void handleNotFound(ResourceNotFoundException ex) {
+        throw new GraphQLErrorException(GraphQLError.newError()
+            .message(ex.getMessage()).errorType(ErrorType.NOT_FOUND).build());
     }
 }
 ```
 
-### Request Validation with Interceptor
+### Query Complexity & Depth Limiting
 
 ```java
-@Component
-public class GraphQLInterceptor implements ExecutionInputCustomizer {
+@Configuration
+public class GraphQLSecurityConfig {
+    @Bean
+    public Instrumentation maxDepthInstrumentation() { return new MaxQueryDepthInstrumentation(8); }
 
-    @Override
-    public CompletableFuture<ExecutionInput> customize(
-            ExecutionInput executionInput,
-            ExecutionGraphQlService schema,
-            DataFetchingEnvironment environment) {
-
-        // Add request context
-        Object context = new HashMap<>(Map.of(
-            "requestId", UUID.randomUUID().toString(),
-            "timestamp", Instant.now()
-        ));
-
-        return CompletableFuture.completedFuture(
-            ExecutionInput.newExecutionInput()
-                .query(executionInput.getDocument().toString())
-                .variables(executionInput.getVariables())
-                .graphQLContext(context)
-                .build()
-        );
-    }
+    @Bean
+    public Instrumentation maxComplexityInstrumentation() { return new MaxQueryComplexityInstrumentation(500); }
 }
 ```
 
-## 5. Real-World Scenarios
+---
 
-### Scenario 1: Social Media Feed
+## Common Mistakes
 
-```graphql
-query FeedQuery {
-  feed(first: 20) {
-    edges {
-      node {
-        id
-        text
-        images
-        author {
-          id
-          name
-          avatar
-        }
-        comments(first: 3) {
-          edges {
-            node {
-              text
-              author { name }
-            }
-          }
-        }
-        likes {
-          count
-          likedByMe
-        }
-      }
-    }
-    pageInfo {
-      hasNextPage
-      endCursor
-    }
-  }
-}
-```
+- **Ignoring N+1 problem** — always batch database calls with DataLoader
+- **Over-fetching in resolvers** — only fetch fields that are requested
+- **Not using pagination** — GraphQL still needs pagination for lists
+- **Deeply nested queries** — limit query depth to prevent abuse
+- **Exposing internal schema** — disable introspection in production
+- **No query complexity limits** — can lead to DoS attacks
+- **Treating GraphQL like REST** — don't create separate endpoints
+- **Not handling errors properly** — use structured error responses
 
-### Scenario 2: E-Commerce Product Catalog
+---
+
+## Key Design Considerations
+
+- **When to Use GraphQL:**
+  - Complex data models with many relationships
+  - Clients with varying data requirements
+  - Mobile applications (bandwidth constrained)
+  - Rapidly evolving frontend requirements
+
+- **When to Use REST Instead:**
+  - Simple CRUD operations
+  - File upload/download
+  - Caching-heavy use cases
+  - Public APIs with diverse clients
+
+- **Federation (Microservices):**
+  - Gateway composes schemas from multiple services
+  - Each service extends the shared types
+  - Enables team autonomy with unified API
+
+- **Security Measures:**
+  - Disable introspection in production
+  - Limit query depth (8-10 levels)
+  - Limit query complexity (500-1000)
+  - Field-level authorization
+  - Rate limit by query cost
+
+---
+
+## Real-World Scenarios
+
+### Scenario 1: N+1 Query Problem with DataLoader
+**Context:** A GraphQL query for a list of users and their posts triggers N+1 database queries. When a client queries `users { name posts { title } }`, the resolver fetches all users (1 query), then for each user, fetches their posts separately (N queries). With 100 users, this is 101 database queries. Response time grows linearly with user count.
+
+**Resolution:** Use DataLoader to batch-load related data. DataLoader groups all `post` field resolutions for all users within a single request execution and executes one batch query.
 
 ```java
 @Controller
-public class ProductController {
+public class UserController {
+    private final PostService postService;
 
-    @QueryMapping
-    public Product product(@Argument Long id) {
-        return productService.findById(id);
+    public UserController(PostService postService, BatchLoaderRegistry batchLoaderRegistry) {
+        this.postService = postService;
+        // Register a batch loader for User -> Posts
+        batchLoaderRegistry.forType(Long.class, List.class)
+            .registerMappedBatchLoader((authorIds, environment) -> {
+                Map<Long, List<Post>> postsByAuthor = postService.findByAuthorIdIn(authorIds)
+                    .stream().collect(Collectors.groupingBy(Post::getAuthorId));
+                return CompletableFuture.completedFuture(postsByAuthor);
+            });
     }
 
     @QueryMapping
-    public ProductConnection products(
-            @Argument Long categoryId,
-            @Argument String search,
-            @Argument Double minPrice,
-            @Argument Double maxPrice,
-            @Argument int first,
-            @Argument String after) {
-
-        return productConnectionService.getProducts(
-            categoryId, search, minPrice, maxPrice, first, after);
-    }
+    public List<User> users() { return userService.findAll(); }
 
     @SchemaMapping
-    public List<ProductVariant> variants(Product product) {
-        return variantService.findByProductId(product.getId());
-    }
-
-    @SchemaMapping
-    public Inventory inventory(Product product) {
-        return inventoryService.getByProductId(product.getId());
+    public CompletableFuture<List<Post>> posts(User user, DataLoader<Long, List<Post>> loader) {
+        return loader.load(user.getId());  // Batched: loads all posts for all users at once
     }
 }
 ```
 
-### Scenario 3: Real-Time Dashboard
+The batch loader fires once per request execution, reducing 101 queries to 2 (1 for users, 1 for all posts).
 
-```graphql
-subscription DashboardSubscription {
-  metricsUpdated {
-    cpu
-    memory
-    requestsPerSecond
-    errorRate
-    activeUsers
-  }
-}
-```
+### Scenario 2: Malicious Deeply Nested Query DoS
+**Context:** A malicious client sends a query 15 levels deep: `user { posts { author { posts { author { posts { ... } } } } } }`. Each level triggers database queries. The server runs out of memory and crashes. This is a DoS attack exploiting GraphQL's flexible query structure.
 
-## 6. Performance
-
-### Performance Optimization Techniques
-
-- **DataLoader**: Batch and cache database requests per query.
-- **Query Complexity Analysis**: Limit expensive queries.
-- **Persisted Queries**: Pre-register queries to avoid parsing overhead.
-- **Response Caching**: Cache full query responses at CDN level.
-- **Field-Level Metrics**: Monitor resolver performance.
-- **Max Query Depth**: Prevent deeply nested queries.
-
-### Query Complexity Analysis
+**Resolution:** Implement query depth limiting and complexity analysis.
 
 ```java
-@Component
-public class ComplexityAnalysisFilter implements Coercing<Object, Object> {
-
-    private final int maxComplexity = 1000;
-
-    @Override
-    public Object serialize(Object dataFetcherResult) {
-        return dataFetcherResult;
-    }
-
-    @Override
-    public Object parseValue(Object input) {
-        return input;
-    }
-
-    @Override
-    public Object parseLiteral(Object input) {
-        return input;
-    }
-}
-
 @Configuration
-public class GraphQLConfig {
-
-    @Bean
-    public GraphQlSourceBuilderCustomizer complexityCustomizer() {
-        return builder -> builder
-            .configureGraphQl(graphQl -> graphQl
-                .instrumentation(new MaxQueryComplexityInstrumentation(1000))
-                .instrumentation(new MaxQueryDepthInstrumentation(10))
-            );
-    }
-}
-```
-
-### Persisted Queries
-
-```java
-@Component
-public class PersistedQueryRegistry {
-
-    private final Map<String, String> queries = new HashMap<>();
-
-    public PersistedQueryRegistry() {
-        queries.put("get-user-profile", """
-            query getUserProfile($id: ID!) {
-                user(id: $id) {
-                    name
-                    email
-                    posts { title }
-                }
-            }
-            """);
-        queries.put("get-post-feed", """
-            query getPostFeed($first: Int!) {
-                feed(first: $first) {
-                    edges { node { id text author { name } } }
-                }
-            }
-            """);
-    }
-
-    public String getQuery(String id) {
-        return queries.get(id);
-    }
-
-    public boolean isRegistered(String id) {
-        return queries.containsKey(id);
-    }
-}
-```
-
-## 7. Security
-
-### GraphQL Security Concerns
-
-- **Over-fetching abuse**: Malicious clients can request deeply nested data.
-- **Query batching attacks**: Attackers can batch many expensive queries.
-- **Introspection leaks**: Production should disable introspection.
-- **Rate limiting**: Implement per-query cost rate limiting.
-- **Authorization at field level**: Ensure users can only access authorized fields.
-
-### Depth and Complexity Limiting
-
-```java
-@Component
 public class GraphQLSecurityConfig {
-
     @Bean
     public Instrumentation maxDepthInstrumentation() {
-        return new MaxQueryDepthInstrumentation(8);
+        return new MaxQueryDepthInstrumentation(8);  // Max 8 levels deep
     }
 
     @Bean
     public Instrumentation maxComplexityInstrumentation() {
-        return new MaxQueryComplexityInstrumentation(500);
+        return new MaxQueryComplexityInstrumentation(500);  // Reject queries over 500 cost
     }
 }
 ```
 
-### Field-Level Authorization
+Also disable introspection in production: `spring.graphql.schema.introspection.enabled=false`. This prevents attackers from discovering the full schema to craft complex queries.
+
+### Scenario 3: Real-Time Subscription Disconnects
+**Context:** Your `orderStatusUpdates` subscription pushes real-time order status changes to clients via WebSocket. Under high load, clients randomly disconnect. The subscription flow: 1,000 clients subscribe → 100 messages/second → WebSocket disconnects after 30 seconds → clients reconnect → cycle repeats.
+
+**Resolution:** Verify the subscription uses proper backpressure and WebSocket configuration.
 
 ```java
-@Component
-public class AuthorizationDataFetcher implements DataFetcher<Object> {
+@Controller
+public class OrderSubscriptionController {
+    // Use Sinks.many() with backpressure, not Sinks.one()
+    private final Sinks.Many<OrderStatus> orderSink = Sinks.many()
+        .multicast()
+        .onBackpressureBuffer(1024, false);  // Buffer up to 1024, drop oldest on overflow
 
-    private final DataFetcher<Object> delegate;
-    private final String requiredRole;
-
-    public AuthorizationDataFetcher(DataFetcher<Object> delegate,
-                                   String requiredRole) {
-        this.delegate = delegate;
-        this.requiredRole = requiredRole;
+    @SubscriptionMapping
+    public Publisher<OrderStatus> orderStatusUpdates(@Argument String orderId) {
+        return orderSink.asFlux()
+            .filter(status -> status.orderId().equals(orderId))
+            .delayElements(Duration.ofMillis(100));  // Rate-limit to 10 msg/s per client
     }
 
-    @Override
-    public Object get(DataFetchingEnvironment environment) throws Exception {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-
-        if (auth == null || !auth.getAuthorities().stream()
-                .anyMatch(g -> g.getAuthority().equals(requiredRole))) {
-            throw new AuthorizationException("Access denied");
-        }
-
-        return delegate.get(environment);
+    public void onOrderStatusChanged(OrderStatus status) {
+        orderSink.tryEmitNext(status);  // Non-blocking emission
     }
 }
 ```
 
-## 8. Common Mistakes
+WebSocket configuration: enable heartbeats every 15 seconds (Spring's `WebSocketHandler`), set max idle timeout to 60 seconds, and ensure the load balancer/proxy is configured to not drop long-lived connections.
 
-- **Ignoring N+1 problem**: Always batch database calls with DataLoader.
-- **Over-fetching in resolvers**: Only fetch fields that are requested.
-- **Not using pagination**: GraphQL still needs pagination for lists.
-- **Deeply nested queries**: Limit query depth to prevent abuse.
-- **Exposing internal schema**: Disable introspection in production.
-- **No query complexity limits**: Can lead to DoS attacks.
-- **Treating GraphQL like REST**: Don't create separate endpoints.
-- **Not handling errors properly**: Use structured error responses.
+---
 
-## 9. Senior Engineer Perspective
+## Scenario-Based Questions
 
-### When to Use GraphQL vs REST
+1. **Q: Your GraphQL API resolves a list of 500 users, and the `posts` field on each user triggers a separate database query. Response time is 30 seconds. How do you fix this with minimal code changes?**
+   - A: Use DataLoader with a `MappedBatchLoader` that loads all posts for all requested users in a single query (`WHERE author_id IN (:ids)`). DataLoader automatically deduplicates and batches requests within a single GraphQL request execution. The resolver returns `CompletableFuture` — DataLoader batches all futures and fires one batch query. This reduces 501 database queries to 2.
 
-**GraphQL is better for:**
-- Complex data models with many relationships.
-- Clients with varying data requirements.
-- Mobile applications (bandwidth constrained).
-- Rapidly evolving frontend requirements.
+2. **Q: A malicious client sends a query that requests `users { posts { comments { user { posts { comments { user { ... } } } } } } }` — 20 levels deep. Each level triggers downstream service calls. The server CPU spikes to 100% and crashes. How do you prevent this?**
+   - A: (1) Implement max query depth instrumentation: limit to 8-10 levels. (2) Implement query complexity analysis: assign costs to each field (e.g., `user = 1`, `posts = 5`, `comments = 3`). Reject queries exceeding a total budget (e.g., 500). (3) Rate limit by query cost: charge clients per query cost, not per query count. (4) Disable introspection in production — limits schema discovery. (5) Timeout long-running queries at the server level. Depth and complexity limits are the primary defense against GraphQL DoS attacks.
 
-**REST is better for:**
-- Simple CRUD operations.
-- File upload/download.
-- Caching-heavy use cases.
-- Public APIs with diverse clients.
+3. **Q: Your mobile team wants to migrate from REST to GraphQL to reduce over-fetching. You have 200 REST endpoints and 50 mobile clients. How do you migrate without downtime?**
+   - A: (1) Add a `/graphql` endpoint alongside existing REST endpoints. (2) Build GraphQL resolvers that delegate to the same services as REST controllers — no business logic rewrite needed. (3) Run both systems in parallel for 6-12 months. (4) Use the strangler fig pattern: new features go to GraphQL first, REST receives only bug fixes. (5) Gradually migrate mobile screens REST → GraphQL. (6) When REST traffic drops to zero, deprecate and remove. Add an OpenAPI-to-GraphQL wrapper if clients need time to migrate.
 
-### GraphQL Federation (Microservices)
+4. **Q: You need to handle file uploads in GraphQL, but GraphQL doesn't natively support multipart uploads. How do you design this?**
+   - A: (1) Use the GraphQL multipart request specification: the client sends a multipart request with `operations` (the GraphQL mutation) and `map` (maps multipart parts to mutation variables). (2) Alternatively, use a separate REST upload endpoint and pass the resulting file URL as a GraphQL argument. (3) For Spring GraphQL, implement a custom `MultipartFile` argument resolver. (4) Consider using a pre-signed URL pattern: client requests an upload URL from GraphQL, uploads directly to S3, then submits the file ID in a mutation.
 
-```
-Gateway
-  -> User Service (extends Query, User type)
-  -> Post Service (extends Query, Post type)
-  -> Comment Service (extends Query, Comment type)
-  -> Notification Service (extends Subscription)
-```
+5. **Q: Your GraphQL API has no caching strategy. Each query hits the database directly, and the same data is fetched repeatedly. How do you implement caching at different levels?**
+   - A: (1) DataLoader's per-request cache: within a single GraphQL request, repeated loads of the same entity hit the cache, not the database. (2) Resolver-level caching: cache expensive resolver results in Redis with TTL per field type. (3) Persisted queries: store common queries server-side; CDN-cache their results. (4) `@cacheControl` directive: annotate schema fields with `maxAge` and `scope` (PUBLIC/PRIVATE) for CDN caching. (5) Response caching at the HTTP level for GET requests (if using automatic persisted queries).
 
-## 10. Interview Questions (Easy)
+6. **Q: How do you implement pagination in GraphQL for a feed that updates in real-time (new posts created every second)?**
+   - A: Use the Relay Connection spec with cursor-based pagination. The query returns `edges` (each with a cursor) and `pageInfo` (with `hasNextPage` and `endCursor`). The cursor is a timestamp or opaque token. Clients pass `first: 20, after: "cursor"`. New posts don't shift page boundaries because the cursor is fixed. For real-time updates, combine with a subscription that pushes new posts, which the client prepends to the cached list.
 
-1. What is GraphQL and who developed it?
-2. What are the three operation types in GraphQL?
-3. What is the difference between a query and a mutation?
-4. What is a resolver in GraphQL?
-5. What is the GraphQL schema?
-6. What is the difference between GraphQL and REST?
-7. What is a GraphQL subscription?
-8. What is the `!` symbol in GraphQL type definitions?
-9. What is introspection in GraphQL?
-10. How do you pass arguments to a GraphQL query?
+7. **Q: You need field-level authorization: regular users can see `name` and `email`, but only admins can see `salary`. How do you implement this without cluttering resolvers with auth checks?**
+   - A: (1) Use a custom `DataFetcher` wrapper or Spring AOP that checks authorization before resolving each field. (2) Use GraphQL directives: define a `@auth(role: "ADMIN")` directive on schema fields. (3) Implement a schema transformation that applies auth checks at the field level. (4) For Spring GraphQL, use `@SchemaMapping` with `@PreAuthorize` from Spring Security. (5) The cleanest approach: return `null` for unauthorized fields and include an `errors` entry explaining the restriction. Avoid throwing exceptions for unauthorized fields — use soft denials.
 
-## Medium
+8. **Q: Your GraphQL mutation `createUser` returns only a success boolean. The client needs the new user's ID to navigate to the user profile. What's wrong and how do you fix it?**
+   - A: GraphQL mutations should return the affected object(s) so clients can update their cache and proceed with subsequent operations. Always follow the pattern: `mutation { createUser(input: ...) { id name email } }`. Return the created/modified object. If performance is a concern, use a `clientMutationId` pattern or return at minimum the ID. A mutation that returns only a boolean forces the client to refetch, defeating GraphQL's efficiency advantage.
 
-1. What is the N+1 problem in GraphQL and how do you solve it?
-2. What is DataLoader and how does it work?
-3. How do you implement pagination in GraphQL?
-4. What is GraphQL federation?
-5. How do you handle file uploads in GraphQL?
-6. What is query complexity analysis?
-7. How do you implement error handling in GraphQL?
-8. What are GraphQL directives?
-9. How do you test GraphQL APIs?
-10. What is persisted queries in GraphQL?
+9. **Q: Your GraphQL schema evolves over time — you need to rename `email` to `emailAddress` and change `name` from a single field to `firstName` + `lastName`. How do you handle this without breaking existing queries?**
+   - A: GraphQL uses schema evolution, not versioning. (1) Add the new fields alongside old ones: `firstName`, `lastName`, and `emailAddress`. (2) Mark old fields as `@deprecated(reason: "Use firstName and lastName")`. (3) Keep old fields working until you've verified no clients use them. (4) Remove old fields only when their usage drops to zero (can be monitored via query logging). (5) GraphQL's field-based selection means clients that don't request deprecated fields are unaffected — no versioning needed.
 
-## 11. Advanced Interview Questions (Hard)
+10. **Q: Your GraphQL subscription for real-time stock price updates disconnects every few minutes. Users miss price updates. How do you diagnose and fix?**
+    - A: (1) Check WebSocket heartbeats: ensure both client and server send pings every 10-15 seconds. Spring GraphQL supports `heartbeatInterval` in WebSocket configuration. (2) Check the subscription publisher: use `Sinks.many().multicast().onBackpressureBuffer()` with backpressure. Without backpressure, fast producers overwhelm slow consumers. (3) Check network proxies/load balancers: some proxies drop idle WebSocket connections after 60 seconds. Configure keep-alive on the proxy. (4) Server-Sent Events (SSE) is an alternative if WebSocket connections are problematic. (5) Implement client-side reconnection with exponential backoff.
 
-1. Design a GraphQL schema for a multi-tenant SaaS platform.
-2. How would you implement a real-time chat system using GraphQL subscriptions?
-3. Implement a custom GraphQL scalar type for handling encrypted data.
-4. How do you implement rate limiting based on query complexity in GraphQL?
-5. Design a caching strategy for a GraphQL API with DataLoader.
-6. How would you implement GraphQL federation across 10+ microservices?
-7. Design an authorization system that works at the field level in GraphQL.
-8. How do you handle versioning in GraphQL without breaking existing queries?
-9. Implement a query cost analysis system that rejects expensive queries.
-10. How would you migrate a REST API to GraphQL incrementally?
+---
 
-## System Design
+## Interview Questions
 
-1. Design a GraphQL API for a social media platform.
-2. Design a GraphQL gateway for a microservices architecture.
-3. Design a real-time analytics dashboard using GraphQL subscriptions.
-4. Design a GraphQL-based content management system.
-5. Design a GraphQL API for an e-commerce platform.
-6. Design a GraphQL API with offline support for mobile applications.
-7. Design a GraphQL monitoring and observability system.
-8. Design a GraphQL API for a collaborative document editor.
-9. Design a GraphQL-based BFF (Backend for Frontend) layer.
-10. Design a GraphQL API with automatic schema stitching.
+1. **What is GraphQL and how does it differ from REST?**
+   - A: GraphQL is a query language where clients specify exactly which fields they need, eliminating over-fetching and under-fetching. Unlike REST's fixed endpoints, GraphQL has a single endpoint with a flexible query structure, strong type system, and client-driven data fetching.
 
-## 12. Expert-Level Interview Questions (Architect-Level)
+2. **What is the N+1 problem in GraphQL and how do you solve it?**
+   - A: When resolving a list of N entities, each triggers an additional database query for related data. Solve with DataLoader: batches all individual loads into a single batch query within a request execution. DataLoader also caches within the request scope.
 
-1. Design a globally distributed GraphQL federation where each service can be independently deployed and scaled, with automatic schema composition and conflict resolution.
-2. How would you implement a GraphQL API that transparently queries across both SQL databases and search indexes (Elasticsearch) with optimal performance?
-3. Design a GraphQL schema evolution strategy that supports zero-downtime schema changes across a federation of services.
-4. How would you implement a real-time collaborative system using GraphQL subscriptions with conflict-free replicated data types (CRDTs)?
-5. Design a GraphQL caching layer that invalidates intelligently based on data dependencies rather than time-based expiry.
-6. How would you build a GraphQL API that can serve both GraphQL and REST clients from the same backend logic?
-7. Design a system that automatically generates GraphQL schemas from database schemas while allowing manual customization for business logic.
-8. How would you implement rate limiting and cost management in a GraphQL API where different fields have vastly different computational costs?
-9. Design a GraphQL API for a financial system that requires strict consistency, audit trails, and complex transactional mutations.
-10. How would you implement a self-documenting GraphQL API that generates human-readable documentation from the schema and resolver annotations?
+3. **How do you protect a GraphQL API from malicious queries?**
+   - A: Query depth limiting (max 8-10 levels), query complexity analysis (max cost budget per query), rate limiting by query cost, disabling introspection in production, and timeouts. These prevent deeply nested queries from crashing the server.
 
-## 13. Debugging & Troubleshooting
+4. **What are the benefits of using DataLoader?**
+   - A: Batching (groups individual loads into batch queries) and caching (deduplicates loads within a request). Prevents N+1 queries without manual batching. Works with any data source (DB, REST, gRPC).
 
-### Common Issues
+5. **What is a GraphQL subscription and when would you use it?**
+   - A: A subscription provides real-time updates from server to client over a persistent connection (WebSocket or SSE). Used for real-time feeds, notifications, chat messages, stock price updates, and any data that changes frequently and needs immediate delivery.
 
-- **Slow queries**: Check for N+1 problems, missing DataLoader batching.
-- **Timeout errors**: Reduce query depth, limit complexity.
-- **Introspection disabled**: Enable introspection in development only.
-- **Schema errors**: Validate schema changes before deployment.
-- **Subscription disconnects**: Check WebSocket configuration and heartbeat.
+6. **How do you implement pagination in GraphQL?**
+   - A: Relay Connection spec with cursor-based pagination. Query returns `edges` (each with a `cursor`) and `pageInfo` (`hasNextPage`, `endCursor`). Clients paginate with `first: 20, after: "cursor"`. This is stable against concurrent inserts.
 
-### GraphQL Tracing
+7. **How does GraphQL handle versioning?**
+   - A: Through schema evolution — add new fields alongside old ones, mark old fields as `@deprecated`, and remove them only when usage drops to zero. GraphQL's field-based selection means clients not requesting deprecated fields are unaffected. No explicit version numbers needed.
 
-```java
-@Component
-public class GraphQLTracingInstrumentation extends SimpleInstrumentation {
+8. **What is the difference between a query and a mutation in GraphQL?**
+   - A: Queries are for reading data (parallel execution). Mutations are for writing data (sequential execution — each mutation runs after the previous completes). Mutations should return the modified object for cache updates.
 
-    @Override
-    public DataFetcher<?> instrumentDataFetcher(
-            DataFetcher<?> dataFetcher,
-            InstrumentationState fieldsState) {
-        return environment -> {
-            long start = System.currentTimeMillis();
-            try {
-                return dataFetcher.get(environment);
-            } finally {
-                long duration = System.currentTimeMillis() - start;
-                log.info("Field {} resolved in {}ms",
-                    environment.getField().getName(), duration);
-            }
-        };
-    }
-}
-```
+9. **How do you handle errors in GraphQL?**
+   - A: GraphQL always returns HTTP 200 with a JSON body containing `data` and `errors` arrays. Each error has a `message`, `locations`, and `path`. Use structured error types (`NOT_FOUND`, `UNAUTHORIZED`, `VALIDATION_ERROR`). Never expose stack traces.
 
-## 14. Comparison Section
+10. **What is GraphQL federation and when would you use it?**
+    - A: Federation composes a single GraphQL schema from multiple microservices' schemas. Each service owns its types and extends shared types. A gateway routes queries to the appropriate service. Use when migrating a monolith GraphQL to microservices or when multiple teams own different data domains.
 
-### GraphQL vs REST
+---
 
-| Aspect | GraphQL | REST |
-|--------|---------|------|
-| Endpoints | Single endpoint | Multiple endpoints |
-| Data Fetching | Client specifies exact needs | Server defines structure |
-| Over-fetching | None (by design) | Common |
-| Under-fetching | None (by design) | Common (multiple requests) |
-| Caching | Complex (custom) | Simple (HTTP caching) |
-| Versioning | Schema evolution | URI/header versioning |
-| File Upload | Complex | Simple (multipart) |
-| Tooling | Growing | Mature |
-| Learning Curve | Moderate | Low |
-| Type System | Built-in | OpenAPI/Swagger |
+## Developer Recommendations
 
-### GraphQL vs gRPC
+- **Always use DataLoader to prevent N+1 queries** — The N+1 problem is the most common GraphQL performance issue. DataLoader batches all field resolutions within a single request execution into one batch query. Implement it from the start — retrofitting DataLoader after the schema is built requires rewriting resolvers. Register batch loaders for every relationship (one-to-many, many-to-one, many-to-many).
 
-| Aspect | GraphQL | gRPC |
-|--------|---------|------|
-| Query Flexibility | High (client defines query) | Low (fixed RPC methods) |
-| Protocol | HTTP/1.1 or HTTP/2 | HTTP/2 |
-| Data Format | JSON (text) | Protobuf (binary) |
-| Streaming | Subscriptions | Native bidirectional |
-| Code Generation | Schema-first | Contract-first (proto) |
-| Use Case | Client-driven UIs | Service-to-service |
+- **Implement query depth and complexity limits before going to production** — GraphQL's flexible query structure makes it vulnerable to DoS attacks. Depth limits prevent deeply nested queries. Complexity analysis assigns costs to fields and rejects expensive queries. These are GraphQL-specific security measures that REST doesn't need. Without them, a single malicious query can crash your server.
 
-## 15. Revision Notes
+- **Use cursor-based pagination (Relay Connection spec) for all list fields** — Offset pagination breaks with concurrent inserts and performs poorly on large offsets. The Relay Connection spec provides stable, efficient pagination that works regardless of data changes. Return `hasNextPage` and `endCursor` in every paginated response. This is standard in GraphQL ecosystem — Apollo, Relay, and all major clients support it.
 
-- GraphQL: query language by Meta, single endpoint, client-specified fields
-- 3 operations: Query (read), Mutation (write), Subscription (real-time)
-- Resolvers fetch data per field; DataLoader batches to prevent N+1
-- Schema defines types, inputs, and operations
-- Spring for GraphQL: `@QueryMapping`, `@MutationMapping`, `@SubscriptionMapping`
-- Security: limit depth, complexity, disable introspection in prod
-- Federation: compose multiple GraphQL services into one endpoint
-- Caching: harder than REST, use DataLoader and response caching
+- **Mutations should return the modified object, not just a status** — Clients need the returned data to update their cache. A mutation returning only `{ success: true }` forces clients to refetch, defeating GraphQL's efficiency. Always return the created/updated object. The GraphQL best practice is: `mutation { createUser(input: ...) { id name email } }`.
 
-## 16. Cheat Sheet
+- **Use schema evolution instead of versioning** — GraphQL's field-based selection makes versioning unnecessary. Add new fields alongside old ones. Mark old fields as `@deprecated`. Remove only when usage drops to zero. This eliminates the versioning tax — no v1/v2 endpoints, no duplicate resolvers, no migration burden. Clients automatically get new capabilities by requesting new fields.
 
-```
-+------------------------------------------------------------------+
-| GRAPHQL CHEAT SHEET                                              |
-+------------------------------------------------------------------+
-| OPERATION TYPES                                                  |
-|   query      { user(id: 1) { name } }    -- Read                 |
-|   mutation   { createUser(...) { id } }  -- Write                |
-|   subscription { userCreated { ... } }   -- Real-time            |
-+------------------------------------------------------------------+
-| TYPE SYSTEM                                                      |
-|   Scalar: Int, Float, String, Boolean, ID                        |
-|   Object: type User { id: ID! name: String! }                   |
-|   Input:  input CreateUserInput { name: String! }                |
-|   Enum:   enum Role { ADMIN USER }                               |
-|   List:   [Post!]!  (non-null list of non-null items)            |
-|   Union:  union SearchResult = User | Post                       |
-|   Interface: interface Node { id: ID! }                          |
-+------------------------------------------------------------------+
-| SPRING BOOT ANNOTATIONS                                          |
-|   @Controller            @QueryMapping                           |
-|   @MutationMapping       @SubscriptionMapping                    |
-|   @SchemaMapping         @Argument                               |
-|   @BatchMapping          @GraphQlException                        |
-+------------------------------------------------------------------+
-| DATALOADER PATTERN                                               |
-|   1. Collect all IDs from a batch                                |
-|   2. Load all at once (SELECT * FROM users WHERE id IN (...))    |
-|   3. Return Map<ID, Entity>                                      |
-|   4. DataLoader caches per-request                                |
-+------------------------------------------------------------------+
-| PAGINATION (Relay Connection Spec)                               |
-|   type UserConnection {                                           |
-|     edges: [UserEdge!]!                                          |
-|     pageInfo: PageInfo!                                          |
-|   }                                                              |
-|   type UserEdge { node: User! cursor: String! }                 |
-|   type PageInfo { hasNextPage: Boolean! endCursor: String }      |
-+------------------------------------------------------------------+
-| SECURITY                                                         |
-|   Disable introspection in production                            |
-|   Max query depth (8-10)                                         |
-|   Max query complexity (500-1000)                                |
-|   Field-level authorization                                      |
-|   Rate limit by query cost                                       |
-|   Validate all inputs                                            |
-+------------------------------------------------------------------+
-```
+- **Secure subscriptions with authentication and rate limiting** — Subscriptions are persistent connections — a single authenticated client can consume server resources indefinitely. Authenticate at connection time (not just at subscription time). Limit the number of active subscriptions per client. Implement backpressure to prevent fast publishers from overwhelming slow subscribers. Use Server-Sent Events as a simpler fallback when WebSocket connections are problematic (corporate proxies, load balancers).

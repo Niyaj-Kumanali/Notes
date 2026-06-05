@@ -1,931 +1,177 @@
 # OAuth 2.0
 
-## 1. Executive Summary
+---
 
-OAuth 2.0 is an authorization framework that enables third-party applications to obtain limited access to services on behalf of a resource owner. It decouples authentication from authorization by introducing an authorization layer and separating the role of the client from the resource owner. OAuth 2.0 is the industry standard for delegated access, used by Google, Facebook, GitHub, and virtually every major platform. It defines multiple grant types for different use cases including web applications, mobile apps, server-to-server communication, and IoT devices.
+## Overview
 
-## 2. Core Theory
+- **Definition:** OAuth 2.0 is an authorization framework that enables third-party applications to obtain limited access to services on behalf of a resource owner, without sharing credentials.
+- **Why It Exists:** Decouples authentication from authorization. Separates the role of the client from the resource owner, allowing delegated access. Industry standard used by Google, Facebook, GitHub, and virtually every major platform.
+- **Key Concepts:** **Resource Owner** (user who authorizes access), **Client** (application requesting access), **Authorization Server** (issues tokens), **Resource Server** (validates tokens, serves data), **Grant Types** (Authorization Code, Client Credentials, Device Code, Refresh Token), **PKCE** (Proof Key for Code Exchange — protects public clients), **Scopes** (permissions the client requests).
 
-### Roles in OAuth 2.0
+---
 
-- **Resource Owner**: The user who authorizes access to their data.
-- **Client**: The application requesting access (web app, mobile app, server).
-- **Authorization Server**: Issues tokens after successful authentication.
-- **Resource Server**: Hosts protected data and validates tokens.
+## Core Concepts
 
-### Authorization Flow
-
-```
-+--------+                               +---------------+
-|        |--(A)- Authorization Request ->|   Resource    |
-|        |                               |     Owner     |
-|        |<-(B)-- Authorization Grant ---|               |
-|        |                               +---------------+
-|        |                               +---------------+
-|        |--(C)-- Authorization Grant -->| Authorization |
-| Client |                               |     Server    |
-|        |<-(D)----- Access Token -------|               |
-|        |                               +---------------+
-|        |                               +---------------+
-|        |--(E)----- Access Token ------>|    Resource   |
-|        |                               |     Server    |
-|        |<-(F)--- Protected Resource ---|               |
-+--------+                               +---------------+
-```
-
-### Grant Types
-
-| Grant Type | Use Case | Security |
-|------------|----------|----------|
-| Authorization Code | Web apps with backend | High (PKCE for mobile) |
-| Implicit (deprecated) | Single-page apps | Low (removed in OAuth 2.1) |
-| Client Credentials | Server-to-server | High |
-| Resource Owner Password Credentials | Legacy/trusted apps | Medium |
-| Device Code | Smart TVs, IoT devices | Medium |
-| Refresh Token | Obtaining new access tokens | High |
-
-## 3. Under-the-Hood Deep Dive
-
-### Authorization Code Grant (Detailed)
-
-1. Client redirects user to Authorization Server:
-   ```
-   GET /authorize?response_type=code&client_id=CLIENT_ID
-       &redirect_uri=https://client.example.com/callback
-       &scope=openid%20profile%20email
-       &state=STATE_CSRF_TOKEN
-   ```
-
-2. User authenticates and consents.
-
-3. Authorization Server redirects to client's redirect URI:
-   ```
-   GET /callback?code=AUTHORIZATION_CODE&state=STATE_CSRF_TOKEN
-   ```
-
-4. Client exchanges code for tokens (server-side):
-   ```
-   POST /token
-   Content-Type: application/x-www-form-urlencoded
-   
-   grant_type=authorization_code&code=AUTHORIZATION_CODE
-   &redirect_uri=https://client.example.com/callback
-   &client_id=CLIENT_ID&client_secret=CLIENT_SECRET
-   ```
-
-5. Authorization Server responds:
-   ```json
-   {
-     "access_token": "eyJhbGciOiJSUzI1NiIs...",
-     "token_type": "Bearer",
-     "expires_in": 3600,
-     "refresh_token": "4d6f6f6e...",
-     "id_token": "eyJraWQiOiIxZTlnZGs3..."
-   }
-   ```
-
-### PKCE (Proof Key for Code Exchange)
-
-PKCE protects against authorization code interception attacks:
+- **Authorization Code Grant:** Client redirects user to Auth Server → User authenticates and consents → Auth Server redirects back with `code` → Client exchanges `code` + `client_secret` for tokens → Access + Refresh tokens issued. This is the most secure grant for web apps.
+- **PKCE:** Public clients (mobile, SPA) generate a `code_verifier` (random 128-char string) and `code_challenge = SHA256(code_verifier)`. The challenge is sent in the auth request; the verifier is sent in the token request. Prevents interception attacks.
+- **Client Credentials Grant:** Server-to-server communication. Client authenticates with its own credentials and receives an access token directly, without user involvement. Used for service-to-service API calls.
+- **OAuth 2.1:** Consolidates best practices — PKCE required for all public clients, Implicit and Password grants removed, refresh tokens must be sender-constrained or rotate, redirect URIs use exact matching.
 
 ```java
-// Client generates:
-String codeVerifier = generateRandomString(128);
-String codeChallenge = base64URLEncode(sha256(codeVerifier));
-
-// Authorization request includes code_challenge
-GET /authorize?response_type=code&client_id=CLIENT_ID
-    &code_challenge_method=S256
-    &code_challenge=CODE_CHALLENGE_HASH
-
-// Token request includes code_verifier
-POST /token
-grant_type=authorization_code&code=CODE
-&code_verifier=CODE_VERIFIER_ORIGINAL
-&client_id=CLIENT_ID
-```
-
-## 4. Production Code Examples
-
-### Spring Boot OAuth2 Client Configuration
-
-```yaml
-spring:
-  security:
-    oauth2:
-      client:
-        registration:
-          google:
-            client-id: ${GOOGLE_CLIENT_ID}
-            client-secret: ${GOOGLE_CLIENT_SECRET}
-            scope: openid, profile, email
-            redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
-          github:
-            client-id: ${GITHUB_CLIENT_ID}
-            client-secret: ${GITHUB_CLIENT_SECRET}
-            scope: read:user, user:email
-          custom:
-            provider: custom-provider
-            client-id: ${CUSTOM_CLIENT_ID}
-            client-secret: ${CUSTOM_CLIENT_SECRET}
-            authorization-grant-type: authorization_code
-            redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
-            scope: openid, profile, api:read
-            client-name: Custom OAuth2 Provider
-        provider:
-          custom-provider:
-            authorization-uri: https://auth.example.com/oauth2/authorize
-            token-uri: https://auth.example.com/oauth2/token
-            user-info-uri: https://api.example.com/userinfo
-            user-name-attribute: sub
-            jwk-set-uri: https://auth.example.com/.well-known/jwks.json
-```
-
-### OAuth2 Resource Server
-
-```java
-@Configuration
-@EnableWebSecurity
-public class OAuth2ResourceServerConfig {
-
-    @Bean
-    public SecurityFilterChain resourceServerFilterChain(HttpSecurity http) throws Exception {
-        return http
-            .securityMatcher("/api/**")
-            .authorizeHttpRequests(auth -> auth
-                .requestMatchers(HttpMethod.GET, "/api/v1/public/**").permitAll()
-                .requestMatchers(HttpMethod.GET, "/api/v1/users").hasAuthority("SCOPE_profile")
-                .requestMatchers("/api/v1/admin/**").hasAuthority("SCOPE_admin")
-                .anyRequest().authenticated()
-            )
-            .oauth2ResourceServer(oauth2 -> oauth2
-                .jwt(jwt -> jwt
-                    .jwtAuthenticationConverter(jwtAuthenticationConverter())
-                )
-                .authenticationEntryPoint((request, response, authException) -> {
-                    response.setContentType("application/json");
-                    response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                    response.getWriter().write(
-                        "{\"error\":\"unauthorized\",\"message\":\"" +
-                        authException.getMessage() + "\"}");
-                })
-            )
-            .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-            .build();
-    }
-
-    @Bean
-    public JwtAuthenticationConverter jwtAuthenticationConverter() {
-        JwtGrantedAuthoritiesConverter grantedAuthorities = new JwtGrantedAuthoritiesConverter();
-        grantedAuthorities.setAuthorityPrefix("SCOPE_");
-        grantedAuthorities.setAuthoritiesClaimName("scope");
-
-        JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
-        converter.setJwtGrantedAuthoritiesConverter(grantedAuthorities);
-        return converter;
-    }
+// Spring Security OAuth2 Resource Server
+@Bean
+public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    return http
+        .securityMatcher("/api/**")
+        .authorizeHttpRequests(auth -> auth
+            .requestMatchers(GET, "/api/public/**").permitAll()
+            .anyRequest().authenticated())
+        .oauth2ResourceServer(oauth2 -> oauth2
+            .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())))
+        .sessionManagement(sm -> sm.sessionCreationPolicy(STATELESS))
+        .build();
 }
 ```
 
-### Custom Token Validation with JWK Set
+---
+
+## Common Mistakes
+
+- **Not Using PKCE for Public Clients** — Mobile and SPA apps must use PKCE. Without it, authorization code interception is possible.
+- **Storing Tokens Insecurely** — LocalStorage exposes tokens to XSS. Use httpOnly cookies or secure platform storage.
+- **Long-Lived Access Tokens** — Use short expiry (15-60 min) with refresh tokens.
+- **Not Validating Redirect URIs** — Can lead to open redirect vulnerabilities.
+- **Missing State Parameter** — Vulnerable to CSRF attacks on the authorization callback.
+- **Hardcoded Client Secrets** — Use environment variables, vaults, or managed secrets.
+
+---
+
+## Key Design Considerations
+
+- **Always Use PKCE** for all public clients (mobile, SPA). For confidential clients (backend), use client_secret + PKCE as defense-in-depth.
+- **Short Access Token TTL** (15-60 minutes). Use refresh tokens for long-lived sessions with rotation (each refresh invalidates the previous token).
+- **Strict Redirect URI Validation** — Exact match only (not prefix or pattern). Prevents open redirect and code interception.
+- **State Parameter** — Random anti-CSRF token in the authorization request. Validated on callback to prevent CSRF.
+- **Token Validation:** Resource servers validate JWT locally (signature, exp, iss, aud) or use introspection endpoint for opaque tokens. Cache introspection results.
+- **Microservices Architecture:** API Gateway validates tokens, passes them downstream. Downstream services validate locally (JWT) or use token exchange for service-specific tokens.
+- **DPoP (Demonstration of Proof-of-Possession):** Binds token to a client's public key. Prevents token replay if the token is stolen.
+
+---
+
+## Real-World Scenarios
+
+### Scenario 1: Authorization Code Interception on Mobile
+**Context:** A mobile banking app uses OAuth 2.0 Authorization Code flow without PKCE. An attacker installs a malicious app on the user's device that registers a custom URL scheme (`mybank://oauth-callback`). When the legitimate app redirects to the authorization server, the malicious app intercepts the callback with the authorization code. The attacker exchanges the code for tokens and gains access to the user's bank account.
+
+**Resolution:** Implement PKCE (Proof Key for Code Exchange). The mobile app generates a random `code_verifier` (128 characters), computes `code_challenge = SHA256(code_verifier)`, and sends the challenge in the authorization request. When exchanging the code for tokens, the app sends the `code_verifier`. The authorization server verifies that `SHA256(code_verifier)` matches the `code_challenge`. Even if the attacker intercepts the authorization code, they cannot exchange it without the `code_verifier`, which never leaves the app.
 
 ```java
-@Configuration
-public class JwtConfig {
+// PKCE code challenge generation in mobile app
+SecureRandom secureRandom = new SecureRandom();
+byte[] codeVerifierBytes = new byte[96];  // 96 bytes → 128 base64 chars
+secureRandom.nextBytes(codeVerifierBytes);
+String codeVerifier = Base64.getUrlEncoder().withoutPadding()
+    .encodeToString(codeVerifierBytes);
 
-    @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri}")
-    private String issuerUri;
+MessageDigest md = MessageDigest.getInstance("SHA-256");
+byte[] challengeBytes = md.digest(codeVerifier.getBytes(StandardCharsets.US_ASCII));
+String codeChallenge = Base64.getUrlEncoder().withoutPadding()
+    .encodeToString(challengeBytes);
 
-    @Bean
-    public ReactiveJwtDecoder jwtDecoder() {
-        return NimbusReactiveJwtDecoder.withJwkSetUri(
-                issuerUri + "/.well-known/jwks.json")
-            .jwsAlgorithm(SignatureAlgorithm.RS256)
-            .build();
-    }
-}
-
-// Custom JWT validator
-@Component
-public class CustomJwtValidator implements ReactiveOAuth2TokenValidator<Jwt> {
-
-    private static final String EXPECTED_AUDIENCE = "api.example.com";
-
-    @Override
-    public Mono<OAuth2TokenValidatorResult> validate(Jwt jwt) {
-        List<OAuth2Error> errors = new ArrayList<>();
-
-        // Validate audience
-        if (!jwt.getAudience().contains(EXPECTED_AUDIENCE)) {
-            errors.add(new OAuth2Error("invalid_audience",
-                "Audience does not match", null));
-        }
-
-        // Validate issuer
-        if (!"https://auth.example.com".equals(jwt.getIssuer().toString())) {
-            errors.add(new OAuth2Error("invalid_issuer",
-                "Issuer mismatch", null));
-        }
-
-        // Validate token type
-        if (!"Bearer".equals(jwt.getClaimAsString("token_type"))) {
-            errors.add(new OAuth2Error("invalid_token_type",
-                "Token type must be Bearer", null));
-        }
-
-        if (errors.isEmpty()) {
-            return Mono.just(OAuth2TokenValidatorResult.success());
-        }
-        return Mono.just(OAuth2TokenValidatorResult.failure(errors));
-    }
-}
+// Send with authorization request
+authRequestUri += "&code_challenge=" + codeChallenge + "&code_challenge_method=S256";
 ```
 
-### Authorization Code Flow with Spring Security
-
-```java
-@Configuration
-@EnableWebSecurity
-public class OAuth2LoginConfig {
-
-    @Bean
-    public SecurityFilterChain loginFilterChain(HttpSecurity http) throws Exception {
-        return http
-            .oauth2Login(oauth2 -> oauth2
-                .loginPage("/oauth2/authorization/my-oauth2-provider")
-                .authorizationEndpoint(auth -> auth
-                    .authorizationRequestResolver(
-                        customAuthorizationRequestResolver())
-                )
-                .tokenEndpoint(token -> token
-                    .accessTokenResponseClient(
-                        customAccessTokenResponseClient())
-                )
-                .userInfoEndpoint(userInfo -> userInfo
-                    .userService(customOAuth2UserService())
-                )
-                .successHandler((request, response, authentication) -> {
-                    OAuth2User oAuth2User = (OAuth2User) authentication.getPrincipal();
-                    // Create or update local user
-                    userService.syncUser(oAuth2User);
-                    response.sendRedirect("/dashboard");
-                })
-                .failureHandler((request, response, exception) -> {
-                    response.sendRedirect("/login?error=" +
-                        exception.getMessage());
-                })
-            )
-            .build();
-    }
-
-    private OAuth2AuthorizationRequestResolver customAuthorizationRequestResolver() {
-        DefaultOAuth2AuthorizationRequestResolver resolver =
-            new DefaultOAuth2AuthorizationRequestResolver(
-                clientRegistrationRepository,
-                OAuth2AuthorizationRequestRedirectFilter
-                    .DEFAULT_AUTHORIZATION_REQUEST_BASE_URI);
-        resolver.setAuthorizationRequestCustomizer(customizer -> {
-            customizer.additionalParameters(params -> {
-                params.put("access_type", "offline");
-                params.put("prompt", "consent");
-            });
-        });
-        return resolver;
-    }
-}
-```
-
-### OAuth2 Client Credentials Grant
-
-```java
-@Service
-public class ClientCredentialsService {
-
-    private final OAuth2AuthorizedClientManager authorizedClientManager;
-
-    public ClientCredentialsService(
-            OAuth2AuthorizedClientManager authorizedClientManager) {
-        this.authorizedClientManager = authorizedClientManager;
-    }
-
-    public String getAccessToken() {
-        OAuth2AuthorizeRequest authorizeRequest = OAuth2AuthorizeRequest
-            .withClientRegistrationId("my-client")
-            .principal(new AnonymousAuthenticationToken(
-                "anonymous", "system",
-                List.of(new SimpleGrantedAuthority("ROLE_SYSTEM"))))
-            .build();
-
-        OAuth2AuthorizedClient authorizedClient =
-            authorizedClientManager.authorize(authorizeRequest);
-
-        return authorizedClient.getAccessToken().getTokenValue();
-    }
-
-    public String callApiWithClientCredentials() {
-        String token = getAccessToken();
-
-        RestClient restClient = RestClient.builder()
-            .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + token)
-            .build();
-
-        return restClient.get()
-            .uri("https://api.example.com/protected/resource")
-            .retrieve()
-            .body(String.class);
-    }
-}
-```
-
-### OAuth2 Client with RestClient
-
-```java
-@Configuration
-public class OAuth2ClientConfig {
-
-    @Bean
-    public OAuth2AuthorizedClientManager authorizedClientManager(
-            ClientRegistrationRepository clientRegistrationRepository,
-            OAuth2AuthorizedClientRepository authorizedClientRepository) {
-
-        OAuth2AuthorizedClientProvider authorizedClientProvider =
-            OAuth2AuthorizedClientProviderBuilder.builder()
-                .authorizationCode()
-                .refreshToken()
-                .clientCredentials()
-                .password()
-                .build();
-
-        DefaultOAuth2AuthorizedClientManager authorizedClientManager =
-            new DefaultOAuth2AuthorizedClientManager(
-                clientRegistrationRepository, authorizedClientRepository);
-        authorizedClientManager.setAuthorizedClientProvider(
-            authorizedClientProvider);
-
-        return authorizedClientManager;
-    }
-
-    @Bean
-    public RestClient restClient(
-            OAuth2AuthorizedClientManager authorizedClientManager) {
-        return RestClient.builder()
-            .requestInterceptor((request, body, execution) -> {
-                OAuth2AuthorizeRequest authorizeRequest = OAuth2AuthorizeRequest
-                    .withClientRegistrationId("my-client")
-                    .principal("system")
-                    .build();
-                OAuth2AuthorizedClient client =
-                    authorizedClientManager.authorize(authorizeRequest);
-                request.getHeaders().setBearerAuth(
-                    client.getAccessToken().getTokenValue());
-                return execution.execute(request, body);
-            })
-            .build();
-    }
-}
-```
-
-### Refresh Token Handling
-
-```java
-@Component
-public class RefreshTokenService {
-
-    private final OAuth2AuthorizedClientService authorizedClientService;
-
-    public RefreshTokenService(
-            OAuth2AuthorizedClientService authorizedClientService) {
-        this.authorizedClientService = authorizedClientService;
-    }
-
-    public OAuth2AccessToken refreshAccessToken(
-            String clientRegistrationId,
-            Principal principal) {
-
-        OAuth2AuthorizedClient client = authorizedClientService
-            .loadAuthorizedClient(clientRegistrationId, principal.getName());
-
-        if (client == null || client.getRefreshToken() == null) {
-            throw new OAuth2AuthorizationException(
-                "No refresh token available");
-        }
-
-        // The refresh is handled automatically by
-        // OAuth2AuthorizedClientProvider when using
-        // OAuth2AuthorizedClientManager
-        return client.getAccessToken();
-    }
-}
-```
-
-### Custom OAuth2 User Service
-
-```java
-@Component
-public class CustomOAuth2UserService
-        extends DefaultOAuth2UserService {
-
-    private final UserService userService;
-
-    public CustomOAuth2UserService(UserService userService) {
-        this.userService = userService;
-    }
-
-    @Override
-    public OAuth2User loadUser(OAuth2UserRequest userRequest)
-            throws OAuth2AuthenticationException {
-
-        OAuth2User oAuth2User = super.loadUser(userRequest);
-
-        try {
-            return processOAuth2User(userRequest, oAuth2User);
-        } catch (Exception ex) {
-            throw new OAuth2AuthenticationException(
-                "Failed to process user: " + ex.getMessage());
-        }
-    }
-
-    private OAuth2User processOAuth2User(
-            OAuth2UserRequest userRequest,
-            OAuth2User oAuth2User) {
-
-        String registrationId = userRequest
-            .getClientRegistration().getRegistrationId();
-        String email = oAuth2User.getAttribute("email");
-        String name = oAuth2User.getAttribute("name");
-
-        Optional<User> existingUser = userService.findByEmail(email);
-
-        User user;
-        if (existingUser.isPresent()) {
-            user = existingUser.get();
-            user.setLastLogin(Instant.now());
-            user = userService.update(user);
-        } else {
-            user = userService.createOAuth2User(
-                email, name, registrationId);
-        }
-
-        return new DefaultOAuth2User(
-            List.of(new SimpleGrantedAuthority("ROLE_USER")),
-            oAuth2User.getAttributes(),
-            "email");
-    }
-}
-```
-
-### Token Revocation
-
-```java
-@Component
-public class TokenRevocationService {
-
-    private final RestClient restClient;
-
-    public TokenRevocationService() {
-        this.restClient = RestClient.builder()
-            .baseUrl("https://auth.example.com")
-            .build();
-    }
-
-    public void revokeAccessToken(String token, String clientId,
-                                 String clientSecret) {
-        String body = "token=" + URLEncoder.encode(token, StandardCharsets.UTF_8) +
-            "&token_type_hint=access_token" +
-            "&client_id=" + URLEncoder.encode(clientId, StandardCharsets.UTF_8) +
-            "&client_secret=" + URLEncoder.encode(clientSecret, StandardCharsets.UTF_8);
-
-        restClient.post()
-            .uri("/oauth2/revoke")
-            .header(HttpHeaders.CONTENT_TYPE,
-                MediaType.APPLICATION_FORM_URLENCODED_VALUE)
-            .body(body)
-            .retrieve()
-            .toBodilessEntity();
-    }
-
-    public void revokeRefreshToken(String token, String clientId,
-                                  String clientSecret) {
-        String body = "token=" + URLEncoder.encode(token, StandardCharsets.UTF_8) +
-            "&token_type_hint=refresh_token" +
-            "&client_id=" + URLEncoder.encode(clientId, StandardCharsets.UTF_8) +
-            "&client_secret=" + URLEncoder.encode(clientSecret, StandardCharsets.UTF_8);
-
-        restClient.post()
-            .uri("/oauth2/revoke")
-            .header(HttpHeaders.CONTENT_TYPE,
-                MediaType.APPLICATION_FORM_URLENCODED_VALUE)
-            .body(body)
-            .retrieve()
-            .toBodilessEntity();
-    }
-}
-```
-
-### Custom Access Token Response Client
-
-```java
-@Component
-public class CustomAccessTokenResponseClient
-        implements OAuth2AccessTokenResponseClient<OAuth2AuthorizationCodeGrantRequest> {
-
-    private final RestClient restClient;
-
-    public CustomAccessTokenResponseClient() {
-        this.restClient = RestClient.create();
-    }
-
-    @Override
-    public OAuth2AccessTokenResponse getTokenResponse(
-            OAuth2AuthorizationCodeGrantRequest request) {
-
-        ClientRegistration registration = request.getClientRegistration();
-
-        String body = "grant_type=authorization_code" +
-            "&code=" + request.getAuthorizationExchange()
-                .getAuthorizationResponse().getCode() +
-            "&redirect_uri=" + registration.getRedirectUri() +
-            "&client_id=" + registration.getClientId() +
-            "&client_secret=" + registration.getClientSecret();
-
-        if (request.getAuthorizationExchange()
-                .getAuthorizationRequest()
-                .getAdditionalParameters()
-                .containsKey("code_verifier")) {
-            body += "&code_verifier=" + request.getAuthorizationExchange()
-                .getAuthorizationRequest()
-                .getAdditionalParameters().get("code_verifier");
-        }
-
-        TokenResponse tokenResponse = restClient.post()
-            .uri(registration.getProviderDetails().getTokenUri())
-            .header(HttpHeaders.CONTENT_TYPE,
-                MediaType.APPLICATION_FORM_URLENCODED_VALUE)
-            .body(body)
-            .retrieve()
-            .body(TokenResponse.class);
-
-        return OAuth2AccessTokenResponse
-            .withToken(tokenResponse.accessToken())
-            .tokenType(OAuth2AccessToken.TokenType.BEARER)
-            .expiresIn(tokenResponse.expiresIn())
-            .refreshToken(tokenResponse.refreshToken())
-            .scopes(Set.of(tokenResponse.scope().split(" ")))
-            .build();
-    }
-
-    private record TokenResponse(
-        String accessToken,
-        long expiresIn,
-        String refreshToken,
-        String scope,
-        String tokenType
-    ) {}
-}
-```
-
-## 5. Real-World Scenarios
-
-### Scenario 1: Social Login Integration
-
-```
-User clicks "Login with Google"
-  -> Redirect to Google OAuth2
-  -> User consents
-  -> Google redirects back with code
-  -> Backend exchanges code for tokens
-  -> Backend fetches user info from Google
-  -> Local user is created/updated
-  -> JWT session token is issued
-```
-
-### Scenario 2: Service-to-Service Authentication
-
-```
-Service A (Payment Service)
-  -> Client Credentials Grant -> Auth Server
-  <- Access Token
-  -> API call with Bearer token -> Service B (Order Service)
-  -> Service B validates token -> Resource Server config
-  -> Authorized request processed
-```
-
-### Scenario 3: Mobile App with PKCE
-
-```
-Mobile App
-  -> Generates code_verifier (128 chars random)
-  -> Computes code_challenge = SHA256(code_verifier)
-  -> Opens browser for authorization with code_challenge
-  -> Authorization Server redirects with code
-  -> App exchanges code + code_verifier for tokens
-  -> Stores access_token and refresh_token securely
-```
-
-## 6. Performance
-
-### Token Validation Performance
-
-- **Local JWT Validation**: Fastest (no network call), validate signature with JWK.
-- **Remote Token Introspection**: Slower (network call), but allows immediate revocation.
-- **Hybrid**: Cache introspection results for performance.
-
-### Token Caching
-
-```java
-@Component
-public class CachedTokenIntrospector {
-
-    private final CacheManager cacheManager;
-
-    public CachedTokenIntrospector(CacheManager cacheManager) {
-        this.cacheManager = cacheManager;
-    }
-
-    public OAuth2AuthenticatedPrincipal introspect(String token) {
-        Cache cache = cacheManager.getCache("token-introspection");
-        Cache.ValueWrapper cached = cache.get(token);
-
-        if (cached != null) {
-            return (OAuth2AuthenticatedPrincipal) cached.get();
-        }
-
-        OAuth2AuthenticatedPrincipal principal = doIntrospect(token);
-        cache.put(token, principal);
-        return principal;
-    }
-
-    private OAuth2AuthenticatedPrincipal doIntrospect(String token) {
-        // Call introspection endpoint
-        // ...
-    }
-}
-```
-
-## 7. Security
-
-### OAuth 2.0 Security Best Practices
-
-- **Always use PKCE** for mobile and public clients.
-- **Use short-lived access tokens** (15-60 minutes).
-- **Use refresh tokens** for long-lived sessions.
-- **Store client secrets securely** (environment variables, vault).
-- **Validate redirect URIs** strictly.
-- **Use HTTPS** for all endpoints.
-- **Implement CSRF protection** for authorization callback.
-- **Rotate refresh tokens** on each use (refresh token rotation).
-- **Sender-Constrained Tokens**: Use DPoP (Demonstration of Proof-of-Possession) or mTLS.
-
-### Common OAuth 2.0 Attacks
-
-| Attack | Prevention |
-|--------|------------|
-| Authorization Code Interception | PKCE |
-| CSRF on redirect | State parameter (anti-CSRF token) |
-| Redirect URI manipulation | Strict redirect URI validation |
-| Open Redirector | Validate redirect URIs |
-| Token Theft | Short expiry, refresh token rotation |
-| Client Impersonation | Client authentication (secret/certificate) |
-
-## 8. Common Mistakes
-
-- **Not using PKCE for public clients**: Mobile and SPA apps must use PKCE.
-- **Storing tokens insecurely**: Use httpOnly cookies or secure storage.
-- **Long-lived access tokens**: Use short expiry + refresh tokens.
-- **Not validating redirect URIs**: Can lead to open redirect vulnerabilities.
-- **Missing state parameter**: Vulnerable to CSRF attacks.
-- **Hardcoded client secrets**: Use environment variables or vaults.
-- **Not refreshing tokens proactively**: Implement token refresh before expiry.
-- **Sharing access tokens across services**: Each service should use its own scope.
-- **No token revocation**: Implement revoke endpoint for logout and compromise.
-
-## 9. Senior Engineer Perspective
-
-### OAuth 2.1 Improvements
-
-OAuth 2.1 consolidates best practices from OAuth 2.0:
-- PKCE is required for all public clients.
-- Implicit grant is removed.
-- Resource Owner Password Credentials grant is removed.
-- Refresh tokens must be sender-constrained or rotate.
-- Redirect URIs must use exact matching.
-
-### Token Exchange and Delegation
-
-```java
-// Token Exchange (RFC 8693)
-// Used for impersonation or delegation
-POST /oauth2/token
-Content-Type: application/x-www-form-urlencoded
-
-grant_type=urn:ietf:params:oauth:grant-type:token-exchange
-&subject_token=ACCESS_TOKEN
-&subject_token_type=urn:ietf:params:oauth:token-type:access_token
-&requested_token_type=urn:ietf:params:oauth:token-type:access_token
-&audience=https://api.downstream.example.com
-```
-
-### OAuth 2.0 in Microservices
-
-```
-API Gateway
-  |-- Validates access token (JWT or introspection)
-  |-- Passes token downstream
-  |-- Downstream services validate token locally (JWT)
-  |-- OR use token exchange for service-specific tokens
-```
-
-## 10. Interview Questions (Easy)
-
-1. What is OAuth 2.0 and what problem does it solve?
-2. What are the four roles in OAuth 2.0?
-3. What is an access token?
-4. What is a refresh token?
-5. What is the difference between OAuth 2.0 and OpenID Connect?
-6. What is the Authorization Code grant?
-7. What is the Client Credentials grant?
-8. What is the purpose of the redirect URI?
-9. What is the state parameter in OAuth 2.0?
-10. What is the difference between OAuth and basic authentication?
-
-## Medium
-
-1. What is PKCE and why is it needed?
-2. How does the Authorization Code flow work step by step?
-3. What is JWT and how does it relate to OAuth 2.0?
-4. How do you implement token revocation?
-5. What is the difference between opaque tokens and JWT access tokens?
-6. How do you handle token refresh in a mobile app?
-7. What is the difference between bearer tokens and sender-constrained tokens?
-8. How does OAuth 2.0 work with Spring Security?
-9. What are OAuth 2.0 scopes and how do they work?
-10. What is the difference between authorization and authentication?
-
-## 11. Advanced Interview Questions (Hard)
-
-1. Design an OAuth 2.0 authorization server from scratch.
-2. How would you implement refresh token rotation with automatic revocation of old tokens?
-3. Design a multi-tenant OAuth 2.0 system where each tenant has its own identity provider.
-4. How do you implement DPoP (Demonstration of Proof-of-Possession) for token binding?
-5. Design an OAuth 2.0 token exchange system for service-to-service delegation.
-6. How would you implement a custom grant type for IoT devices?
-7. Design a cross-domain single sign-on (SSO) system using OAuth 2.0.
-8. How do you handle OAuth 2.0 in a microservices architecture with an API gateway?
-9. Implement a token introspection cache with automatic invalidation.
-10. How would you migrate from OAuth 2.0 to OAuth 2.1?
-
-## System Design
-
-1. Design an OAuth 2.0-based authentication system for a SaaS platform.
-2. Design a distributed OAuth 2.0 authorization server across multiple regions.
-3. Design an OAuth 2.0 API gateway with centralized token validation.
-4. Design a multi-provider OAuth 2.0 login system (Google, GitHub, Facebook, Apple).
-5. Design an OAuth 2.0-based permission system for a collaborative document platform.
-6. Design a token management system with automatic rotation and revocation.
-7. Design an OAuth 2.0 authorization flow for a mobile app with biometric authentication.
-8. Design a zero-trust architecture using OAuth 2.0 and mutual TLS.
-9. Design an OAuth 2.0 system for a B2B API platform with customer-managed identities.
-10. Design an OAuth 2.0-based delegated admin system for multi-tenant SaaS.
-
-## 12. Expert-Level Interview Questions (Architect-Level)
-
-1. Design a global OAuth 2.0/OpenID Connect identity platform supporting 100M+ users across 50 regions with sub-second token issuance latency.
-2. How would you implement a dynamic client registration system with automatic scope discovery and consent management?
-3. Design an OAuth 2.0-based capability-based security model for a distributed system with thousands of services.
-4. How would you implement a token exchange protocol that supports both impersonation and delegation across organizational boundaries?
-5. Design a continuous authentication system that extends OAuth 2.0 with risk-based step-up authentication.
-6. How would you build a federated OAuth 2.0 system that bridges on-premise and cloud identity providers?
-7. Design an OAuth 2.0 authorization system for a IoT platform with millions of devices using the device authorization grant.
-8. How would you implement a real-time token revocation system that propagates revocations across all services within seconds?
-9. Design an OAuth 2.0 audit and compliance system that tracks every authorization decision, token issuance, and API access.
-10. How would you design a strategy for gradual OAuth 2.0 adoption across a legacy enterprise with existing session-based authentication?
-
-## 13. Debugging & Troubleshooting
-
-### Common Issues
-
-- **Invalid grant**: Authorization code expired or already used.
-- **Invalid redirect URI**: Redirect URI does not match registered URIs.
-- **Invalid client**: Client ID or secret is incorrect.
-- **Access denied**: User did not consent to requested scopes.
-- **Token expired**: Access token has expired, need to refresh.
-- **Invalid scope**: Requested scope is not registered for the client.
-- **SSL errors**: Certificate validation failures in token endpoint calls.
-
-### Debugging OAuth 2.0 Flows
-
-```java
-@Component
-public class OAuth2DebugFilter implements Filter {
-
-    @Override
-    public void doFilter(ServletRequest request, ServletResponse response,
-                        FilterChain chain) throws IOException, ServletException {
-        HttpServletRequest httpRequest = (HttpServletRequest) request;
-
-        if (httpRequest.getRequestURI().contains("oauth2")) {
-            log.debug("OAuth2 request: {} {}",
-                httpRequest.getMethod(), httpRequest.getRequestURI());
-            Collections.list(httpRequest.getParameterNames())
-                .forEach(name -> {
-                    if (!name.contains("secret") && !name.contains("token")) {
-                        log.debug("  param: {} = {}", name,
-                            httpRequest.getParameter(name));
-                    }
-                });
-        }
-
-        chain.doFilter(request, response);
-    }
-}
-```
-
-## 14. Comparison Section
-
-### OAuth 2.0 vs SAML 2.0
-
-| Aspect | OAuth 2.0 | SAML 2.0 |
-|--------|-----------|----------|
-| Protocol | JSON/REST | XML/SOAP |
-| Token Format | JWT or opaque | SAML Assertion (XML) |
-| Use Case | Authorization & delegated access | Enterprise SSO |
-| Mobile Support | Excellent | Poor |
-| Modern Web | Yes | No |
-| Complexity | Low | High |
-| Standard | IETF RFCs | OASIS |
-
-### OAuth 2.0 vs OpenID Connect (OIDC)
-
-| Aspect | OAuth 2.0 | OIDC |
-|--------|-----------|------|
-| Purpose | Authorization | Authentication |
-| Token | Access Token | ID Token (JWT) |
-| User Info | Not defined | UserInfo endpoint |
-| Profile | Authorization framework | Authentication layer on OAuth 2.0 |
-| Standard | RFC 6749 | OpenID Foundation |
-
-## 15. Revision Notes
-
-- OAuth 2.0: delegated authorization framework
-- 4 roles: Resource Owner, Client, Authorization Server, Resource Server
-- Grant types: Authorization Code, Client Credentials, Device Code, Refresh Token
-- PKCE: code_verifier + code_challenge for public clients
-- Access tokens: short-lived, Bearer typically JWT
-- Refresh tokens: long-lived, used to get new access tokens
-- Scopes define what the client can access
-- State parameter prevents CSRF attacks
-- Spring Security: `@EnableWebSecurity`, `oauth2Login()`, `oauth2ResourceServer()`
-- OAuth 2.1: PKCE required, Implicit removed, Password removed
-
-## 16. Cheat Sheet
-
-```
-+------------------------------------------------------------------+
-| OAUTH 2.0 CHEAT SHEET                                            |
-+------------------------------------------------------------------+
-| ROLES                                                            |
-|   Resource Owner  -> User who owns the data                      |
-|   Client          -> App requesting access                       |
-|   Authorization   -> Issues tokens                               |
-|   Server                                                         |
-|   Resource Server -> Hosts protected data                        |
-+------------------------------------------------------------------+
-| GRANT TYPES                                                      |
-|   Authorization Code  -> Web apps (with PKCE for mobile)         |
-|   Client Credentials  -> Server-to-server                        |
-|   Device Code         -> Smart TVs, IoT                          |
-|   Refresh Token       -> Get new access tokens                   |
-+------------------------------------------------------------------+
-| TOKEN ENDPOINT PARAMETERS                                        |
-|   grant_type: authorization_code | client_credentials | ...      |
-|   code:         The authorization code                           |
-|   redirect_uri: Must match authorization request                 |
-|   client_id:    Client identifier                                |
-|   client_secret: Client secret (confidential clients)            |
-|   code_verifier: PKCE verifier (public clients)                  |
-+------------------------------------------------------------------+
-| SPRING BOOT CONFIGURATION KEYS                                   |
-|   spring.security.oauth2.client.registration.*                  |
-|   spring.security.oauth2.client.provider.*                      |
-|   spring.security.oauth2.resourceserver.jwt.*                   |
-+------------------------------------------------------------------+
-| COMMON ENDPOINTS                                                 |
-|   /oauth2/authorize    -- Authorization endpoint                 |
-|   /oauth2/token        -- Token endpoint                         |
-|   /oauth2/revoke       -- Revocation endpoint                    |
-|   /oauth2/introspect   -- Introspection endpoint                 |
-|   /.well-known/jwks.json -- JWK Set endpoint                    |
-|   /.well-known/openid-configuration -- OIDC discovery           |
-+------------------------------------------------------------------+
-| SECURITY CHECKLIST                                               |
-|   [ ] Use HTTPS everywhere                                       |
-|   [ ] PKCE for all public clients                                |
-|   [ ] Validate redirect URIs strictly                            |
-|   [ ] Use state parameter for CSRF protection                    |
-|   [ ] Short access token TTL (15-60 min)                        |
-|   [ ] Rotate refresh tokens                                      |
-|   [ ] Validate all token claims (iss, aud, exp, iat)            |
-|   [ ] Store secrets in vault/env vars                           |
-|   [ ] Implement token revocation                                |
-+------------------------------------------------------------------+
-```
+### Scenario 2: Microservice Authorization Without Centralized Token Validation
+**Context:** A platform with 15 microservices initially validates OAuth tokens by calling the Authorization Server's introspection endpoint on every request. This creates 15× the load on the Auth Server and adds 30-50ms of latency per request. During peak traffic, the Auth Server becomes a bottleneck, causing cascading failures.
+
+**Resolution:** Switch to JWT-based access tokens signed with RS256. Each service fetches the public keys from the Auth Server's JWKS endpoint once (cached for hours) and validates tokens locally. Token introspection is eliminated from the request path. The Auth Server now only handles token issuance and occasional key rotation. This reduces per-request validation time from 50ms to <1ms and removes the Auth Server as a bottleneck. Trade-off: token revocation is no longer immediate — use short token TTLs (15 min) combined with a distributed blacklist for emergency revocations.
+
+### Scenario 3: Cross-Origin Logout with Multiple Clients
+**Context:** A user is logged into three apps: a web app (SPA), a mobile app, and a desktop app. All use the same OAuth authorization server. The user logs out from the SPA, but the mobile and desktop apps still have valid sessions. The user expects all sessions to be terminated.
+
+**Resolution:** Implement a centralized logout (Single Logout / SLO). The SPA calls the Auth Server's `/logout` endpoint with the ID token hint. The Auth Server: (1) invalidates all refresh tokens for the user, (2) redirects to each registered client's post-logout URI (OpenID Connect Front-Channel or Back-Channel Logout), and (3) clears the Auth Server session. Each client receives a logout notification and clears its local session. For apps that are offline, the session remains valid until token expiry (trade-off: SLO is best-effort, not guaranteed).
+
+---
+
+## Scenario-Based Questions
+
+1. **Q: Your mobile app's OAuth implementation doesn't use PKCE. A security auditor flags this as critical. The app runs on both iOS and Android, and the authorization server supports PKCE. What changes do you make?**
+   - A: (1) Generate a cryptographically random `code_verifier` on the client (128 chars, base64url). (2) Compute `code_challenge = SHA256(code_verifier)`. (3) Add `code_challenge` and `code_challenge_method=S256` to the authorization request. (4) Send `code_verifier` with the token exchange request. (5) The Auth Server verifies the challenge and rejects if it doesn't match. Even if an attacker intercepts the authorization code via a malicious app or man-in-the-middle, they cannot exchange it without the `code_verifier`. PKCE is required by OAuth 2.1 and recommended even for confidential clients as defense-in-depth.
+
+2. **Q: Your SPA uses the Implicit Grant (OAuth 2.0). The access token is in the URL fragment. An attacker exploits an XSS vulnerability in the SPA and steals the token from memory. How do you mitigate this, and why should you move away from Implicit Grant?**
+   - A: Implicit Grant is deprecated in OAuth 2.1. Problems: (1) Token in URL fragment is exposed in browser history and server logs. (2) No refresh token support (SPAs were considered unable to protect client secrets). (3) No token binding — if stolen, the token is usable from any client. Migration path: switch to Authorization Code with PKCE. The Auth Server redirects with an authorization code (not a token), which is exchanged server-side (or via web worker in the SPA). PKCE protects against code interception. Refresh tokens can be issued as httpOnly cookies. This provides a more secure, standards-compliant solution.
+
+3. **Q: Your OAuth authorization server issues access tokens with a symmetric key (HS256). You have 20 resource servers that all need to validate tokens. A developer accidentally commits the HS256 secret to a public repository. What do you do?**
+   - A: (1) Rotate the HS256 secret immediately — generate a new one. (2) Invalidate all existing tokens (force re-authentication or re-issue). (3) All 20 resource servers need the new secret — coordinated deployment required. (4) Migrate to RS256 (asymmetric): the Auth Server uses a private key to sign, resource servers use a public key from JWKS. No shared secret to leak. Key rotation is simpler — update JWKS, no coordinated deployments to 20 services. This is the standard recommendation for distributed systems with multiple resource servers.
+
+4. **Q: A user reports that when they click "Login with Google" on your app, the redirect brings them back to an error page saying "Invalid state parameter." Users who don't see this error can log in fine. What is happening, and how do you fix it?**
+   - A: The `state` parameter is a CSRF token sent in the authorization request and validated on callback. The error means the state in the callback doesn't match the state stored in the session. Causes: (1) Browser privacy settings (Safari ITP, Firefox Enhanced Tracking Protection) may clear session storage between the redirect and callback. (2) The user opened the authorization URL in a new tab/window. (3) Multiple tabs: state from one tab is overwritten by another. Fix: store state in sessionStorage (not localStorage) and validate. For browsers that clear session on redirect, use a stateless approach: `state = HMAC(secureRandom, session_id)` — validate without server-side storage.
+
+5. **Q: Your API allows both first-party (your own app) and third-party (external developer) clients. Both use OAuth 2.0. A third-party app has a bug that sends 1000 token requests per second, overloading the authorization server. How do you protect the Auth Server without blocking legitimate traffic?**
+   - A: (1) Rate limit per client ID: max 10 token requests per second per client. (2) Separate queues for first-party and third-party token requests — first-party always has priority. (3) Implement client authentication with stronger measures for third-party apps: require `client_assertion` (JWT signed by the client) instead of simple `client_secret`. (4) Monitor and auto-throttle clients showing anomalous behavior. (5) Charge by API usage (or enforce tiers) to disincentivize abuse. (6) Use a CDN/WAF to absorb DDoS-level traffic before it reaches the Auth Server.
+
+6. **Q: Your OAuth implementation has a single redirect URI for all environments (localhost, staging, production). A developer debugging locally uses a different port and the authorization code never arrives. How do you handle multiple redirect URIs securely?**
+   - A: (1) Register separate client IDs for each environment (dev, staging, prod) — each with its own redirect URIs. (2) Use exact URI matching (OAuth 2.1 requires this): register `http://localhost:3000/callback`, `https://staging.example.com/callback`, `https://example.com/callback`. (3) Never use wildcard or pattern matching — an attacker could register `https://evil.com` with a redirect_uri starting with `https://example.com`. (4) For local development, use tools like `ngrok` with a stable URL instead of localhost. (5) Validate redirect URIs on the server side with a strict allowlist that rejects unexpected URIs.
+
+7. **Q: A user grants your app access to their Google Drive via OAuth 2.0 with scope `drive.readonly`. Three months later, your app is hacked. The attacker uses the stored refresh token to access the user's Google Drive. The user didn't revoke access. How do you design your system to minimize damage from this scenario?**
+   - A: (1) Never store refresh tokens indefinitely: invalidate them if not used for 30 days. (2) Use refresh token rotation: each use issues a new token, old one is invalidated. Theft is detected when the attacker's use invalidates the user's token. (3) Bind the refresh token to the client: use DPoP (Demonstration of Proof-of-Possession) to tie the token to a specific client key pair. A stolen token is useless without the corresponding private key. (4) Request minimal scopes: `drive.metadata.readonly` instead of `drive.readonly` — less data exposed if compromised. (5) Monitor for anomalous usage patterns (new IP, new device) and revoke on suspicion.
+
+8. **Q: Your API gateway validates OAuth tokens and passes them downstream. Service A needs to call Service B on behalf of the user. Service B checks the token's `aud` claim and rejects it because it was issued for Service A. How do you handle this without user re-authentication?**
+   - A: (1) Use the OAuth Token Exchange extension (RFC 8693): Service A calls the Auth Server with the user's token and requests a new token for Service B. The Auth Server validates the delegation and issues a new token with `aud: "service-b"`. (2) Use a token exchange API in your Auth Server that accepts the current token and returns a service-specific token. (3) Alternatively, use a "user context" token: a signed JWT containing user identity and claims that all internal services accept without audience validation (trade-off: less secure, but simpler). Recommended approach: token exchange for clear audit trail and scoped permissions.
+
+9. **Q: Your OAuth server issues only opaque tokens (reference tokens). Every resource server must call the introspection endpoint to validate. During peak load, the introspection endpoint times out, causing all authenticated requests to fail. How do you solve this without migrating to JWTs immediately?**
+   - A: (1) Cache introspection results: cache the token's validity for 5 minutes (or whatever the token's remaining TTL is). This is safe because opaque tokens are valid until expiry. (2) Use a distributed cache (Redis) shared across all resource servers. (3) Fallback behavior: if introspection times out, allow the request with degraded access (cache the decision for 30 seconds). (4) Circuit breaker on the introspection client: if error rate > 50%, serve from cache for 60 seconds. (5) Parallel migration to JWTs: run both opaque and JWT tokens in parallel during a transition period.
+
+10. **Q: Your app uses OpenID Connect for authentication. A user logs in, and you receive an ID token with `nonce` claim. What is the `nonce` for, and what happens if you don't validate it?**
+    - A: The `nonce` parameter prevents replay attacks on ID tokens. Your app generates a random `nonce` and sends it with the authentication request. The ID token includes this `nonce`. You validate that the ID token's `nonce` matches what you sent. Without `nonce` validation, an attacker could intercept an ID token (from a previous session) and replay it to impersonate the user. This is especially important for implicit/hybrid flows where the ID token is returned directly in the redirect. Store the `nonce` in session and validate before creating a session.
+
+---
+
+## Interview Questions
+
+1. **What are the four roles in OAuth 2.0?**
+   - A: Resource Owner (the user who authorizes access), Client (the application requesting access), Authorization Server (issues tokens after authentication), Resource Server (validates tokens, serves protected data).
+
+2. **What is the difference between OAuth 2.0 and OpenID Connect?**
+   - A: OAuth 2.0 is an authorization framework — it issues access tokens for resource access. OpenID Connect (OIDC) adds an authentication layer on top: ID Token (JWT with user identity), UserInfo endpoint, and standardized scopes (openid, profile, email). OAuth = what you can do; OIDC = who you are.
+
+3. **What is PKCE and why is it needed?**
+   - A: PKCE (Proof Key for Code Exchange) protects public clients (mobile apps, SPAs) against authorization code interception. The client generates a random `code_verifier`, sends its hash as `code_challenge` in the auth request, then proves possession by sending the `code_verifier` in the token request. Even if an attacker intercepts the authorization code, they can't exchange it without the verifier.
+
+4. **How does the Authorization Code flow work?**
+   - A: 1) Client redirects user to Auth Server with client_id, redirect_uri, scope, state. 2) User authenticates and consents. 3) Auth Server redirects back with authorization code. 4) Client exchanges code + client_secret (and PKCE verifier for public clients) server-side. 5) Auth Server returns access token + refresh token.
+
+5. **What is the Client Credentials grant used for?**
+   - A: Server-to-server communication where no user is involved. The client authenticates with its own credentials (client_id + client_secret or client assertion) and receives an access token directly. Used for backend services calling APIs, cron jobs, and inter-service communication.
+
+6. **What is the state parameter and why is it important?**
+   - A: A random value sent in the authorization request and validated on callback. Prevents CSRF attacks on the OAuth redirect flow — an attacker cannot inject a malicious authorization code because they don't know the user's state value. Implemented using session storage or HMAC-based stateless tokens.
+
+7. **How do you implement token revocation?**
+   - A: Call the Auth Server's `/oauth2/revoke` endpoint with the token and client credentials. For JWTs, also maintain a server-side blacklist by `jti`. On logout: revoke access token (or let it expire), invalidate refresh token server-side. OAuth 2.0 requires the revocation endpoint (RFC 7009).
+
+8. **What is the difference between scopes and roles?**
+   - A: Scopes define what a client can do on behalf of the user (e.g., `drive:read`, `email`). Roles define user permissions within the application (e.g., `ADMIN`, `MEMBER`). Scopes are OAuth concepts at the API level; roles are application-level authorization. Scopes = delegated permissions; roles = user privileges.
+
+9. **How do you handle OAuth 2.0 in a microservices architecture?**
+   - A: API Gateway validates tokens and passes them downstream. Services validate JWTs locally using cached JWKS. Internal service-to-service calls use Client Credentials grant or token exchange. Stateless session management with short-lived tokens. Avoid introspection calls in the request path.
+
+10. **What changes does OAuth 2.1 introduce?**
+    - A: PKCE required for all public clients. Implicit Grant removed (Authorization Code + PKCE replaces it). Resource Owner Password Credentials Grant removed. Refresh tokens must be sender-constrained (DPoP) or use rotation. Redirect URIs use exact matching (no patterns). These changes consolidate security best practices into the spec.
+
+---
+
+## Developer Recommendations
+
+- **Always use PKCE — even for confidential clients** — PKCE was designed for public clients, but it adds defense-in-depth for all clients. If a server's `client_secret` is leaked, PKCE still protects against authorization code interception. The implementation cost is minimal: a few extra random bytes and a hash. OAuth 2.1 requires PKCE for public clients. Make it a default for all OAuth flows, regardless of client type.
+
+- **Use JWT access tokens with asymmetricsignatures for distributed systems** — Opaque tokens require introspection on every request, creating a central bottleneck and adding 30-50ms latency per hop. JWT with RS256/ES256 enables local validation in <1ms using cached public keys from JWKS. The trade-off: token revocation is no longer immediate (valid until `exp`). Mitigate with short token lifetimes (15 min) and an optional blacklist for emergency revocations. The performance gain outweighs the revocation delay for most systems.
+
+- **Implement refresh token rotation with theft detection** — Refresh tokens are high-value targets (they issue new access tokens indefinitely). Rotation ensures each refresh token is single-use. If a stolen token is used, the legitimate user's next refresh fails, providing immediate theft detection. Combine rotation with device fingerprinting (IP, user-agent) for additional security. The trade-off: network failures during rotation can leave users logged out — mitigate with a 30-second grace period where the old token remains valid.
+
+- **Use the state parameter for CSRF protection** — Without state, an attacker can craft a malicious authorization request, intercept the callback, and inject the resulting authorization code into the user's session. This would grant the attacker access to the user's account. The state parameter links the authorization request to the callback using a cryptographically random value stored in the user's session. Validate state on every callback and reject mismatches.
+
+- **Centralize token validation in an API gateway** — In a microservices architecture, each service should not independently implement OAuth token validation. The API gateway validates tokens, extracts claims, and passes a standardized user context (by claims or a dedicated internal JWT) to downstream services. This ensures consistent policy enforcement, simplifies auditing, and reduces the attack surface. Internal services can trust the gateway without implementing their own validation logic.
+
+- **Plan for key rotation from day one** — Signing keys expire, are compromised, or need algorithm upgrades. From launch, support multiple keys in JWKS. Use the `kid` header to identify which key signed the token. When rotating: (1) add the new key to JWKS, (2) wait for all clients to fetch the updated JWKS (monitor cache duration), (3) start signing with the new key, (4) keep old keys in JWKS for token validation until all tokens signed with them expire. This phased approach prevents validation failures during the transition.

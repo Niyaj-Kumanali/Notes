@@ -1,597 +1,342 @@
-# Locking
+# Database Locking
 
-## 1. Executive Summary
+---
 
-Database locking is the mechanism that prevents concurrent transactions from interfering with each other while maintaining data consistency. Locks control access to database resources (rows, pages, tables) and implement isolation guarantees. Understanding locking is critical for building concurrent applications — too little locking causes data corruption, too much causes contention and deadlocks. In Spring Boot/JPA applications, the ORM and transaction manager interact with database locks in ways that can surprise developers who don't understand the underlying mechanisms.
+## What is Database Locking?
 
-## 2. Core Theory
+**Database locking** is the mechanism that prevents concurrent transactions from interfering with each other while maintaining data consistency. Locks control access to database resources (rows, pages, tables) and implement isolation guarantees. Understanding locking is critical for building concurrent applications — too little locking causes data corruption, too much causes contention and deadlocks.
 
-### 2.1 Lock Types by Granularity
+### Key Concepts:
 
-| Granularity | Resource Locked | Concurrency | Overhead |
-|-------------|----------------|-------------|----------|
-| Row-level | Single row | Highest | High |
-| Page-level | Disk page (multiple rows) | Medium | Medium |
-| Table-level | Entire table | Lowest | Low |
-| Database-level | Entire database | None | Lowest |
+1. **Lock Granularity**:
 
-### 2.2 Lock Modes
+   - **Row-level** — Single row locked. Highest concurrency, highest overhead.
+   - **Page-level** — Disk page (multiple rows) locked. Medium concurrency and overhead.
+   - **Table-level** — Entire table locked. Lowest concurrency, lowest overhead.
+   - **Database-level** — Entire database locked. No concurrency.
 
-| Mode | Symbol | Description | Compatibility |
-|------|--------|-------------|---------------|
-| Shared | S | Read lock; allows concurrent reads | Compatible with S |
-| Exclusive | X | Write lock; blocks all other locks | Incompatible with all |
-| Update | U | Intention to update; prevents conversion deadlock | S compatible, conflicts with X |
-| Intention Shared | IS | Intention to read at finer granularity | Compatible with IS, IX, S, X (at higher level) |
-| Intention Exclusive | IX | Intention to write at finer granularity | Compatible with IS, IX; conflicts with S, X |
+2. **Lock Modes**:
 
-### 2.2 Lock Compatibility Matrix
+   - **Shared (S)** — Read lock. Allows other shared locks but blocks exclusive locks.
+   - **Exclusive (X)** — Write lock. Blocks all other locks.
+   - **Update (U)** — Intention to update. Prevents conversion deadlocks. Compatible with S, conflicts with X.
+   - **Intention Shared (IS)** — Intention to read fine-grained resources.
+   - **Intention Exclusive (IX)** — Intention to write fine-grained resources.
 
-```
-    S   X   IS  IX  SIX
-S   Y   N   Y   N   N
-X   N   N   N   N   N
-IS  Y   N   Y   Y   Y
-IX  N   N   Y   Y   N
-SIX N   N   Y   N   N
+3. **Two-Phase Locking (2PL)**:
 
-Y = Compatible, N = Conflict
-```
+   For transaction isolation, databases use 2PL:
+   - **Growing phase** — Locks are acquired but not released.
+   - **Shrinking phase** — Locks are released but not acquired.
+   - **Strict 2PL** — All exclusive locks held until commit.
 
-### 2.3 Two-Phase Locking (2PL)
+4. **Deadlocks**:
 
-For transaction isolation, databases use 2PL:
-- **Growing phase**: Locks are acquired but not released
-- **Shrinking phase**: Locks are released but not acquired
-- Strict 2PL: All exclusive locks held until commit
+   A **deadlock** occurs when two transactions each hold a lock the other needs:
+   ```
+   Tx 1: Locks row A → wants row B = blocked
+   Tx 2: Locks row B → wants row A = blocked
+   ```
+   Databases detect deadlocks using **wait-for graphs** and resolve by aborting one transaction (the "victim").
 
-### 2.4 Deadlock
+5. **MVCC vs Locking**:
 
-A deadlock occurs when two transactions each hold a lock the other needs:
+   MVCC allows readers to see a consistent snapshot without acquiring shared locks:
+   - **Readers** see the latest committed version as of their transaction start.
+   - **Writers** create new row versions; old versions remain for concurrent readers.
+   - **Cleanup** is handled by VACUUM (PostgreSQL) or background threads.
+   - This means: `SELECT` (without `FOR UPDATE`) never blocks and is never blocked by writers in PostgreSQL/Oracle.
 
-```
-Transaction 1: Locks row A -> wants row B = blocked
-Transaction 2: Locks row B -> wants row A = blocked
-```
+---
 
-Databases detect deadlocks using wait-for graphs and resolve them by aborting one transaction (the "victim").
+## Core Concepts
 
-## 3. Under-the-Hood Deep Dive
+### 1. PostgreSQL Row-Level Locking
 
-### 3.1 Lock Manager Internals
+   ```sql
+   SELECT * FROM orders WHERE id = 100 FOR UPDATE;        -- Exclusive row lock
+   SELECT * FROM orders WHERE id = 100 FOR NO KEY UPDATE; -- Weaker exclusive (doesn't block KEY SHARE)
+   SELECT * FROM orders WHERE id = 100 FOR SHARE;         -- Shared row lock
+   SELECT * FROM orders WHERE id = 100 FOR KEY SHARE;     -- Weakest shared (only blocks FK key changes)
+   ```
 
-The lock manager maintains:
-- **Lock table**: Hash table mapping resource IDs to lock structures
-- **Lock structure**: Holders (granted), Waiters (pending), Mode
-- **Wait-for graph**: Tracks which transactions wait for which
+### 2. Pessimistic Locking with JPA
 
-### 3.2 Row-Level Locking in PostgreSQL
+   ```java
+   @Repository
+   public interface AccountRepository extends JpaRepository<Account, Long> {
+       @Lock(LockModeType.PESSIMISTIC_WRITE)
+       @Query("SELECT a FROM Account a WHERE a.id = :id")
+       Optional<Account> findByIdWithLock(@Param("id") Long id);
 
-PostgreSQL implements row-level locking using a combination of:
-- **Tuple header flags**: Indicate if row is locked
-- **Multi-version concurrency control (MVCC)**: Readers don't block writers; writers don't block readers
-- **Row locks**: Implemented via `ctid` and transaction ID arrays
+       @Lock(LockModeType.PESSIMISTIC_READ)
+       @Query("SELECT a FROM Account a WHERE a.id = :id")
+       Optional<Account> findByIdWithSharedLock(@Param("id") Long id);
+   }
+   ```
 
-```sql
--- PostgreSQL row locks explicitly:
-SELECT * FROM orders WHERE id = 100 FOR UPDATE;      -- Exclusive row lock
-SELECT * FROM orders WHERE id = 100 FOR NO KEY UPDATE; -- Weaker exclusive
-SELECT * FROM orders WHERE id = 100 FOR SHARE;         -- Shared row lock
-SELECT * FROM orders WHERE id = 100 FOR KEY SHARE;     -- Weakest shared
-```
+### 3. Optimistic Locking with @Version
 
-### 3.3 MVCC vs Locking
+   ```java
+   @Entity
+   @Table(name = "accounts")
+   public class Account {
+       @Id
+       @GeneratedValue(strategy = GenerationType.IDENTITY)
+       private Long id;
 
-MVCC allows readers to see a consistent snapshot without acquiring shared locks:
-- **Readers**: See the latest committed version as of their transaction start
-- **Writers**: Create new row versions; old versions remain for concurrent readers
-- **Cleanup**: Dead row versions are cleaned by VACUUM (PostgreSQL) or background threads
+       @Column(nullable = false)
+       private BigDecimal balance;
 
-This means: SELECT (without FOR UPDATE) never blocks and never is blocked by writers in PostgreSQL/Oracle.
+       @Version
+       private Long version;
+   }
+   ```
 
-### 3.4 Lock Escalation
+   ```java
+   @Service
+   @Transactional
+   public class TransferService {
+       public void transfer(Long fromId, Long toId, BigDecimal amount) {
+           Account from = accountRepository.findById(fromId).orElseThrow();
+           Account to = accountRepository.findById(toId).orElseThrow();
+           from.setBalance(from.getBalance().subtract(amount));
+           to.setBalance(to.getBalance().add(amount));
+           // version check happens on save; if version changed → OptimisticLockException
+           accountRepository.save(from);
+           accountRepository.save(to);
+       }
+   }
+   ```
 
-Databases may escalate row locks to table locks when a transaction locks many rows:
-- SQL Server: Automatically at ~5000 locks per session
-- PostgreSQL: No lock escalation (uses memory-efficient lock structures)
-- MySQL/InnoDB: No lock escalation (uses bitmap for page-level lock tracking)
+### 4. Handling OptimisticLockException
 
-### 3.5 Lock Timeout Configuration
+   ```java
+   @Service
+   public class RetryTransferService {
+       private static final int MAX_RETRIES = 3;
 
-```sql
--- PostgreSQL
-SET lock_timeout = '5s';  -- Statement-level timeout
-SET deadlock_timeout = '1s'; -- How long before deadlock check
+       public TransferResult transferWithRetry(Long fromId, Long toId, BigDecimal amount) {
+           for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+               try {
+                   transfer(fromId, toId, amount);
+                   return TransferResult.success();
+               } catch (OptimisticLockException e) {
+                   if (attempt == MAX_RETRIES) {
+                       return TransferResult.failure("Concurrent update conflict, please retry");
+                   }
+                   entityManager.clear(); // Re-read fresh state
+               }
+           }
+           return TransferResult.failure("Max retries exceeded");
+       }
+   }
+   ```
 
--- MySQL
-SET innodb_lock_wait_timeout = 50; -- Seconds
-```
+### 5. SKIP LOCKED for Queue Processing
 
-## 4. Production Code Examples
+   ```sql
+   -- Skip already-locked rows for concurrent workers
+   BEGIN;
+   SELECT * FROM job_queue
+   WHERE status = 'PENDING'
+   ORDER BY priority DESC
+   LIMIT 10
+   FOR UPDATE SKIP LOCKED;
+   -- Process jobs...
+   UPDATE job_queue SET status = 'DONE' WHERE id IN (...);
+   COMMIT;
+   ```
 
-### 4.1 Pessimistic Locking with JPA
+   Available in PostgreSQL 9.5+, MySQL 8.0+, SQL Server 2019+.
+
+### 6. Lock Timeout Configuration
+
+   ```sql
+   -- PostgreSQL
+   SET lock_timeout = '5s';       -- Statement-level timeout
+   SET deadlock_timeout = '1s';   -- How long before deadlock check
+
+   -- MySQL
+   SET innodb_lock_wait_timeout = 50; -- Seconds
+   ```
+
+   ```java
+   // JPA lock timeout
+   @QueryHints({
+       @QueryHint(name = "jakarta.persistence.lock.timeout", value = "5000")
+   })
+   @Lock(LockModeType.PESSIMISTIC_WRITE)
+   @Query("SELECT a FROM Account a WHERE a.id = :id")
+   Optional<Account> findByIdWithLock(@Param("id") Long id);
+   ```
+
+### 7. Lock Monitoring
+
+   ```sql
+   -- PostgreSQL: current locks
+   SELECT locktype, relation::regclass, mode, granted, pid
+   FROM pg_locks WHERE NOT granted;
+
+   -- MySQL: InnoDB lock status
+   SHOW ENGINE INNODB STATUS;
+   SELECT * FROM performance_schema.data_locks;
+
+   -- SQL Server
+   SELECT * FROM sys.dm_tran_locks;
+   ```
+
+---
+
+## Common Mistakes
+
+1. **Not using @Version for optimistic locking** — silently overwriting concurrent updates.
+2. **Using pessimistic locking when optimistic would suffice** — unnecessary contention.
+3. **Forgetting lock_timeout** — transactions can block indefinitely.
+4. **Inconsistent lock order across transactions** — leading to deadlocks.
+5. **Holding locks across user interaction (long transactions)** — lock contention escalates.
+6. **SELECT without FOR UPDATE before UPDATE in concurrent writes** — lost updates.
+7. **Assuming SELECT always blocks** — MVCC means SELECT doesn't block in PostgreSQL/Oracle.
+8. **Not handling OptimisticLockException** — silent data loss instead of retry.
+9. **Lock escalation in MySQL/SQL Server** — row locks escalate to table locks unexpectedly.
+10. **Not considering application-level transactions** — Hibernate session-per-request pattern.
+
+---
+
+## Real-World Scenarios
+
+### 1. Ticket Booking with Pessimistic Locking
+
+A concert ticket system must prevent overselling. Two users see the same available seat. `SELECT ... FOR UPDATE` locks the seat row until the transaction completes:
 
 ```java
-@Repository
-public interface AccountRepository extends JpaRepository<Account, Long> {
-
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT a FROM Account a WHERE a.id = :id")
-    Optional<Account> findByIdWithLock(@Param("id") Long id);
-
-    @Lock(LockModeType.PESSIMISTIC_READ)
-    @Query("SELECT a FROM Account a WHERE a.id = :id")
-    Optional<Account> findByIdWithSharedLock(@Param("id") Long id);
-}
-```
-
-### 4.2 Optimistic Locking with @Version
-
-```java
-@Entity
-@Table(name = "accounts")
-public class Account {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    @Column(nullable = false)
-    private String ownerName;
-
-    @Column(nullable = false)
-    private BigDecimal balance;
-
-    @Version
-    private Long version;
-}
-```
-
-```java
-@Service
-@Transactional
-public class TransferService {
-    public void transfer(Long fromId, Long toId, BigDecimal amount) {
-        // Optimistic locking: version check happens on update/save
-        Account from = accountRepository.findById(fromId)
-            .orElseThrow(() -> new EntityNotFoundException("From account not found"));
-        Account to = accountRepository.findById(toId)
-            .orElseThrow(() -> new EntityNotFoundException("To account not found"));
-
-        from.setBalance(from.getBalance().subtract(amount));
-        to.setBalance(to.getBalance().add(amount));
-
-        accountRepository.save(from);  // version++ if version matches
-        accountRepository.save(to);    // version++ if version matches
-    }
-}
-```
-
-### 4.3 Pessimistic Locking in Service Layer
-
-```java
-@Service
-@Transactional
-public class InventoryService {
-    public OrderItem reserveInventory(Long productId, int quantity) {
-        // Pessimistic lock prevents overselling
-        Product product = productRepository.findByIdWithLock(productId)
-            .orElseThrow(() -> new EntityNotFoundException("Product not found"));
-
-        if (product.getStockQuantity() < quantity) {
-            throw new InsufficientInventoryException(
-                "Only " + product.getStockQuantity() + " available");
-        }
-
-        product.setStockQuantity(product.getStockQuantity() - quantity);
-        productRepository.save(product);
-
-        return new OrderItem(productId, quantity);
-    }
-}
-```
-
-### 4.4 Lock Timeout Configuration in JPA
-
-```java
-// Set lock timeout at query level
-@QueryHints({
-    @QueryHint(name = "jakarta.persistence.lock.timeout", value = "5000")
-})
 @Lock(LockModeType.PESSIMISTIC_WRITE)
-@Query("SELECT a FROM Account a WHERE a.id = :id")
-Optional<Account> findByIdWithLock(@Param("id") Long id);
+@Query("SELECT s FROM Seat s WHERE s.id = :id")
+Optional<Seat> findByIdWithLock(@Param("id") Long id);
 
-// Global configuration
-spring.jpa.properties.jakarta.persistence.lock.timeout: 5000
-spring.jpa.properties.hibernate.connection.isolation: 2  # READ_COMMITTED
-```
-
-### 4.5 Handling OptimisticLockException
-
-```java
-@Service
 @Transactional
-public class RetryTransferService {
-    private static final int MAX_RETRIES = 3;
-
-    public TransferResult transferWithRetry(Long fromId, Long toId, BigDecimal amount) {
-        for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-            try {
-                transfer(fromId, toId, amount);
-                return TransferResult.success();
-            } catch (OptimisticLockException e) {
-                if (attempt == MAX_RETRIES) {
-                    return TransferResult.failure("Concurrent update conflict, please retry");
-                }
-                // Re-read fresh state and retry
-                entityManager.clear();
-            }
-        }
-        return TransferResult.failure("Max retries exceeded");
-    }
+public Booking bookSeat(Long seatId, Long userId) {
+    Seat seat = seatRepository.findByIdWithLock(seatId)
+        .orElseThrow(() -> new SeatNotFoundException());
+    if (!seat.isAvailable()) throw new SeatBookedException();
+    seat.setAvailable(false);
+    return bookingRepository.save(new Booking(seat, userId));
 }
 ```
 
-## 5. Real-World Scenarios
+### 2. Job Queue with SKIP LOCKED
 
-### 5.1 Inventory Reservation (Pessimistic Lock)
-
-```sql
--- BEGIN TX
-SELECT * FROM inventory WHERE product_id = 100 FOR UPDATE;
--- Check stock, decrement, decision to fulfill
-UPDATE inventory SET reserved = reserved + 1 WHERE product_id = 100;
--- COMMIT / ROLLBACK
-```
-
-Without `FOR UPDATE`, two concurrent requests could both see 1 item in stock and both fulfill, causing overselling.
-
-### 5.2 Non-Blocking Read with Optimistic Lock
-
-```java
-// Read current state (no lock)
-Article article = articleRepository.findById(id).get();
-article.setTitle(newTitle);
-article.setContent(newContent);
-// At save time, DB checks version hasn't changed
-articleRepository.save(article);
-// If another user updated between read and save -> OptimisticLockException
-```
-
-### 5.3 Avoiding Locks with READ UNCOMMITTED or READ ONLY
+A job processing system has 10 workers polling the same `job_queue`. Without SKIP LOCKED, all workers block on the same rows. With SKIP LOCKED, each worker picks up only unlocked rows:
 
 ```sql
-SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
--- Or for reporting queries that shouldn't lock
-SELECT * FROM orders WHERE status = 'COMPLETED';
--- These never lock and never are blocked
-```
-
-In PostgreSQL:
-```sql
--- READ UNCOMMITTED behaves like READ COMMITTED (no dirty reads)
--- Equivalent to:
-BEGIN;
-SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
-SELECT * FROM orders WHERE status = 'COMPLETED';
-COMMIT;
-```
-
-### 5.4 Deadlock Detection and Resolution
-
-```java
-@ControllerAdvice
-public class DeadlockHandler {
-    @ExceptionHandler(DeadlockLoserDataAccessException.class)
-    @ResponseStatus(HttpStatus.CONFLICT)
-    public ErrorResponse handleDeadlock(DeadlockLoserDataAccessException e) {
-        // Log and return retry suggestion
-        return new ErrorResponse("CONCURRENT_MODIFICATION",
-            "Request failed due to concurrent modification. Please retry.");
-    }
-}
-```
-
-## 6. Performance
-
-### 6.1 Lock Contention Impact
-
-- **Row locks**: Minimal contention for distinct rows; high contention for same row
-- **Page/table locks**: High contention, should be avoided in OLTP
-- **Lock overhead**: Memory for lock structures + CPU for lock management
-
-### 6.2 Reducing Lock Contention
-
-1. **Keep transactions short** — minimize lock hold time
-2. **Access resources in consistent order** — prevent deadlocks (always update accounts in ID order)
-3. **Use appropriate isolation level** — READ COMMITTED instead of SERIALIZABLE when possible
-4. **Use optimistic locking** — for low-contention scenarios
-5. **Batch operations** — reduce number of transactions
-6. **Index for update** — FOR UPDATE uses index to lock only matching rows
-
-### 6.3 Lock Monitoring
-
-```sql
--- PostgreSQL: current locks
-SELECT locktype, relation::regclass, mode, granted,
-       pid, transactionid, virtualtransaction
-FROM pg_locks
-WHERE NOT granted;
-
--- MySQL: InnoDB lock status
-SHOW ENGINE INNODB STATUS;
-SELECT * FROM performance_schema.data_locks;
-
--- SQL Server
-EXEC sp_who2;
-SELECT * FROM sys.dm_tran_locks;
-```
-
-## 7. Security
-
-### 7.1 Lock-Based Denial of Service
-
-An attacker can intentionally acquire locks on critical rows to block legitimate users. Mitigations:
-- Set lock_timeout to prevent indefinite blocking
-- Monitor for sessions holding locks for extended periods
-- Use row-level security with read-committed isolation
-- Kill long-running idle-in-transaction sessions
-
-## 8. Common Mistakes
-
-1. **Not using @Version for optimistic locking** — silently overwriting concurrent updates
-2. **Using pessimistic locking when optimistic would suffice** — unnecessary contention
-3. **Forgetting lock_timeout** — transactions can block indefinitely
-4. **Inconsistent lock order across transactions** — leading to deadlocks
-5. **Holding locks across user interaction (long transactions)** — lock contention escalates
-6. **SELECT without FOR UPDATE before UPDATE in concurrent writes** — lost updates
-7. **Assuming SELECT always blocks** — MVCC means SELECT doesn't block in PostgreSQL/Oracle
-8. **Not handling OptimisticLockException** — silent data loss instead of retry
-9. **Lock escalation in MySQL/SQL Server** — row locks escalate to table locks unexpectedly
-10. **Not considering application-level transactions** — Hibernate session-per-request pattern
-
-## 9. Senior Engineer Perspective
-
-### Locking Strategy Selection
-
-| Scenario | Recommended Strategy | Why |
-|----------|---------------------|-----|
-| Low contention, simple reads/writes | Optimistic locking (@Version) | Lowest overhead, no blocking |
-| High contention (single resource, many users) | Pessimistic locking | Prevents retry storms |
-| Financial transactions | Pessimistic locking with ordered access | Must prevent overspend |
-| Reporting / analytics | Read-only transaction (no locking) | Avoids locking OLTP rows |
-| Queue processing (work table) | SELECT ... FOR UPDATE SKIP LOCKED | Non-blocking work distribution |
-| High-volume counter | Atomic UPDATE without read-first | Reduces round trips |
-
-### SKIP LOCKED (PostgreSQL 9.5+, MySQL 8.0+)
-
-```sql
--- Skip already-locked rows (queue processing)
 BEGIN;
 SELECT * FROM job_queue
 WHERE status = 'PENDING'
 ORDER BY priority DESC
-LIMIT 10
+LIMIT 5
 FOR UPDATE SKIP LOCKED;
--- Process jobs...
 UPDATE job_queue SET status = 'DONE' WHERE id IN (...);
 COMMIT;
 ```
 
-## 10. Interview Questions (20)
+### 3. Social Media Likes with Optimistic Locking
 
-### Easy (10)
+A social media post receives 1000 concurrent likes. Each like reads the count, increments, and writes back. Optimistic locking ensures no updates are silently lost:
 
-1. What is a database lock?
-2. What is the difference between shared and exclusive locks?
-3. What is a deadlock?
-4. How does MVCC avoid locking for read operations?
-5. What is the difference between optimistic and pessimistic locking?
-6. What does the @Version annotation do in JPA?
-7. What is lock contention?
-8. What happens when a deadlock is detected?
-9. What is the difference between row-level and table-level locking?
-10. What is lock escalation?
+```java
+@Entity
+public class Post {
+    @Id private Long id;
+    private int likeCount;
+    @Version private Long version;
+}
 
-### Medium (10)
-
-11. Explain the difference between `FOR UPDATE` and `FOR SHARE`.
-12. How does JPA's `@Lock(LockModeType.PESSIMISTIC_WRITE)` work?
-13. What is two-phase locking (2PL)?
-14. How does `SELECT ... FOR UPDATE SKIP LOCKED` work? When would you use it?
-15. What is a lock timeout and how do you configure it in PostgreSQL/MySQL?
-16. Explain how optimistic locking detects concurrent modifications.
-17. What is lock granularity and how does it affect performance?
-18. How would you diagnose a deadlock in PostgreSQL?
-19. What is the difference between `LockModeType.OPTIMISTIC` and `LockModeType.OPTIMISTIC_FORCE_INCREMENT`?
-20. How does MVCC eliminate the need for read locks?
-
-## 11. Advanced Interview Questions (20)
-
-### Hard (10)
-
-1. Explain how PostgreSQL implements row-level locking using the tuple header's `t_infomask` bits.
-2. What is predicate locking and how does it prevent phantoms in SERIALIZABLE isolation?
-3. Explain the difference between blocking locks, deadlocks, and livelocks.
-4. How does the wait-die or wound-wait scheme prevent deadlocks?
-5. Describe the internal structure of a lock manager (lock table, lock structures, wait queues).
-6. How does lock escalation work in SQL Server vs PostgreSQL?
-7. Explain the concept of "lock key range" in MySQL/InnoDB for preventing phantoms.
-8. How does the database detect deadlocks in a distributed (sharded) environment?
-9. What is the difference between a "lock" and a "latch" in database internals?
-10. How does PostgreSQL implement "SELECT ... FOR UPDATE" under the hood (tuple locking + multixact)?
-
-### System Design (11-20)
-
-11. Design a distributed lock service using a relational database.
-12. How would you design a job queue with `SKIP LOCKED` for concurrent workers?
-13. Design an inventory reservation system that handles high contention on popular products.
-14. How would you implement a pessimistic locking strategy across microservices?
-15. Design a deadlock detection and resolution system for a distributed database.
-16. How would you design a ticket booking system that prevents overselling?
-17. Design a locking strategy for a financial ledger that must maintain audit integrity.
-18. How would you implement a non-blocking read-optimized system with occasional writes?
-19. Design a lock-free queue using PostgreSQL advisory locks.
-20. How would you design a multi-tenant system with tenant-level locking isolation?
-
-## 12. Expert-Level Interview Questions (10)
-
-1. Design a database concurrency control system that uses optimistic CC for all operations but automatically falls back to pessimistic on conflict.
-2. How would you implement serializable snapshot isolation (SSI) from scratch?
-3. Design a distributed deadlock detection algorithm for a globally distributed database spanning 10+ regions.
-4. How would you implement a lock manager that supports both row-level and predicate locks with zero overhead for the common case of no concurrency?
-5. Design a system that automatically detects lock contention hotspots and suggests schema/query changes.
-6. How would you implement MVCC-garbage-collection (VACUUM) that doesn't interfere with concurrent readers?
-7. Design a hybrid concurrency control system that uses different strategies for different tables in the same transaction.
-8. How would you implement optimistic locking in a sharded database without a global version counter?
-9. Design a system that supports both snapshot isolation and serializable isolation concurrently, choosing per-transaction.
-10. How would you implement a lock-free read of a row that is being concurrently updated by another transaction?
-
-## 13. Debugging & Troubleshooting
-
-### PostgreSQL Lock Diagnostics
-
-```sql
--- Blocked queries
-SELECT blocked.pid AS blocked_pid,
-       blocked.query AS blocked_query,
-       blocking.pid AS blocking_pid,
-       blocking.query AS blocking_query,
-       now() - blocked.query_start AS blocked_duration
-FROM pg_stat_activity blocked
-JOIN pg_locks blocked_locks ON blocked.pid = blocked_locks.pid
-JOIN pg_locks blocking_locks ON blocked_locks.locktype = blocking_locks.locktype
-    AND blocked_locks.database = blocking_locks.database
-    AND NOT blocked_locks.granted
-JOIN pg_stat_activity blocking ON blocking.pid = blocking_locks.pid
-WHERE NOT blocked_locks.granted;
-
--- Long-running transactions (potential lock holders)
-SELECT pid, age(now(), xact_start) AS transaction_duration,
-       state, query
-FROM pg_stat_activity
-WHERE state = 'idle in transaction'
-   OR (state = 'active' AND xact_start < now() - interval '5 minutes');
+@Service
+public class LikeService {
+    @Transactional
+    public void likePost(Long postId) {
+        Post post = postRepo.findById(postId).orElseThrow();
+        post.setLikeCount(post.getLikeCount() + 1);
+    }
+}
 ```
 
-### MySQL Lock Diagnostics
+## Scenario-Based Questions
 
-```sql
--- Current locks
-SELECT * FROM performance_schema.data_locks;
-SELECT * FROM performance_schema.data_lock_waits;
+1. **Q: You are building a concert ticket booking system with 10,000 concurrent users. Seats are limited. How do you prevent overselling while maintaining throughput?**
+   A: Use pessimistic locking with `FOR UPDATE SKIP LOCKED` on the seat reservation. This locks only the seats being booked and skips already-locked rows. Keep the reservation window short (5 minutes with a background job to release expired holds). For the waitlist, use optimistic locking since contention is lower.
 
--- InnoDB status (verbose)
-SHOW ENGINE INNODB STATUS;
-```
+2. **Q: Your app uses `@Version` for optimistic locking. During a flash sale with 5000 concurrent users for 100 items, almost every request fails with OptimisticLockException and retries. Retries also fail. What's happening?**
+   A: Retry storm — all read version 1, only the first commit succeeds. The other 4999 retry reading version 2, but only one succeeds, etc. Fix: switch to pessimistic locking for reservation, or use atomic `UPDATE items SET stock = stock - 1 WHERE id = ? AND stock > 0`.
 
-### Spring Boot Lock Diagnostics
+3. **Q: Two transactions always lock tables A then B. A third transaction locks B then A. The app experiences periodic deadlocks. How do you prevent this?**
+   A: Enforce global lock ordering — always acquire locks in the same order (by resource ID numerically, or table name alphabetically). For transfers, lock the smaller account ID first. Use `ORDER BY id` when selecting rows to lock. Set `lock_timeout` to fail fast instead of blocking.
 
-```yaml
-logging:
-  level:
-    org.springframework.orm.jpa: DEBUG
-    org.springframework.transaction: TRACE
-    com.zaxxer.hikari: DEBUG
-```
+4. **Q: A reporting query running for 3 minutes blocks all order updates. The report uses default settings. How do you fix this without a replica?**
+   A: In PostgreSQL, `SELECT` without `FOR UPDATE` doesn't block writes. If it blocks, the report may use `FOR SHARE` or SERIALIZABLE. In MySQL, ensure the WHERE clause uses an index to avoid row-to-table lock escalation. Set `SET TRANSACTION READ ONLY` to avoid acquiring locks.
 
-## 14. Comparison Section
+5. **Q: A `SELECT ... FOR UPDATE` on a parent table prevents INSERTs on a child table with a foreign key. Why?**
+   A: The FK constraint acquires a shared lock (`FOR KEY SHARE`) on the parent row. Locking the parent with `FOR UPDATE` blocks child INSERTs. Use `FOR NO KEY UPDATE` (PostgreSQL) which doesn't block KEY SHARE locks.
 
-| Feature | PostgreSQL | MySQL/InnoDB | Oracle | SQL Server |
-|---------|-----------|--------------|--------|------------|
-| Row locking | FOR UPDATE/KEY SHARE | FOR UPDATE | FOR UPDATE | UPDLOCK/ROWLOCK |
-| MVCC | Yes | Yes | Yes | Yes (snapshot isolation) |
-| Lock escalation | None | None | None | Yes (row->table) |
-| Deadlock detection | Immediate (wait-for graph) | Immediate (wait-for graph) | Immediate | Periodic check |
-| SKIP LOCKED | Yes (9.5+) | Yes (8.0+) | No (use NOWAIT) | Yes (2019+) |
-| Advisory locks | Yes (pg_advisory_lock) | GET_LOCK() | DBMS_LOCK | sp_getapplock |
-| Default isolation | READ COMMITTED | REPEATABLE READ | READ COMMITTED | READ COMMITTED |
-| Predicate locks | Yes (SERIALIZABLE) | Yes (gap locks) | Yes | Yes |
+6. **Q: Your PostgreSQL app uses `SELECT ... FOR UPDATE` for inventory. Locked rows are held for only 50ms, but CPU spikes and throughput drops under load. What's going wrong?**
+   A: Even short lock holds cause contention when thousands compete for the same rows. The CPU spike is from context switching and deadlock detection. Use `SKIP LOCKED` so transactions skip locked rows instead of waiting. Queue requests in application memory and batch. Use atomic `UPDATE inventory SET reserved = reserved + 1 WHERE id = ? AND reserved + 1 <= stock`.
 
-| Approach | Optimistic Locking | Pessimistic Locking |
-|----------|-------------------|---------------------|
-| Read | No lock (version read) | No lock (or shared lock) |
-| Write | Version check at update | Exclusive lock at read |
-| Conflict detection | At commit (may fail) | At read (blocks immediately) |
-| Retry needed | Yes (OptimisticLockException) | No (waits and succeeds) |
-| Best for | Low contention, read-heavy | High contention, write-heavy |
-| Scalability | Better (no locking overhead) | Worse (lock contention) |
-| Implementation | @Version annotation | @Lock(PESSIMISTIC_WRITE) |
+7. **Q: A MySQL table with 10M rows frequently escalates row locks to table locks under heavy load. The WHERE clause uses `WHERE status = 'PENDING'`. What's the root cause?**
+   A: MySQL escalates to table locks when a query scans too many rows without an efficient index. If `status` has low selectivity, MySQL may choose a full table scan, locking every row. Add an index on `status`. Verify with `EXPLAIN` that the query uses an index scan.
 
-## 15. Revision Notes
+8. **Q: An OptimisticLockException is logged but the application doesn't retry. The user sees "save failed". How do you handle this properly?**
+   A: Implement retry with exponential backoff at the service layer. Catch `OptimisticLockException`, clear the persistence context (`entityManager.clear()`), re-read fresh data, and retry. After max retries, throw a meaningful business exception. Use `@Retryable` from Spring Retry.
 
-- Locks prevent concurrent access conflicts; MVCC reduces need for read locks
-- Lock granularity: row < page < table (fine = more concurrency, more overhead)
-- Two-phase locking: acquire all locks before releasing any
-- Deadlock: cyclic wait; database detects and aborts one transaction
-- Pessimistic locking: lock at read time; use for high contention
-- Optimistic locking: check at write time; use for low contention
-- SKIP LOCKED: skip locked rows in queue processing
-- Always access resources in consistent order to prevent deadlocks
-- Keep transactions short to minimize lock hold time
-- Monitor pg_locks / performance_schema.data_locks for contention
+9. **Q: A database deadlock is detected and one transaction is chosen as the victim. The victim's transaction rolls back. What happens to the connection?**
+   A: The connection returns to the pool in a clean state (rollback resets it). Catch the deadlock exception and retry the entire operation. Never retry on the same connection without a fresh transaction. Configure `deadlock_timeout` for faster detection.
 
-## 16. Cheat Sheet
+10. **Q: A long transaction holds a lock for 30 seconds while the app processes data in memory. Other transactions block. Connection pool threads are consumed by waiters. How do you diagnose and fix this?**
+    A: Check `pg_locks` for blocked processes and `pg_stat_activity` for the blocking query. Fix: never hold locks across slow application processing. Read in one short transaction, process in memory, write in another. Set `lock_timeout` to fail fast.
 
-```
-+-------------------------------------------------------------------+
-|                     LOCKING CHEAT SHEET                           |
-+-------------------------------------------------------------------+
-|                                                                   |
-|  LOCK MODES:                                                      |
-|                                                                   |
-|  S  (Shared)       -> Read lock, allows concurrent reads          |
-|  X  (Exclusive)    -> Write lock, no concurrent access            |
-|  U  (Update)       -> Intention to update (prevents conversion    |
-|                        deadlock on SQL Server)                     |
-|  IS (Int Shared)   -> Intention to read at fine granularity       |
-|  IX (Int Exclusive)-> Intention to write at fine granularity      |
-|                                                                   |
-+-------------------------------------------------------------------+
-|  LOCK COMPATIBILITY (Y=compatible, N=conflict):                   |
-|                                                                   |
-|           S    X    IS   IX   SIX                                 |
-|     S     Y    N    Y    N    N                                   |
-|     X     N    N    N    N    N                                   |
-|     IS    Y    N    Y    Y    Y                                   |
-|     IX    N    N    Y    Y    N                                   |
-|     SIX   N    N    Y    N    N                                   |
-|                                                                   |
-+-------------------------------------------------------------------+
-|  POSTGRESQL ROW LOCKS:                                            |
-|                                                                   |
-|  FOR UPDATE         -> Exclusive (prevents all writes + key       |
-|                         updates on referenced FKs)                 |
-|  FOR NO KEY UPDATE  -> Like UPDATE but doesn't block KEY SHARE    |
-|  FOR SHARE          -> Shared (prevents writes, allows reads)     |
-|  FOR KEY SHARE      -> Weak shared (only blocks FK key changes)   |
-|                                                                   |
-+-------------------------------------------------------------------+
-|  JPA LOCK MODES:                                                  |
-|                                                                   |
-|  LockModeType.OPTIMISTIC           -> Check @Version at commit     |
-|  LockModeType.OPTIMISTIC_FORCE_INCREMENT -> Force version inc     |
-|  LockModeType.PESSIMISTIC_READ     -> Shared lock (FOR SHARE)     |
-|  LockModeType.PESSIMISTIC_WRITE    -> Exclusive lock (FOR UPDATE) |
-|  LockModeType.PESSIMISTIC_FORCE_INCREMENT -> Exclusive + ver inc |
-|                                                                   |
-+-------------------------------------------------------------------+
-|  DEADLOCK PREVENTION:                                             |
-|                                                                   |
-|  1. Always access resources in the same order                     |
-|     (e.g., always update account 1 before account 2)              |
-|  2. Keep transactions short                                       |
-|  3. Use appropriate isolation level (not SERIALIZABLE unless needed)|
-|  4. Use lock_timeout to prevent indefinite waiting                |
-|  5. Manage locks at database level, not application level         |
-|  6. Use READ COMMITTED + optimistic locking when possible         |
-|                                                                   |
-+-------------------------------------------------------------------+
-|  MONITORING COMMANDS:                                             |
-|                                                                   |
-|  PostgreSQL:   SELECT * FROM pg_locks WHERE NOT granted;          |
-|  MySQL:        SHOW ENGINE INNODB STATUS;                        |
-|  SQL Server:   SELECT * FROM sys.dm_tran_locks;                  |
-|  Oracle:       SELECT * FROM v$lock WHERE block > 0;             |
-|                                                                   |
-+-------------------------------------------------------------------+
+## Interview Questions
+
+1. **What is the difference between shared and exclusive locks?**
+   A: Shared (read) locks allow other shared locks but block exclusive locks. Exclusive (write) locks block all other locks.
+
+2. **What is a deadlock and how does the database resolve it?**
+   A: A deadlock occurs when two transactions each hold a lock the other needs (circular wait). The database uses wait-for graphs to detect and aborts one transaction (the victim).
+
+3. **What is the difference between pessimistic and optimistic locking?**
+   A: Pessimistic acquires locks upfront (`SELECT FOR UPDATE`), preventing conflicts. Optimistic detects conflicts at commit time (`@Version`), retrying on failure. Pessimistic is better for high contention.
+
+4. **What does SKIP LOCKED do?**
+   A: Skips rows already locked by other transactions instead of waiting. Used for job queues and work distribution. Available in PostgreSQL 9.5+, MySQL 8.0+.
+
+5. **How does MVCC affect locking?**
+   A: MVCC allows readers to see a consistent snapshot without shared locks. `SELECT` without `FOR UPDATE` never blocks and is never blocked by writers in PostgreSQL/Oracle.
+
+6. **What is lock escalation?**
+   A: Converting many fine-grained locks (row-level) into a coarse-grained lock (table-level). Common in MySQL when a query scans many rows without an index.
+
+7. **What is two-phase locking (2PL)?**
+   A: Transactions acquire locks in a growing phase and release in a shrinking phase. Strict 2PL holds all exclusive locks until commit/rollback, ensuring serializability.
+
+8. **What happens with @Lock(PESSIMISTIC_WRITE) in JPA?**
+   A: Hibernate issues `SELECT ... FOR UPDATE` on the entity. The row is locked until the transaction commits. Others trying to read (with FOR UPDATE) or write to that row block.
+
+9. **How does @Version work?**
+   A: Hibernate increments the version column on every UPDATE. The UPDATE includes `WHERE version = :oldVersion`. If the version changed, no rows are updated and `OptimisticLockException` is thrown.
+
+10. **How do you monitor active locks in PostgreSQL?**
+    A: Query `pg_locks` for current locks, `pg_stat_activity` for blocked queries. Use `SELECT blocked.pid, blocking.pid FROM pg_locks ... WHERE NOT blocked.granted` to find blocking chains.
+
+## Developer Recommendations
+
+- **Use optimistic locking (@Version) for low-contention scenarios** — Optimistic locking has zero overhead when there's no conflict. Pessimistic locking always acquires locks, adding overhead even without conflict.
+
+- **Always acquire locks in a consistent order across transactions** — Inconsistent lock ordering is the #1 cause of deadlocks. For transfers, lock smaller account ID first. For multi-table ops, use alphabetical order.
+
+- **Use SKIP LOCKED for work queue tables** — `SELECT ... FOR UPDATE` without `SKIP LOCKED` causes workers to block on locked rows. SKIP LOCKED enables horizontal scaling of workers.
+
+- **Keep lock durations as short as possible** — Hold locks only for the critical section (read-check-write), not for slow operations. Extract heavy computation outside the transaction.
+
+- **Set lock_timeout to fail fast instead of blocking indefinitely** — A transaction waiting on a lock blocks a connection pool thread. `SET lock_timeout = '5s'` ensures the wait fails fast.
+
+- **Use SELECT FOR NO KEY UPDATE when you don't need to block FK checks** — `FOR UPDATE` blocks both writes and FK shared locks. `FOR NO KEY UPDATE` (PostgreSQL) blocks writes but allows FK references.
+
+- **Handle OptimisticLockException with retry logic** — Without retry, the user sees a random failure. Implement retry with exponential backoff and clear the persistence context between attempts.

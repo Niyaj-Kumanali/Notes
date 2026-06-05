@@ -1,20 +1,18 @@
 # WebSockets
 
-## 1. Executive Summary
+---
 
-WebSockets provide full-duplex communication channels over a single TCP connection, enabling real-time bidirectional data transfer between clients and servers. Unlike traditional HTTP request-response, WebSockets maintain an open persistent connection that allows both parties to send data at any time. They are essential for real-time applications such as chat systems, live notifications, collaborative editing, online gaming, and financial trading platforms.
+## Overview
 
-## 2. Core Theory
+- **Definition:** WebSockets provide full-duplex communication channels over a single TCP connection, enabling real-time bidirectional data transfer between clients and servers.
+- **Why It Exists:** HTTP is half-duplex and stateless — clients must poll for updates. WebSockets maintain a persistent connection, eliminating polling overhead and enabling sub-100ms real-time communication for chat, live notifications, collaborative editing, and trading platforms.
+- **Key Concepts:** **Upgrade** (HTTP to WebSocket handshake), **Frame** (data unit with opcode, payload, masking), **Full-Duplex** (both sides send anytime), **Persistent Connection** (stays open until explicitly closed), **Subprotocol** (application protocol on top — e.g., STOMP), **WSS** (WebSocket over TLS).
 
-### How WebSockets Work
+---
 
-1. **HTTP Upgrade**: Client sends an HTTP upgrade request.
-2. **Handshake**: Server responds with 101 Switching Protocols.
-3. **Connection**: Persistent bidirectional TCP connection established.
-4. **Framing**: Data is sent in frames (text or binary).
-5. **Closing**: Either party sends a close frame.
+## Core Concepts
 
-### WebSocket Lifecycle
+### Connection Lifecycle
 
 ```
 Client                              Server
@@ -26,13 +24,14 @@ Client                              Server
   |<-- Close Frame ---------------------|
 ```
 
-### WebSocket Frame Structure
+### Frame Structure
 
 ```
-Frame:
 | FIN (1) | RSV (3) | Opcode (4) | MASK (1) | Payload Len (7/16/64) |
 | Masking Key (0 or 4 bytes) | Payload Data |
 ```
+
+- **Opcode:** 1 = text, 2 = binary, 8 = close, 9 = ping, 10 = pong.
 
 ### Key Differences from HTTP
 
@@ -45,138 +44,39 @@ Frame:
 | Protocol | Text-based | Binary framing |
 | Latency | Higher | Lower |
 
-## 3. Under-the-Hood Deep Dive
-
-### WebSocket Protocols and Versions
-
-- **RFC 6455**: The standard WebSocket protocol.
-- **WSS**: WebSocket over TLS (encrypted).
-- **Subprotocols**: Application-level protocols on top of WebSocket (e.g., STOMP, MQTT over WebSocket).
-- **Extensions**: Per-message compression, multiplexing.
-
-### Handshake Details
+### Handshake Detail
 
 ```http
-Client Request:
 GET /ws/chat HTTP/1.1
-Host: server.example.com
 Upgrade: websocket
 Connection: Upgrade
 Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==
 Sec-WebSocket-Version: 13
-Sec-WebSocket-Protocol: chat, superchat
-Origin: https://app.example.com
 
-Server Response:
 HTTP/1.1 101 Switching Protocols
 Upgrade: websocket
 Connection: Upgrade
 Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=
-Sec-WebSocket-Protocol: chat
 ```
 
-### STOMP over WebSocket
-
-STOMP (Simple Text Oriented Messaging Protocol) provides a pub-sub model on top of WebSockets:
-
-```
-Frame types: CONNECT, SUBSCRIBE, SEND, MESSAGE, DISCONNECT
-```
-
-## 4. Production Code Examples
-
-### Spring Boot WebSocket Configuration
-
-```xml
-<dependency>
-    <groupId>org.springframework.boot</groupId>
-    <artifactId>spring-boot-starter-websocket</artifactId>
-</dependency>
-```
-
-### WebSocket Configuration with STOMP
+### Spring Boot STOMP Configuration
 
 ```java
 @Configuration
 @EnableWebSocketMessageBroker
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
-
     @Override
     public void configureMessageBroker(MessageBrokerRegistry registry) {
-        // Enable in-memory broker for topics and queues
         registry.enableSimpleBroker("/topic", "/queue");
-
-        // Application destination prefix (messages from client)
         registry.setApplicationDestinationPrefixes("/app");
-
-        // User destination prefix for point-to-point
         registry.setUserDestinationPrefix("/user");
     }
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
-        // WebSocket endpoint that clients connect to
         registry.addEndpoint("/ws")
             .setAllowedOrigins("https://app.example.com")
-            .withSockJS();  // Fallback for browsers that don't support WebSocket
-    }
-}
-```
-
-### WebSocket Interceptor
-
-```java
-@Component
-public class WebSocketAuthInterceptor implements ChannelInterceptor {
-
-    private final JwtTokenProvider tokenProvider;
-
-    public WebSocketAuthInterceptor(JwtTokenProvider tokenProvider) {
-        this.tokenProvider = tokenProvider;
-    }
-
-    @Override
-    public Message<?> preSend(Message<?> message, MessageChannel channel) {
-        StompHeaderAccessor accessor = StompHeaderAccessor.wrap(message);
-
-        switch (accessor.getCommand()) {
-            case CONNECT -> {
-                // Authenticate on connect
-                String token = accessor.getFirstNativeHeader("Authorization");
-                if (token != null && token.startsWith("Bearer ")) {
-                    token = token.substring(7);
-                    if (tokenProvider.validateToken(token)) {
-                        Authentication auth = tokenProvider.getAuthentication(token);
-                        accessor.setUser(auth);
-                    } else {
-                        throw new AuthenticationException("Invalid token");
-                    }
-                } else {
-                    // Allow anonymous connections if public
-                    accessor.setUser(new AnonymousAuthenticationToken(
-                        "anonymous", "anonymousUser",
-                        List.of(new SimpleGrantedAuthority("ROLE_ANONYMOUS"))));
-                }
-            }
-            case SUBSCRIBE -> {
-                // Authorize subscription
-                String destination = accessor.getDestination();
-                if (destination != null && destination.startsWith("/topic/admin")
-                        && !hasAdminRole(accessor.getUser())) {
-                    throw new AuthorizationException("Access denied");
-                }
-            }
-        }
-
-        return message;
-    }
-
-    private boolean hasAdminRole(Principal user) {
-        if (user instanceof Authentication auth) {
-            return auth.getAuthorities().stream()
-                .anyMatch(g -> g.getAuthority().equals("ROLE_ADMIN"));
-        }
-        return false;
+            .withSockJS();
     }
 }
 ```
@@ -186,110 +86,79 @@ public class WebSocketAuthInterceptor implements ChannelInterceptor {
 ```java
 @Controller
 public class ChatController {
-
     private final SimpMessagingTemplate messagingTemplate;
-    private final ChatService chatService;
 
-    public ChatController(SimpMessagingTemplate messagingTemplate,
-                         ChatService chatService) {
-        this.messagingTemplate = messagingTemplate;
-        this.chatService = chatService;
-    }
-
-    // Client sends to /app/chat/{roomId}
     @MessageMapping("/chat/{roomId}")
     @SendTo("/topic/chat/{roomId}")
     public ChatMessage handleChatMessage(
             @DestinationVariable String roomId,
             @Payload ChatMessage message,
             Principal principal) {
-
         message.setSender(principal.getName());
         message.setTimestamp(Instant.now());
-        message.setRoomId(roomId);
-
-        // Persist and return
         chatService.saveMessage(message);
         return message;
     }
 
-    // Private message
     @MessageMapping("/private-message")
-    public void handlePrivateMessage(
-            @Payload PrivateMessage message,
-            Principal principal) {
-
+    public void handlePrivateMessage(@Payload PrivateMessage message, Principal principal) {
         message.setSender(principal.getName());
-        message.setTimestamp(Instant.now());
-        chatService.savePrivateMessage(message);
-
-        // Send to specific user
         messagingTemplate.convertAndSendToUser(
-            message.getRecipient(),
-            "/queue/private-messages",
-            message);
-    }
-
-    // Typing indicator
-    @MessageMapping("/chat/{roomId}/typing")
-    public void handleTyping(
-            @DestinationVariable String roomId,
-            @Payload TypingIndicator indicator,
-            Principal principal) {
-
-        indicator.setUsername(principal.getName());
-        messagingTemplate.convertAndSend(
-            "/topic/chat/" + roomId + "/typing",
-            indicator);
+            message.getRecipient(), "/queue/private-messages", message);
     }
 }
 ```
 
-### REST API + WebSocket Notification
+### REST API Pushing WebSocket Notifications
 
 ```java
 @RestController
 @RequestMapping("/api/v1/notifications")
 public class NotificationController {
-
     private final SimpMessagingTemplate messagingTemplate;
 
     @PostMapping("/broadcast")
-    public ResponseEntity<Void> broadcastNotification(
-            @Valid @RequestBody BroadcastRequest request) {
+    public ResponseEntity<Void> broadcast(@RequestBody BroadcastRequest request) {
         messagingTemplate.convertAndSend("/topic/notifications",
             new Notification("BROADCAST", request.getMessage()));
         return ResponseEntity.ok().build();
     }
 
     @PostMapping("/user/{userId}")
-    public ResponseEntity<Void> sendToUser(
-            @PathVariable String userId,
-            @Valid @RequestBody NotificationRequest request) {
-        messagingTemplate.convertAndSendToUser(
-            userId,
-            "/queue/notifications",
+    public ResponseEntity<Void> sendToUser(@PathVariable String userId,
+                                           @RequestBody NotificationRequest request) {
+        messagingTemplate.convertAndSendToUser(userId, "/queue/notifications",
             new Notification("USER", request.getMessage()));
         return ResponseEntity.ok().build();
     }
+}
+```
 
-    @PostMapping("/order/{orderId}/status")
-    public ResponseEntity<Void> notifyOrderStatus(
-            @PathVariable String orderId,
-            @Valid @RequestBody OrderStatusUpdate status) {
-        // Send to order-specific topic
-        messagingTemplate.convertAndSend(
-            "/topic/order/" + orderId,
-            new OrderStatusNotification(orderId, status));
+### WebSocket Auth Interceptor
 
-        // Also send to the user who owns the order
-        String userId = orderService.getUserId(orderId);
-        messagingTemplate.convertAndSendToUser(
-            userId,
-            "/queue/order-updates",
-            new OrderStatusNotification(orderId, status));
-
-        return ResponseEntity.ok().build();
+```java
+@Component
+public class WebSocketAuthInterceptor implements ChannelInterceptor {
+    @Override
+    public Message<?> preSend(Message<?> message, MessageChannel channel) {
+        StompHeaderAccessor accessor = StompHeaderAccessor.wrap(message);
+        switch (accessor.getCommand()) {
+            case CONNECT -> {
+                String token = accessor.getFirstNativeHeader("Authorization");
+                if (token != null && token.startsWith("Bearer ")) {
+                    Authentication auth = tokenProvider.getAuthentication(token.substring(7));
+                    accessor.setUser(auth);
+                }
+            }
+            case SUBSCRIBE -> {
+                String dest = accessor.getDestination();
+                if (dest != null && dest.startsWith("/topic/admin")
+                        && !hasAdminRole(accessor.getUser())) {
+                    throw new AuthorizationException("Access denied");
+                }
+            }
+        }
+        return message;
     }
 }
 ```
@@ -299,627 +168,265 @@ public class NotificationController {
 ```java
 @Component
 public class RawWebSocketHandler extends TextWebSocketHandler {
-
-    private final Set<WebSocketSession> sessions =
-        ConcurrentHashMap.newKeySet();
+    private final Set<WebSocketSession> sessions = ConcurrentHashMap.newKeySet();
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
         sessions.add(session);
-        log.info("WebSocket connected: {}", session.getId());
         broadcastMessage("User connected: " + session.getId());
     }
 
     @Override
-    protected void handleTextMessage(WebSocketSession session,
-                                    TextMessage message) throws Exception {
-        String payload = message.getPayload();
-        log.info("Received: {}", payload);
-
-        // Echo back
-        session.sendMessage(new TextMessage("Echo: " + payload));
+    protected void handleTextMessage(WebSocketSession session, TextMessage message) {
+        session.sendMessage(new TextMessage("Echo: " + message.getPayload()));
     }
 
     @Override
-    public void afterConnectionClosed(WebSocketSession session,
-                                     CloseStatus status) {
+    public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
         sessions.remove(session);
-        log.info("WebSocket disconnected: {} - {}", session.getId(), status);
         broadcastMessage("User disconnected: " + session.getId());
-    }
-
-    @Override
-    public void handleTransportError(WebSocketSession session,
-                                    Throwable exception) {
-        log.error("WebSocket error: {}", session.getId(), exception);
-        sessions.remove(session);
     }
 
     private void broadcastMessage(String message) {
         TextMessage textMessage = new TextMessage(message);
-        sessions.forEach(session -> {
-            if (session.isOpen()) {
-                try {
-                    session.sendMessage(textMessage);
-                } catch (IOException e) {
-                    log.error("Failed to send message", e);
-                }
-            }
+        sessions.forEach(s -> {
+            if (s.isOpen()) try { s.sendMessage(textMessage); } catch (IOException ignored) {}
         });
     }
-
-    public boolean sendToSession(String sessionId, String message) {
-        return sessions.stream()
-            .filter(s -> s.getId().equals(sessionId))
-            .findFirst()
-            .map(session -> {
-                try {
-                    session.sendMessage(new TextMessage(message));
-                    return true;
-                } catch (IOException e) {
-                    return false;
-                }
-            })
-            .orElse(false);
-    }
 }
 ```
 
-### WebSocket Handshake Interceptor
-
-```java
-@Component
-public class CustomHandshakeInterceptor implements HandshakeInterceptor {
-
-    @Override
-    public boolean beforeHandshake(ServerHttpRequest request,
-                                  ServerHttpResponse response,
-                                  WebSocketHandler wsHandler,
-                                  Map<String, Object> attributes) throws Exception {
-        // Extract query parameters
-        String token = ((ServletServerHttpRequest) request)
-            .getServletRequest().getParameter("token");
-
-        if (token != null) {
-            // Validate and add to session attributes
-            attributes.put("token", token);
-            attributes.put("username", extractUsername(token));
-            return true;
-        }
-
-        // Reject if no token
-        response.setStatusCode(HttpStatus.UNAUTHORIZED);
-        return false;
-    }
-
-    @Override
-    public void afterHandshake(ServerHttpRequest request,
-                              ServerHttpResponse response,
-                              WebSocketHandler wsHandler,
-                              Exception exception) {
-        log.info("Handshake completed");
-    }
-
-    private String extractUsername(String token) {
-        // Extract username from JWT or API key
-        return jwtTokenProvider.getUsernameFromToken(token);
-    }
-}
-```
-
-### Presence Tracking
-
-```java
-@Component
-public class PresenceTracker {
-
-    private final Map<String, Set<String>> onlineUsers =
-        new ConcurrentHashMap<>();  // roomId -> Set<username>
-
-    public void userConnected(String roomId, String username) {
-        onlineUsers.computeIfAbsent(roomId, k -> ConcurrentHashMap.newKeySet())
-            .add(username);
-    }
-
-    public void userDisconnected(String roomId, String username) {
-        Set<String> users = onlineUsers.get(roomId);
-        if (users != null) {
-            users.remove(username);
-            if (users.isEmpty()) {
-                onlineUsers.remove(roomId);
-            }
-        }
-    }
-
-    public Set<String> getOnlineUsers(String roomId) {
-        return onlineUsers.getOrDefault(roomId, Set.of());
-    }
-
-    public int getOnlineCount(String roomId) {
-        return getOnlineUsers(roomId).size();
-    }
-}
-```
-
-### Heartbeat and Keepalive
-
-```java
-@Configuration
-@EnableWebSocketMessageBroker
-public class WebSocketHeartbeatConfig implements WebSocketMessageBrokerConfigurer {
-
-    @Override
-    public void configureWebSocketTransport(WebSocketTransportRegistration registration) {
-        registration
-            .setSendTimeLimit(15000)      // 15s to send
-            .setSendBufferSizeLimit(524288) // 512KB buffer
-            .setMessageSizeLimit(65536);    // 64KB per message
-    }
-
-    @Override
-    public void configureMessageBroker(MessageBrokerRegistry registry) {
-        registry.enableSimpleBroker("/topic", "/queue")
-            .setHeartbeatValue(new long[]{10000, 10000}) // Server heartbeat
-            .setTaskScheduler(heartbeatScheduler());
-    }
-
-    @Bean
-    public ThreadPoolTaskScheduler heartbeatScheduler() {
-        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
-        scheduler.setPoolSize(2);
-        scheduler.setThreadNamePrefix("ws-heartbeat-");
-        return scheduler;
-    }
-}
-```
-
-### Error Handling
-
-```java
-@Controller
-public class WebSocketErrorHandler {
-
-    @MessageExceptionHandler
-    @SendToUser("/queue/errors")
-    public String handleException(Throwable exception) {
-        log.error("WebSocket error", exception);
-        return "Error: " + exception.getMessage();
-    }
-
-    @MessageExceptionHandler(AuthenticationException.class)
-    @SendToUser("/queue/errors")
-    public String handleAuthException(AuthenticationException exception) {
-        return "Authentication failed: " + exception.getMessage();
-    }
-}
-```
-
-### JavaScript Client Example
-
-```javascript
-const stompClient = new StompJs.Client({
-    brokerURL: 'wss://api.example.com/ws',
-    connectHeaders: {
-        Authorization: 'Bearer ' + accessToken
-    },
-    onConnect: () => {
-        // Subscribe to public topic
-        stompClient.subscribe('/topic/chat/room1', message => {
-            const chatMessage = JSON.parse(message.body);
-            displayMessage(chatMessage);
-        });
-
-        // Subscribe to user's private queue
-        stompClient.subscribe('/user/queue/notifications', message => {
-            const notification = JSON.parse(message.body);
-            showNotification(notification);
-        });
-
-        // Send a message
-        stompClient.publish({
-            destination: '/app/chat/room1',
-            body: JSON.stringify({
-                content: 'Hello everyone!',
-                type: 'TEXT'
-            })
-        });
-    },
-    onDisconnect: () => {
-        console.log('Disconnected');
-    }
-});
-
-stompClient.activate();
-```
-
-## 5. Real-World Scenarios
-
-### Scenario 1: Real-Time Collaboration
-
-```
-User A --(cursor position)--> WebSocket Server --(broadcast)--> User B
-User B --(edit operation)--> WebSocket Server --(broadcast)--> User A, C
-Server --(document state)--> All users
-```
-
-### Scenario 2: Live Trading Dashboard
-
-```java
-@Controller
-public class TradingController {
-
-    @MessageMapping("/trade/subscribe/{symbol}")
-    public void subscribeToSymbol(
-            @DestinationVariable String symbol,
-            Principal principal) {
-
-        // Subscribe user to real-time price updates
-        messagingTemplate.convertAndSendToUser(
-            principal.getName(),
-            "/queue/trade/subscribed",
-            new SubscriptionResponse(symbol, "subscribed"));
-
-        // Start streaming prices
-        priceStreamer.addSubscriber(symbol, principal.getName());
-    }
-
-    @MessageMapping("/trade/unsubscribe/{symbol}")
-    public void unsubscribeFromSymbol(
-            @DestinationVariable String symbol,
-            Principal principal) {
-
-        priceStreamer.removeSubscriber(symbol, principal.getName());
-    }
-}
-```
-
-### Scenario 3: Live Notifications System
-
-```
-Server Events:
-  - Order placed -> /topic/orders/new
-  - Payment received -> /user/{userId}/queue/payments
-  - System alert -> /topic/admin/alerts
-  - User status change -> /topic/users/status
-```
-
-## 6. Performance
-
-### Performance Considerations
-
-- **Connection Count**: Each WebSocket consumes memory (~20-50KB per connection).
-- **Threading**: Use non-blocking I/O for high connection counts.
-- **Message Size**: Keep messages small; compress large payloads.
-- **Fragmentation**: Large messages should be fragmented into frames.
-- **Heartbeat Frequency**: Balance liveness detection with network overhead.
-- **Backpressure**: Implement backpressure to prevent overwhelming clients.
-
-### Scaling WebSockets
+### Horizontal Scaling with External Broker
 
 ```java
 @Configuration
 public class WebSocketScalabilityConfig {
-
     @Bean
     public SimpleMessageBrokerConfigurer messageBrokerConfigurer() {
-        return registry -> {
-            // Use external broker for horizontal scaling
-            registry.enableStompBrokerRelay("/topic", "/queue")
-                .setRelayHost("rabbitmq.example.com")
-                .setRelayPort(61613)
-                .setClientLogin("guest")
-                .setClientPasscode("guest")
-                .setSystemLogin("guest")
-                .setSystemPasscode("guest")
-                .setSystemHeartbeatSendInterval(10000)
-                .setSystemHeartbeatReceiveInterval(10000);
-        };
+        return registry -> registry.enableStompBrokerRelay("/topic", "/queue")
+            .setRelayHost("rabbitmq.example.com")
+            .setRelayPort(61613)
+            .setSystemHeartbeatSendInterval(10000)
+            .setSystemHeartbeatReceiveInterval(10000);
     }
 }
 ```
 
-### Connection Limits
+### JavaScript Client
 
+```javascript
+const stompClient = new StompJs.Client({
+    brokerURL: 'wss://api.example.com/ws',
+    connectHeaders: { Authorization: 'Bearer ' + accessToken },
+    onConnect: () => {
+        stompClient.subscribe('/topic/chat/room1', msg => displayMessage(JSON.parse(msg.body)));
+        stompClient.subscribe('/user/queue/notifications', msg => showNotification(JSON.parse(msg.body)));
+        stompClient.publish({ destination: '/app/chat/room1', body: JSON.stringify({ content: 'Hello!' }) });
+    }
+});
+stompClient.activate();
 ```
-Tomcat NIO:  ~10K concurrent connections (default)
-Netty:        ~100K+ concurrent connections
-With tuning:  ~1M concurrent connections (epoll)
+
+---
+
+## Common Mistakes
+
+- **Not authenticating at handshake** — verify identity before establishing the connection
+- **Missing authorization** — validate which topics/queues each user can subscribe to
+- **Not using WSS** — always encrypt WebSocket traffic in production
+- **Memory leaks** — clean up sessions and subscriptions on disconnect
+- **No backpressure** — can overwhelm clients with too many messages
+- **Synchronous processing in listeners** — never block the event loop
+- **Ignoring heartbeat** — without heartbeats, dead connections go undetected
+- **Not scaling the broker** — in-memory broker won't work across multiple instances
+- **Large messages** — keep messages small; compress or paginate large payloads
+
+---
+
+## Key Design Considerations
+
+- **When to Use:** Real-time chat, live notifications, collaborative editing, live data feeds (sports, stocks), online gaming, real-time dashboards
+- **When NOT to Use:** Request-response APIs (use REST/gRPC), batch data transfer, simple CRUD, stateless operations
+- **Connection Limits:** Tomcat NIO ~10K concurrent, Netty ~100K+, tuned epoll ~1M
+- **Memory:** Each connection consumes ~20–50KB
+- **Scaling:** Use external STOMP broker (RabbitMQ, ActiveMQ) or Redis Pub/Sub for multi-instance fan-out
+- **Heartbeat:** Balance liveness detection with network overhead — typical: 10s interval
+- **Security:** Validate Origin header, authenticate on handshake, authorize subscriptions, sanitize payloads, enforce WSS
+- **Architecture Patterns:** Direct WebSocket (raw), STOMP (pub-sub, most common), RSocket (reactive), WebRTC (P2P)
+
+```yaml
+# Heartbeat configuration
+registry.enableSimpleBroker("/topic", "/queue")
+    .setHeartbeatValue(new long[]{10000, 10000});
 ```
 
-## 7. Security
+---
 
-### WebSocket Security Concerns
+## Real-World Scenarios
 
-- **Origin Validation**: Check the Origin header to prevent cross-site hijacking.
-- **Authentication**: Authenticate during the handshake (token in header/params).
-- **Authorization**: Validate subscriptions and messages.
-- **Rate Limiting**: Prevent abuse of real-time endpoints.
-- **Input Validation**: Sanitize all message payloads.
-- **WSS**: Always use wss:// in production (WebSocket over TLS).
+### Scenario 1: WebSocket Authentication Bypass
+**Context:** A stock trading app uses STOMP over WebSocket for real-time price updates. The WebSocket handshake accepts any connection without authentication. A malicious user connects to the WebSocket endpoint and subscribes to `/topic/admin/price-alerts` (intended for administrators only). They receive real-time price alerts meant for the trading desk, gaining an unfair market advantage.
 
-### CSRF Protection for WebSockets
+**Resolution:** Authenticate at the WebSocket handshake and authorize every subscription.
 
 ```java
 @Component
-public class WebSocketCsrfInterceptor implements ChannelInterceptor {
-
+public class WebSocketAuthInterceptor implements ChannelInterceptor {
     @Override
     public Message<?> preSend(Message<?> message, MessageChannel channel) {
         StompHeaderAccessor accessor = StompHeaderAccessor.wrap(message);
-
-        if (accessor.getCommand() == StompCommand.CONNECT) {
-            String csrfToken = accessor.getFirstNativeHeader("X-CSRF-TOKEN");
-            if (csrfToken == null || !csrfTokenValidator.isValid(csfcToken)) {
-                throw new CsrfException("Invalid CSRF token");
+        switch (accessor.getCommand()) {
+            case CONNECT -> {
+                // Authenticate during handshake
+                String token = accessor.getFirstNativeHeader("Authorization");
+                if (token == null || !token.startsWith("Bearer ")) {
+                    throw new AuthenticationException("Missing or invalid token");
+                }
+                Authentication auth = tokenProvider.getAuthentication(token.substring(7));
+                accessor.setUser(auth);
+            }
+            case SUBSCRIBE -> {
+                // Authorize every subscription
+                String destination = accessor.getDestination();
+                Authentication user = accessor.getUser();
+                if (destination != null && destination.startsWith("/topic/admin")
+                        && !hasAdminRole(user)) {
+                    throw new AuthorizationException("Access denied to " + destination);
+                }
             }
         }
-
         return message;
     }
 }
 ```
 
-## 8. Common Mistakes
+### Scenario 2: WebSocket Connection Exhaustion from Memory Leak
+**Context:** A real-time dashboard application uses WebSockets to push updates to 5,000 concurrent users. After 24 hours of operation, server memory grows from 512MB to 4GB. The server crashes with `OutOfMemoryError`. Investigation reveals that each WebSocket session maintains a reference to a user-specific data object that is never cleaned up on disconnect — the sessions list grows monotonically.
 
-- **Not authenticating at handshake**: Always verify identity before establishing connection.
-- **Missing authorization**: Validate that users can access the topics they subscribe to.
-- **Not using WSS**: Always encrypt WebSocket traffic in production.
-- **Memory leaks**: Clean up sessions on disconnect.
-- **No backpressure**: Can overwhelm clients with too many messages.
-- **Synchronous processing in listeners**: Never block the event loop.
-- **Ignoring heartbeat**: Detect dead connections with heartbeats.
-- **Not scaling the broker**: Use external broker for multiple instances.
-- **Large messages**: Keep messages small and efficient.
-
-## 9. Senior Engineer Perspective
-
-### When to Use WebSockets
-
-**Good for:**
-- Real-time chat and messaging.
-- Live notifications and alerts.
-- Real-time collaboration (documents, whiteboards).
-- Live data feeds (sports scores, stock prices).
-- Online gaming.
-- Real-time dashboards.
-
-**Bad for:**
-- Request-response APIs (use REST/gRPC).
-- Batch data transfer.
-- Simple CRUD operations.
-- Stateless operations.
-
-### Architecture Patterns
-
-```
-Direct WebSocket: Raw WebSocket protocol (lowest overhead).
-STOMP over WebSocket: Pub-sub messaging model (most common).
-RSocket over WebSocket: Reactive streams protocol.
-WebRTC: Real-time peer-to-peer communication.
-```
-
-### Horizontal Scaling
-
-```
-Client -> Load Balancer (sticky sessions) -> WebSocket Server
-                                          -> Redis Pub/Sub -> Other WebSocket Servers
-                                          -> External Broker (RabbitMQ) ->
-
-For horizontal scaling, use:
-1. Sticky sessions (least preferred)
-2. External broker (Redis, RabbitMQ, ActiveMQ)
-3. Message routing at the application layer
-```
-
-## 10. Interview Questions (Easy)
-
-1. What is a WebSocket?
-2. How does a WebSocket connection start?
-3. What is the difference between HTTP and WebSocket?
-4. What is the WebSocket handshake?
-5. What is WSS?
-6. What is a WebSocket frame?
-7. What is the STOMP protocol?
-8. What is SockJS?
-9. What are the main use cases for WebSockets?
-10. What HTTP status code is returned for a successful WebSocket upgrade?
-
-## Medium
-
-1. How do you authenticate WebSocket connections?
-2. What is the difference between WebSocket and SSE (Server-Sent Events)?
-3. How do you scale WebSocket applications horizontally?
-4. What is the purpose of heartbeat messages in WebSockets?
-5. How does Spring Boot support WebSocket messaging?
-6. What is the difference between `@SendTo` and `SimpMessagingTemplate`?
-7. How do you handle WebSocket reconnection?
-8. What is a STOMP frame structure?
-9. How do you implement user-specific messaging in STOMP?
-10. What are WebSocket sub-protocols?
-
-## 11. Advanced Interview Questions (Hard)
-
-1. Design a real-time collaborative document editor with WebSockets (like Google Docs).
-2. How would you implement presence detection and typing indicators across a WebSocket cluster?
-3. Design a WebSocket-based distributed rate limiter.
-4. How do you handle WebSocket reconnection with message recovery (no lost messages)?
-5. Implement a custom sub-protocol for a real-time multiplayer game.
-6. Design a WebSocket-based notification system with delivery guarantees.
-7. How would you implement WebSocket clustering using Redis Pub/Sub?
-8. Design a backpressure mechanism for WebSocket message streaming.
-9. How do you handle large-scale WebSocket deployments (1M+ connections)?
-10. Implement a WebSocket health check and auto-recovery system.
-
-## System Design
-
-1. Design a real-time chat system for 10M users using WebSockets.
-2. Design a real-time collaboration platform (like Figma or Miro).
-3. Design a live streaming analytics dashboard with WebSockets.
-4. Design a real-time multiplayer game server using WebSockets.
-5. Design a real-time notification system for a social media platform.
-6. Design a WebSocket-based live location tracking system.
-7. Design a real-time customer support chat platform.
-8. Design a WebSocket-based auction bidding system.
-9. Design a real-time collaborative code editor.
-10. Design a WebSocket-based IoT device monitoring dashboard.
-
-## 12. Expert-Level Interview Questions (Architect-Level)
-
-1. Design a globally distributed WebSocket infrastructure that handles 10M+ concurrent connections with geographic load balancing, automatic failover, and sub-100ms latency.
-2. How would you build a WebSocket-based platform that supports millions of concurrent users with exactly-once message delivery guarantees?
-3. Design a hybrid real-time system that seamlessly transitions between WebSocket, SSE, and long-polling based on client capabilities and network conditions.
-4. How would you implement a WebSocket design system that supports versioned protocols for backward compatibility during rolling deployments?
-5. Design a real-time event sourcing system using WebSockets where clients can subscribe to event streams and replay historical events.
-6. How would you build a WebSocket-based BFF (Backend for Frontend) that aggregates data from multiple microservices into a single real-time stream?
-7. Design a WebSocket system that transparently handles network partitions, reconnection storms, and message deduplication at scale.
-8. How would you implement end-to-end encryption for WebSocket messages where the server cannot decrypt the content?
-9. Design a WebSocket monitoring and observability platform that tracks per-connection metrics, message latency, and error rates across a distributed cluster.
-10. How would you build a multi-tenant WebSocket platform with per-tenant rate limiting, connection limits, and resource isolation?
-
-## 13. Debugging & Troubleshooting
-
-### Common Issues
-
-- **Connection drops**: Check network stability, firewalls, timeouts.
-- **Handshake failure**: Check origin, sub-protocols, authentication.
-- **WSS errors**: Verify TLS certificate, check cipher suites.
-- **Message not received**: Verify destination, subscription, authorization.
-- **High memory usage**: Check for session leaks, message buffering.
-- **Cross-origin issues**: Verify CORS settings for WebSocket.
-- **STOMP frame errors**: Check frame format and headers.
-
-### Debugging with Browser DevTools
-
-```javascript
-// Monitor WebSocket frames in browser
-// Chrome DevTools -> Network -> WS tab
-// Firefox DevTools -> Network -> WebSocket
-
-// Log all STOMP frames
-stompClient.onWebSocketClose = (frame) => {
-    console.log('WebSocket closed:', frame);
-};
-
-stompClient.debug = function(str) {
-    console.log('STOMP:', str);
-};
-```
-
-### WebSocket Session Monitoring
+**Resolution:** Track WebSocket sessions properly and clean up on disconnect. Use a concurrent map with weak references or explicit cleanup in `afterConnectionClosed`.
 
 ```java
 @Component
-public class WebSocketMonitor {
+public class DashboardWebSocketHandler extends TextWebSocketHandler {
+    private final ConcurrentMap<String, UserSession> activeSessions = new ConcurrentHashMap<>();
 
-    private final SimpUserRegistry userRegistry;
-
-    public WebSocketMonitor(SimpUserRegistry userRegistry) {
-        this.userRegistry = userRegistry;
+    @Override
+    public void afterConnectionEstablished(WebSocketSession session) {
+        UserSession userSession = new UserSession(session.getId(), extractUser(session));
+        activeSessions.put(session.getId(), userSession);
     }
 
-    public WebSocketStats getStats() {
-        Set<SimpUser> users = userRegistry.getUsers();
-        long sessionCount = users.stream()
-            .mapToLong(u -> u.getSessions().size())
-            .sum();
-
-        return new WebSocketStats(users.size(), sessionCount);
+    @Override
+    public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
+        UserSession removed = activeSessions.remove(session.getId());
+        if (removed != null) {
+            removed.cleanup();  // Release any resources held by the session
+        }
     }
-
-    public record WebSocketStats(int uniqueUsers, long totalSessions) {}
 }
 ```
 
-## 14. Comparison Section
+### Scenario 3: Horizontal Scaling with Message Stomping
+**Context:** A chat application runs on 3 server instances behind a load balancer. User A (connected to Server 1) sends a message to Room 1. User B (connected to Server 2) is in the same room. Because the in-memory STOMP broker is local to Server 1, the message is never delivered to Server 2's users. User B sees messages from User A only when both are on the same server.
 
-### WebSocket vs SSE (Server-Sent Events)
+**Resolution:** Switch to an external STOMP broker (RabbitMQ or ActiveMQ) that all server instances connect to. Messages published to any server are fanned out through the broker to all connected servers.
 
-| Aspect | WebSocket | SSE |
-|--------|-----------|-----|
-| Communication | Full-duplex | Server to client only |
-| Protocol | ws:// / wss:// | HTTP streaming |
-| Binary Data | Yes | Text only (EventSource) |
-| Auto-Reconnect | Manual | Built-in |
-| Browser Support | Universal | Except IE/Edge legacy |
-| Maximum Connections | Unlimited | 6 per domain (HTTP/1.1) |
-| Complexity | Higher | Lower |
-
-### WebSocket vs Polling
-
-| Aspect | WebSocket | Polling |
-|--------|-----------|---------|
-| Latency | Real-time | Polling interval |
-| Server Load | Lower | Higher (many requests) |
-| Bandwidth | Lower (no headers) | Higher (HTTP headers) |
-| Complexity | Higher | Lower |
-| Real-time | Yes | No (bounded by interval) |
-
-## 15. Revision Notes
-
-- WebSocket: full-duplex, persistent, bidirectional, low-latency
-- Starts with HTTP upgrade (101 Switching Protocols)
-- RFC 6455 standard; WSS for encrypted connections
-- STOMP provides pub-sub on top of WebSocket
-- Spring Boot: `@EnableWebSocketMessageBroker`, `@MessageMapping`, `@SendTo`
-- SimpMessagingTemplate for sending messages from server
-- Use external broker (RabbitMQ, Redis) for horizontal scaling
-- Always authenticate and authorize WebSocket connections
-- Handle reconnection, backpressure, and heartbeat
-
-## 16. Cheat Sheet
-
+```java
+@Configuration
+@EnableWebSocketMessageBroker
+public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
+    @Override
+    public void configureMessageBroker(MessageBrokerRegistry registry) {
+        // Use RabbitMQ as the external STOMP broker instead of in-memory broker
+        registry.enableStompBrokerRelay("/topic", "/queue")
+            .setRelayHost("rabbitmq.example.com")
+            .setRelayPort(61613)
+            .setSystemHeartbeatSendInterval(10000)
+            .setSystemHeartbeatReceiveInterval(10000);
+    }
+}
 ```
-+------------------------------------------------------------------+
-| WEBSOCKET CHEAT SHEET                                            |
-+------------------------------------------------------------------+
-| HANDSHAKE                                                        |
-|   Client: GET /ws HTTP/1.1                                       |
-|           Upgrade: websocket                                     |
-|           Connection: Upgrade                                    |
-|           Sec-WebSocket-Key: <base64-encoded-16-bytes>           |
-|           Sec-WebSocket-Version: 13                              |
-|   Server: 101 Switching Protocols                                |
-|           Upgrade: websocket                                     |
-|           Connection: Upgrade                                    |
-|           Sec-WebSocket-Accept: <sha1-hash>                     |
-+------------------------------------------------------------------+
-| STOMP FRAMES                                                     |
-|   CONNECT     -> Establish connection                            |
-|   SUBSCRIBE   -> Subscribe to destination                        |
-|   SEND        -> Send message to destination                     |
-|   MESSAGE     -> Message received from subscription               |
-|   DISCONNECT  -> Close connection                                |
-+------------------------------------------------------------------+
-| SPRING BOOT ANNOTATIONS                                          |
-|   @MessageMapping("/path")          -- Handle STOMP messages     |
-|   @SendTo("/topic/...")             -- Send to all subscribers   |
-|   @SendToUser("/queue/...")         -- Send to specific user     |
-|   @DestinationVariable              -- Path variable             |
-|   @Payload                          -- Message body              |
-|   @Header                           -- STOMP header              |
-+------------------------------------------------------------------+
-| DESTINATION PREFIXES                                             |
-|   /app   -> Messages from client to server (handled by @MessageMapping) |
-|   /topic -> Pub-sub (1 producer, N consumers)                    |
-|   /queue -> Point-to-point (1 producer, 1 consumer)              |
-|   /user  -> User-specific messages (routed to single user)       |
-+------------------------------------------------------------------+
-| TYPICAL CONFIG                                                   |
-|   @EnableWebSocketMessageBroker                                  |
-|   registry.enableSimpleBroker("/topic", "/queue")                |
-|   registry.setApplicationDestinationPrefixes("/app")             |
-|   registry.addEndpoint("/ws").withSockJS()                       |
-+------------------------------------------------------------------+
-| SCALING                                                          |
-|   Simple:  In-memory broker (single instance)                    |
-|   Scaled:  External broker (RabbitMQ STOMP, Redis)               |
-|   Global:  Load balancer + external broker per region            |
-+------------------------------------------------------------------+
-| SECURITY                                                         |
-|   Always use WSS in production                                   |
-|   Authenticate during CONNECT                                    |
-|   Authorize SUBSCRIBE and SEND                                   |
-|   Validate Origin header                                         |
-|   Sanitize all message payloads                                  |
-+------------------------------------------------------------------+
-```
+
+---
+
+## Scenario-Based Questions
+
+1. **Q: Design a real-time chat system for 10M users. Requirements: group chat (1M users in a room), private messaging, message history, and horizontal scalability. How do you architect the WebSocket layer?**
+   - A: (1) Use STOMP over WebSocket with an external broker (RabbitMQ) for horizontal scaling. (2) Load balancer with sticky sessions (hash by user ID). (3) Group chat: each room has a topic `/topic/chat/{roomId}` — 1M users in one room means 1M subscribers. Use fanout per server (the broker sends one message per server, not per user). (4) Private messaging: use `/user/{userId}/queue/messages` — RabbitMQ routes to the specific server where the user is connected. (5) Message history: persist in Cassandra/DynamoDB. On connect, query last N messages and send via WebSocket. (6) Presence tracking: Redis with user → server mapping, heartbeats, and TTL.
+
+2. **Q: Your WebSocket server runs on a single instance with 10,000 connections. During a deployment, all connections drop. Users must manually refresh the page. How do you implement zero-downtime WebSocket deploys?**
+   - A: (1) Graceful shutdown: register a JVM shutdown hook that stops accepting new connections, then gracefully closes existing connections with a "server restarting" message and a suggested reconnect delay. (2) Client reconnection: the client receives the close frame with the delay, waits for the specified duration, then reconnects. (3) Rolling update with a load balancer: remove one server from the pool, drain its connections gracefully, update, add back. (4) Session persistence: store session state in Redis — on reconnect, the new server picks up the user's subscriptions and state. (5) Use Kubernetes preStop hook: `sleep 30` before SIGTERM — gives connections time to drain.
+
+3. **Q: Your WebSocket connection drops frequently on mobile networks. Users lose messages sent during the disconnection. How do you implement reliable messaging with offline support?**
+   - A: (1) Client-side message ID: each sent message has a unique client-generated ID. (2) Server ACK: the server responds with `{"ack": "<messageId>"}` after persistence. (3) Message buffer: unacknowledged messages are stored in the client's local storage and replayed on reconnect. (4) Server-side offline buffer: use Redis to store the last N messages per user. On reconnect, the server replays missed messages. (5) Client reconnect with exponential backoff: 1s → 2s → 4s → 8s → max 30s. On reconnect, the client sends the last received message ID. (6) Detect connection state with `navigator.onLine` events and WebSocket pings.
+
+4. **Q: Your collaborative document editor uses WebSockets with Operational Transformation. When 100 users edit the same document simultaneously, the server CPU spikes to 100% and some operations are lost. How do you scale the server-side processing?**
+   - A: (1) Use CRDTs (Conflict-Free Replicated Data Types) instead of OT — CRDTs are commutative and don't require a central ordering server, reducing server CPU. (2) Batch operations: don't process each keystroke individually — buffer edits for 50ms and apply as a batch. (3) Shard by document ID: route all operations for document A to Server 1, document B to Server 2. (4) Use a dedicated OT/CRDT processing cluster separate from the WebSocket server. (5) Rate limit operations per user (e.g., 10 ops/second) — human typing speed is <10 chars/second; higher rates indicate automated edits.
+
+5. **Q: How do you handle 1M+ concurrent WebSocket connections on a single server?**
+   - A: (1) Use Netty (NIO event-loop model) — handles millions of connections with a few threads. (2) OS tuning: increase `fs.file-max` and `ulimit -n` to 2M+, enable `SO_REUSEPORT` for multi-threaded accept, tune TCP keepalive. (3) Memory per connection: ~50KB. 1M connections = 50GB RAM. Use off-heap memory and efficient session storage. (4) Use epoll (Linux) for O(1) event notification. (5) In practice: scale horizontally. Each server handles 100K-200K connections. Use a load balancer (HAProxy, Nginx) with `least-connections` algorithm and proxy protocol for client IP preservation.
+
+6. **Q: Your chat application needs to show online/offline status for 1M users across 10 server instances. How do you implement accurate presence detection without overloading the system?**
+   - A: (1) On connect: add `user:{userId}` to Redis set `online:users` with TTL = heartbeat_interval × 3. (2) Heartbeat: each WebSocket client sends a ping every 15 seconds. The server updates the TTL of the user's Redis key. (3) On disconnect: remove from `online:users`. (4) Broadcast presence changes to `/topic/presence` — each server subscribes and updates its local user list. (5) For 1M users, batch presence updates: send "user went online" only after 30 seconds of confirmed uptime (debounce). (6) Use a separate Redis instance or cluster for presence data to avoid impacting business data.
+
+7. **Q: A malicious WebSocket client sends 10,000 messages per second to your server. Each message triggers a database write. How do you implement rate limiting for WebSocket connections?**
+   - A: (1) Per-connection token bucket: each connection has a `RateLimiter` with capacity = 10 messages/second, refill rate = 10/second. (2) If exceeded, send a rate-limit error frame and close the connection after 3 warnings. (3) For cross-cluster rate limiting: use Redis with a sliding window per user. (4) Message size limits: reject messages larger than 64KB at the frame level. (5) Backpressure: if the consumer is slow, stop reading from the socket (Netty auto-read control). (6) Different rate limits per operation type: typing indicator = 5/s, chat message = 1/s, file upload = 1/minute.
+
+8. **Q: Your WebSocket server sometimes sends messages faster than clients can process them. Messages queue up in the client's receive buffer, memory grows, and the connection becomes unresponsive. How do you implement backpressure?**
+   - A: (1) Monitor the client's send buffer: `session.getTextMessageSizeLimit()` or Netty's `Channel.isWritable()`. If the buffer exceeds a threshold (e.g., 64KB), stop sending to that client. (2) Sliding window protocol: the server maintains a window of N in-flight messages per client. Each message requires a client ACK. When the window is full, stop sending. (3) Prioritize messages: drop non-critical messages (typing indicators, presence updates) under backpressure. Always deliver critical messages (chat, notifications). (4) Implement adaptive rate limiting: if a client's ACK rate drops below a threshold, reduce send rate.
+
+9. **Q: You need to implement a real-time multiplayer game server. Requirements: <50ms latency, 60 updates/second, 100 players per game session. Why would you choose raw WebSocket over STOMP?**
+   - A: (1) STOMP adds framing overhead: each STOMP frame has a command header, content-type, and destination header. For 60 updates/second, this overhead is significant. (2) Raw WebSocket has minimal framing: just opcode + payload. (3) Raw WebSocket supports binary frames — send compressed game state as Protocol Buffers or FlatBuffers instead of JSON. (4) Custom protocol: define your own message types (1 byte message ID + payload) — far more efficient than STOMP's text-based protocol. (5) STOMP's pub-sub model adds routing overhead. In a game, you typically broadcast to all players in a session — raw WebSocket with a session collection is simpler and faster.
+
+10. **Q: Your WebSocket application sends sensitive user data. A security audit requires end-to-end encryption (E2EE) where the server cannot decrypt messages. How do you design this?**
+    - A: (1) Key exchange during handshake: use the WebSocket subprotocol negotiation to perform a Diffie-Hellman key exchange (or use the `Sec-WebSocket-Protocol` header to agree on an E2EE subprotocol). (2) After handshake, both client and server have a shared symmetric key without the server knowing the key (server relays key material between clients without decrypting). (3) Group chats: use a group key that's distributed to all members via their individual encrypted channels. The server relays the encrypted group messages without decrypting them. (4) Key rotation: periodically rotate keys and re-distribute. (5) Trade-off: the server cannot perform content-based features (search, moderation, spam detection). For compliance requirements, use client-side scanning or anonymous statistical analysis instead.
+
+---
+
+## Interview Questions
+
+1. **What is a WebSocket and how does it differ from HTTP?**
+   - A: WebSocket provides full-duplex communication over a single persistent TCP connection. Unlike HTTP's half-duplex request-response model, both sides can send messages anytime with minimal overhead (low framing, no headers per message).
+
+2. **How does the WebSocket handshake work?**
+   - A: Client sends an HTTP GET with `Upgrade: websocket`, `Connection: Upgrade`, and `Sec-WebSocket-Key`. Server responds with `101 Switching Protocols` and `Sec-WebSocket-Accept`. The connection upgrades from HTTP to WebSocket.
+
+3. **What is STOMP and why use it over raw WebSockets?**
+   - A: STOMP is a text-based messaging protocol that runs on top of WebSocket. It provides pub-sub semantics (topics, queues), destination routing, and message headers. Use STOMP for chat, notifications, and dashboards. Use raw WebSocket for games and low-latency applications.
+
+4. **How do you scale WebSocket connections across multiple servers?**
+   - A: Use an external STOMP broker (RabbitMQ, ActiveMQ) or Redis Pub/Sub. All servers connect to the broker. Messages published to any server are fanned out through the broker. Load balancer with sticky sessions routes clients to their connected server.
+
+5. **How do you authenticate WebSocket connections?**
+   - A: Validate a JWT/OAuth2 token during the handshake (in the `Authorization` header or as a query parameter). Store the authenticated principal in the session. Authorize subscription destinations — reject subscriptions to topics the user shouldn't access.
+
+6. **How do you detect and handle WebSocket disconnections?**
+   - A: Server-side: `afterConnectionClosed` callback, heartbeat/ping frames (10-30s interval). Client-side: `onclose` event, reconnection with exponential backoff, message buffering during disconnection.
+
+7. **How do you implement WebSocket reconnection with message recovery?**
+   - A: Client sends messages with unique IDs. Server ACKs on receipt. Unacknowledged messages are stored client-side and replayed on reconnect. Server buffers last N messages per user in Redis and replays on reconnect based on last received message ID.
+
+8. **How do you implement backpressure in WebSockets?**
+   - A: Monitor the send buffer — stop sending if the buffer exceeds a threshold. Use a sliding window protocol with in-flight message tracking and client ACKs. Drop non-critical messages under pressure. Prioritize critical messages.
+
+9. **What are the memory considerations for WebSocket connections?**
+   - A: Each connection consumes ~20-50KB of server memory. 100K connections = 2-5GB. Use Netty for efficient connection handling (NIO event-loop). Set max connections per server. Offload session state to Redis.
+
+10. **When would you choose Server-Sent Events (SSE) over WebSockets?**
+    - A: SSE when you need only server-to-client push (notifications, feeds) and HTTP/2 is available. SSE is simpler (runs over HTTP, auto-reconnects, standard EventSource API). WebSocket when you need bidirectional communication (chat, games, collaborative editing).
+
+---
+
+## Developer Recommendations
+
+- **Always authenticate at the WebSocket handshake, not just in subscriptions** — Authenticating only in subscription handlers allows an attacker to open a WebSocket connection and keep it alive without identity. Authenticate the `CONNECT` frame (STOMP) or the handshake request itself. Reject connections with invalid or missing tokens immediately. After authentication, authorize every subscription against the user's permissions — don't assume that a connected user is authorized for all topics.
+
+- **Use an external STOMP broker for multi-instance deployments** — The in-memory STOMP broker works only on a single server instance. As soon as you have 2+ servers, messages published on Server 1 never reach users connected to Server 2. Use RabbitMQ or ActiveMQ as a STOMP relay: all servers connect to the broker, and messages fan out through it. The configuration change is minimal (swap `enableSimpleBroker` for `enableStompBrokerRelay`). Don't wait until you need it — set it up from day one.
+
+- **Implement heartbeats to detect dead connections** — WebSocket connections can die silently: network cable unplugged, laptop sleeps, mobile loses signal. Without heartbeats, the server holds stale sessions indefinitely, wasting memory and causing incorrect presence status. Send server-to-client heartbeats every 10-30 seconds. If the server detects a missing heartbeat, close the connection and clean up resources. The client also uses heartbeats to trigger reconnection.
+
+- **Handle backpressure to prevent overwhelming slow clients** — A fast publisher can fill a slow consumer's TCP buffer, causing memory growth and eventual connection timeout. Monitor the send buffer size. If it exceeds a threshold (e.g., 64KB), stop sending and either buffer (with limits), drop non-critical messages, or apply rate limiting. For critical messages, use a sliding window protocol with client ACKs. Without backpressure, a single slow client can consume disproportionate server resources.
+
+- **Store session state in Redis for graceful failover and deploys** — If a server crashes or is taken down for deployment, all WebSocket connections on that server are lost. Without session state recovery, users must re-subscribe to topics and re-establish their state. Store each user's subscriptions and last message IDs in Redis. On reconnect, restore subscriptions from Redis. Combined with sticky sessions and graceful shutdown, this enables zero-downtime deployments.
+
+- **Use Protocol Buffers or FlatBuffers instead of JSON for high-throughput WebSocket apps** — JSON parsing is CPU-intensive for high-frequency updates (60 updates/second per user × 10,000 users). Binary protocols like Protocol Buffers are 3-10x faster to serialize/deserialize and produce smaller payloads. For real-time games, stock tickers, and collaborative editing, the difference between JSON and Protobuf is the difference between 50% CPU and 10% CPU. Raw WebSocket with binary frames enables this — STOMP is text-based and doesn't support binary payloads natively.

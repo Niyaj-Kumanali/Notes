@@ -1,86 +1,63 @@
 # REST API
 
-## 1. Executive Summary
+---
 
-Representational State Transfer (REST) is an architectural style for designing distributed systems, first introduced by Roy Fielding in his 2000 doctoral dissertation. REST APIs use HTTP as the communication protocol and treat server resources as entities that can be created, read, updated, and deleted via standard HTTP methods. REST is stateless, cacheable, and follows a uniform interface, making it the dominant approach for building web APIs in the industry.
+## Overview
 
-## 2. Core Theory
+- **Definition:** Representational State Transfer (REST) is an architectural style for designing distributed systems, introduced by Roy Fielding in his 2000 doctoral dissertation. REST APIs use HTTP as the communication protocol and treat server resources as entities that can be created, read, updated, and deleted via standard HTTP methods.
 
-REST is built on six architectural constraints:
+- **Why It Exists:** Before REST, web APIs were unstructured and inconsistent. REST provided a standardized, stateless, cacheable approach with a uniform interface, making it the dominant architecture for building web APIs.
 
-- **Uniform Interface**: Resources are identified in requests, resource representations are used to manipulate resources, self-descriptive messages include metadata, and hypermedia drives application state (HATEOAS).
-- **Stateless**: Each request from a client contains all the information needed to process it. No client context is stored on the server between requests.
-- **Cacheable**: Responses must define themselves as cacheable or non-cacheable to improve performance.
-- **Client-Server**: Separation of concerns allows the client and server to evolve independently.
-- **Layered System**: A client cannot tell whether it is connected directly to the end server or an intermediary (load balancer, cache, etc.).
-- **Code on Demand (optional)**: Servers can extend client functionality by transferring executable code.
+- **Six Constraints:**
+  - **Uniform Interface** — resources identified in requests, self-descriptive messages, HATEOAS for discoverability
+  - **Stateless** — each request contains all info needed; no server-side client context
+  - **Cacheable** — responses define themselves as cacheable or non-cacheable
+  - **Client-Server** — separation of concerns allows independent evolution
+  - **Layered System** — intermediaries (load balancers, caches) are transparent to clients
+  - **Code on Demand (optional)** — servers can extend client functionality via executable code
 
-### HTTP Methods and Their Semantics
+---
 
-| Method | CRUD Equivalent | Idempotent | Safe | Use Case |
-|--------|----------------|------------|------|----------|
-| GET | Read | Yes | Yes | Retrieve a resource |
-| POST | Create | No | No | Create a new resource |
-| PUT | Update/Replace | Yes | No | Full update of a resource |
-| PATCH | Partial Update | No | No | Partial modification |
-| DELETE | Delete | Yes | No | Remove a resource |
-| HEAD | - | Yes | Yes | Retrieve headers only |
-| OPTIONS | - | Yes | Yes | Discover allowed methods |
+## HTTP Methods & Status Codes
 
-### HTTP Status Codes
+- **HTTP Methods and Their Semantics:**
 
-```
-1xx - Informational
-2xx - Success (200 OK, 201 Created, 204 No Content)
-3xx - Redirection (301 Moved Permanently, 304 Not Modified)
-4xx - Client Error (400 Bad Request, 401 Unauthorized, 403 Forbidden, 404 Not Found, 409 Conflict, 422 Unprocessable Entity)
-5xx - Server Error (500 Internal Server Error, 502 Bad Gateway, 503 Service Unavailable)
-```
+  - **GET** — Read (idempotent, safe)
+  - **POST** — Create (not idempotent)
+  - **PUT** — Full update/replace (idempotent)
+  - **PATCH** — Partial modification (not idempotent)
+  - **DELETE** — Remove (idempotent)
+  - **HEAD** — Retrieve headers only (idempotent, safe)
+  - **OPTIONS** — Discover allowed methods (idempotent, safe)
 
-## 3. Under-the-Hood Deep Dive
+- **Status Code Families:**
+  - **1xx** — Informational
+  - **2xx** — Success (200 OK, 201 Created, 204 No Content)
+  - **3xx** — Redirection (301 Moved, 304 Not Modified)
+  - **4xx** — Client Error (400 Bad Request, 401 Unauthorized, 403 Forbidden, 404 Not Found, 409 Conflict, 422 Unprocessable)
+  - **5xx** — Server Error (500 Internal, 502 Bad Gateway, 503 Unavailable)
 
-### Request Processing Pipeline
+---
 
-When a REST API request arrives at a Spring Boot application:
+## Request Processing Pipeline (Spring Boot)
 
-1. The embedded Tomcat/Netty server accepts the TCP connection.
-2. The request passes through a chain of servlet filters (security, logging, CORS).
-3. `DispatcherServlet` receives the request and consults `HandlerMapping` beans to find the matching `@RequestMapping` method.
-4. `HandlerAdapter` invokes the method after argument resolution (path variables, query params, request body).
-5. The method returns a response entity or domain object.
-6. `HttpMessageConverter` serializes the response (e.g., Jackson for JSON).
-7. The response travels back through the filter chain.
+- **Flow:**
+  1. Embedded Tomcat/Netty accepts the TCP connection
+  2. Request passes through servlet filter chain (security, logging, CORS)
+  3. `DispatcherServlet` consults `HandlerMapping` to find the matching `@RequestMapping` method
+  4. `HandlerAdapter` invokes the method after argument resolution (path variables, query params, body)
+  5. Method returns a response entity or domain object
+  6. `HttpMessageConverter` serializes the response (Jackson for JSON)
+  7. Response travels back through the filter chain
 
-### Content Negotiation
+- **Content Negotiation:**
+  - `Accept` header — client specifies desired response format
+  - `Content-Type` header — client specifies request body format
+  - Spring Boot handles via `ContentNegotiationManager`
 
-REST APIs support content negotiation via:
-- `Accept` header: Client specifies desired response format (`application/json`, `application/xml`).
-- `Content-Type` header: Client specifies the format of the request body.
-- Spring Boot automatically handles negotiation via `ContentNegotiationManager`.
+---
 
-### HATEOAS (Hypermedia as the Engine of Application State)
-
-HATEOAS adds links to API responses so clients can discover available actions dynamically.
-
-```java
-import org.springframework.hateoas.EntityModel;
-import org.springframework.hateoas.Link;
-import org.springframework.hateoas.server.mvc.WebMvcLinkBuilder;
-
-@EntityModel<User> getUser(@PathVariable Long id) {
-    User user = userService.findById(id);
-    EntityModel<User> model = EntityModel.of(user);
-    model.add(WebMvcLinkBuilder.linkTo(
-        WebMvcLinkBuilder.methodOn(UserController.class).getUser(id)
-    ).withSelfRel());
-    model.add(WebMvcLinkBuilder.linkTo(
-        WebMvcLinkBuilder.methodOn(UserController.class).getAllUsers()
-    ).withRel("users"));
-    return model;
-}
-```
-
-## 4. Production Code Examples
+## Production Code Examples
 
 ### Spring Boot REST Controller
 
@@ -89,12 +66,8 @@ import org.springframework.hateoas.server.mvc.WebMvcLinkBuilder;
 @RequestMapping("/api/v1/users")
 @Slf4j
 public class UserController {
-
     private final UserService userService;
-
-    public UserController(UserService userService) {
-        this.userService = userService;
-    }
+    public UserController(UserService userService) { this.userService = userService; }
 
     @GetMapping
     @ResponseStatus(HttpStatus.OK)
@@ -102,89 +75,32 @@ public class UserController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(defaultValue = "id,asc") String[] sort) {
-
         Sort sorting = Sort.by(
-            sort[1].equalsIgnoreCase("desc")
-                ? Sort.Direction.DESC
-                : Sort.Direction.ASC,
-            sort[0]
-        );
+            sort[1].equalsIgnoreCase("desc") ? Sort.Direction.DESC : Sort.Direction.ASC,
+            sort[0]);
         Pageable pageable = PageRequest.of(page, size, sorting);
-        return userService.findAll(pageable)
-            .map(UserMapper::toResponse);
+        return userService.findAll(pageable).map(UserMapper::toResponse);
     }
 
     @GetMapping("/{id}")
-    @ResponseStatus(HttpStatus.OK)
     public UserResponse getUser(@PathVariable Long id) {
-        return UserMapper.toResponse(
-            userService.findById(id)
-        );
+        return UserMapper.toResponse(userService.findById(id));
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public UserResponse createUser(@Valid @RequestBody CreateUserRequest request) {
-        User user = userService.create(UserMapper.toEntity(request));
-        return UserMapper.toResponse(user);
+        return UserMapper.toResponse(userService.create(UserMapper.toEntity(request)));
     }
 
     @PutMapping("/{id}")
-    @ResponseStatus(HttpStatus.OK)
-    public UserResponse updateUser(
-            @PathVariable Long id,
-            @Valid @RequestBody UpdateUserRequest request) {
-        return UserMapper.toResponse(
-            userService.update(id, UserMapper.toEntity(request))
-        );
+    public UserResponse updateUser(@PathVariable Long id, @Valid @RequestBody UpdateUserRequest request) {
+        return UserMapper.toResponse(userService.update(id, UserMapper.toEntity(request)));
     }
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void deleteUser(@PathVariable Long id) {
-        userService.delete(id);
-    }
-}
-```
-
-### Service Layer with Exception Handling
-
-```java
-@Service
-@Transactional
-public class UserService {
-
-    private final UserRepository userRepository;
-
-    public UserService(UserRepository userRepository) {
-        this.userRepository = userRepository;
-    }
-
-    public User findById(Long id) {
-        return userRepository.findById(id)
-            .orElseThrow(() -> new ResourceNotFoundException(
-                "User not found with id: " + id
-            ));
-    }
-
-    public User create(User user) {
-        if (userRepository.existsByEmail(user.getEmail())) {
-            throw new ConflictException("Email already in use: " + user.getEmail());
-        }
-        return userRepository.save(user);
-    }
-
-    public User update(Long id, User updatedUser) {
-        User existing = findById(id);
-        existing.setName(updatedUser.getName());
-        existing.setEmail(updatedUser.getEmail());
-        return userRepository.save(existing);
-    }
-
-    public void delete(Long id) {
-        User user = findById(id);
-        userRepository.delete(user);
-    }
+    public void deleteUser(@PathVariable Long id) { userService.delete(id); }
 }
 ```
 
@@ -193,17 +109,10 @@ public class UserService {
 ```java
 @RestControllerAdvice
 public class GlobalExceptionHandler {
-
     @ExceptionHandler(ResourceNotFoundException.class)
     @ResponseStatus(HttpStatus.NOT_FOUND)
     public ErrorResponse handleNotFound(ResourceNotFoundException ex) {
         return new ErrorResponse("NOT_FOUND", ex.getMessage());
-    }
-
-    @ExceptionHandler(ConflictException.class)
-    @ResponseStatus(HttpStatus.CONFLICT)
-    public ErrorResponse handleConflict(ConflictException ex) {
-        return new ErrorResponse("CONFLICT", ex.getMessage());
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -224,35 +133,17 @@ public class GlobalExceptionHandler {
 }
 ```
 
-### Request/Response DTOs with Validation
+### Request/Response DTOs
 
 ```java
 public record CreateUserRequest(
-    @NotBlank(message = "Name is required")
-    @Size(min = 2, max = 100, message = "Name must be 2-100 characters")
-    String name,
+    @NotBlank String name,
+    @NotBlank @Email String email) {}
 
-    @NotBlank(message = "Email is required")
-    @Email(message = "Email must be valid")
-    String email
-) {}
+public record UserResponse(Long id, String name, String email, Instant createdAt, Instant updatedAt) {}
 
-public record UserResponse(
-    Long id,
-    String name,
-    String email,
-    Instant createdAt,
-    Instant updatedAt
-) {}
-
-public record ErrorResponse(
-    String code,
-    String message,
-    Map<String, String> details
-) {
-    public ErrorResponse(String code, String message) {
-        this(code, message, null);
-    }
+public record ErrorResponse(String code, String message, Map<String, String> details) {
+    public ErrorResponse(String code, String message) { this(code, message, null); }
 }
 ```
 
@@ -261,7 +152,6 @@ public record ErrorResponse(
 ```java
 @Service
 public class UserApiClient {
-
     private final RestClient restClient;
 
     public UserApiClient(RestClient.Builder builder) {
@@ -271,8 +161,7 @@ public class UserApiClient {
             .requestInterceptor((request, body, execution) -> {
                 log.info("Request: {} {}", request.getMethod(), request.getURI());
                 return execution.execute(request, body);
-            })
-            .build();
+            }).build();
     }
 
     public UserResponse getUser(Long id) {
@@ -286,585 +175,241 @@ public class UserApiClient {
     }
 
     public UserResponse createUser(CreateUserRequest request) {
-        return restClient.post()
-            .uri("/api/v1/users")
-            .body(request)
-            .retrieve()
-            .body(UserResponse.class);
+        return restClient.post().uri("/api/v1/users").body(request)
+            .retrieve().body(UserResponse.class);
     }
 }
 ```
 
-### Paginated Response Pattern
+### Pagination Pattern
 
 ```java
-public record PagedResponse<T>(
-    List<T> content,
-    int page,
-    int size,
-    long totalElements,
-    int totalPages,
-    boolean first,
-    boolean last
-) {
+public record PagedResponse<T>(List<T> content, int page, int size,
+    long totalElements, int totalPages, boolean first, boolean last) {
     public static <T> PagedResponse<T> from(Page<T> page) {
-        return new PagedResponse<>(
-            page.getContent(),
-            page.getNumber(),
-            page.getSize(),
-            page.getTotalElements(),
-            page.getTotalPages(),
-            page.isFirst(),
-            page.isLast()
-        );
+        return new PagedResponse<>(page.getContent(), page.getNumber(), page.getSize(),
+            page.getTotalElements(), page.getTotalPages(), page.isFirst(), page.isLast());
     }
 }
 ```
 
-### Filtering, Sorting, and Searching
+---
+
+## Common Mistakes
+
+- **Using GET for mutations** — always use the correct HTTP method
+- **Inconsistent error responses** — standardize error format across all endpoints
+- **Ignoring idempotency** — PUT/DELETE should be idempotent; POST should not
+- **Exposing internal IDs** — use UUIDs instead of auto-increment IDs
+- **No pagination** — always paginate list endpoints
+- **Returning stack traces in production** — never expose internal error details
+- **Not versioning APIs** — always version from day one
+- **Incorrect HTTP status codes** — use 201 for create, 204 for delete
+- **N+1 query problem** — use JOIN FETCH or EntityGraph
+- **No input validation** — always validate and sanitize all inputs
+
+---
+
+## Key Design Considerations
+
+- **Richardson Maturity Model:**
+  - Level 0: Swamp of POX — HTTP as tunnel (one URI, one method)
+  - Level 1: Resources — multiple URIs but single HTTP method
+  - Level 2: HTTP Verbs — proper use of methods and status codes
+  - Level 3: Hypermedia Controls — HATEOAS for discoverability
+
+- **Best Practices:**
+  - Use plural nouns for resources (`/users` not `/user`)
+  - Limit nested resources to 2-3 levels
+  - Implement query complexity limits
+  - Use OpenAPI/Swagger for contract-first design
+  - Design for graceful degradation with circuit breakers
+  - Log request IDs, trace IDs, and response times
+  - Never break existing clients; use additive changes
+
+---
+
+## Real-World Scenarios
+
+### Scenario 1: Idempotent Payment Processing
+**Context:** Your e-commerce payment endpoint `POST /api/v1/orders/{id}/pay` charges the user's card. Network timeouts cause the mobile client to retry automatically. Without idempotency, each retry triggers a new charge — users are double-charged, support tickets surge, and the finance team demands a fix.
+
+**Resolution:** Implement idempotency keys. The client generates a UUID (`Idempotency-Key` header) for each payment attempt. The server stores the key with the processing result in Redis (TTL: 24 hours). On the first request, process the payment and cache the result. On retry with the same key, return the cached result without processing again. This guarantees exactly-once processing.
 
 ```java
-@GetMapping
-public PagedResponse<UserResponse> searchUsers(
-        @RequestParam(required = false) String name,
-        @RequestParam(required = false) String email,
-        @RequestParam(defaultValue = "0") int page,
-        @RequestParam(defaultValue = "20") int size,
-        @RequestParam(defaultValue = "id,asc") String[] sort) {
-
-    Specification<User> spec = Specification.where(null);
-
-    if (name != null) {
-        spec = spec.and((root, query, cb) ->
-            cb.like(cb.lower(root.get("name")), "%" + name.toLowerCase() + "%"));
+@PostMapping("/{orderId}/pay")
+public ResponseEntity<PaymentResponse> payOrder(
+        @PathVariable Long orderId,
+        @RequestHeader("Idempotency-Key") UUID idempotencyKey,
+        @Valid @RequestBody PaymentRequest request,
+        @AuthenticationPrincipal User user) {
+    // Check if this idempotency key was already processed
+    Optional<PaymentResponse> cached = idempotencyService.getResult(idempotencyKey);
+    if (cached.isPresent()) {
+        return ResponseEntity.ok(cached.get());
     }
-    if (email != null) {
-        spec = spec.and((root, query, cb) ->
-            cb.equal(root.get("email"), email));
-    }
-
-    Sort sorting = Sort.by(
-        sort[1].equalsIgnoreCase("desc")
-            ? Sort.Direction.DESC : Sort.Direction.ASC,
-        sort[0]
-    );
-    Pageable pageable = PageRequest.of(page, size, sorting);
-
-    return PagedResponse.from(
-        userRepository.findAll(spec, pageable).map(UserMapper::toResponse)
-    );
+    // Process payment and cache the result
+    PaymentResponse result = paymentService.processPayment(orderId, user.getId(), request);
+    idempotencyService.cacheResult(idempotencyKey, result, Duration.ofHours(24));
+    return ResponseEntity.status(HttpStatus.CREATED).body(result);
 }
 ```
 
-## 5. Real-World Scenarios
+### Scenario 2: N+1 Query Problem in Order Listing
+**Context:** `GET /api/v1/orders` returns a list of orders. The response includes order items, but the implementation iterates through orders and queries items one by one: `SELECT * FROM items WHERE order_id = ?`. With 100 orders, this generates 101 database queries. Response time is 5 seconds.
 
-### Scenario 1: Social Media Platform API
-
-Designing a Twitter-like API requires careful resource modeling:
-
-```
-POST /api/v1/tweets              - Create a tweet
-GET  /api/v1/tweets/{id}         - Get a tweet
-GET  /api/v1/tweets/{id}/replies - Get replies to a tweet
-POST /api/v1/tweets/{id}/like    - Like a tweet
-POST /api/v1/tweets/{id}/retweet - Retweet
-GET  /api/v1/feed                - Get user's timeline feed
-```
-
-### Scenario 2: E-Commerce Order System
+**Resolution:** Use batch fetching with JOIN or `IN` clause. Replace N+1 queries with a single batch query: `SELECT * FROM items WHERE order_id IN (:orderIds)`. Map results in memory.
 
 ```java
-@RestController
-@RequestMapping("/api/v1/orders")
-public class OrderController {
+// Before: N+1 queries
+public List<OrderResponse> findAll() {
+    List<Order> orders = orderRepository.findAll();  // 1 query
+    return orders.stream().map(order -> {
+        List<Item> items = itemRepository.findByOrderId(order.getId()); // N queries
+        return OrderMapper.toResponse(order, items);
+    }).toList();
+}
 
-    @PostMapping
-    public ResponseEntity<OrderResponse> placeOrder(
-            @AuthenticationPrincipal User user,
-            @Valid @RequestBody PlaceOrderRequest request) {
-        Order order = orderService.placeOrder(user.getId(), request);
-        URI location = ServletUriComponentsBuilder
-            .fromCurrentRequest()
-            .path("/{id}")
-            .buildAndExpand(order.getId())
-            .toUri();
-        return ResponseEntity.created(location).body(OrderMapper.toResponse(order));
-    }
-
-    @PostMapping("/{orderId}/cancel")
-    public ResponseEntity<Void> cancelOrder(
-            @PathVariable Long orderId,
-            @AuthenticationPrincipal User user) {
-        orderService.cancel(orderId, user.getId());
-        return ResponseEntity.noContent().build();
-    }
-
-    @GetMapping("/{orderId}/status")
-    public ResponseEntity<OrderStatusResponse> getOrderStatus(
-            @PathVariable Long orderId) {
-        return ResponseEntity.ok(
-            new OrderStatusResponse(orderService.getStatus(orderId))
-        );
-    }
+// After: Batch fetching (2 queries total)
+public List<OrderResponse> findAll() {
+    List<Order> orders = orderRepository.findAll();           // 1 query
+    List<Long> orderIds = orders.stream().map(Order::getId).toList();
+    Map<Long, List<Item>> itemsByOrder = itemRepository
+        .findByOrderIdIn(orderIds)                           // 1 batch query
+        .stream().collect(Collectors.groupingBy(Item::getOrderId));
+    return orders.stream()
+        .map(order -> OrderMapper.toResponse(order, itemsByOrder.getOrDefault(order.getId(), List.of())))
+        .toList();
 }
 ```
 
-### Scenario 3: Bulk Operations
+### Scenario 3: Cursor-Based Pagination for Real-Time Feed
+**Context:** A social media feed `GET /api/v1/feed?page=0&size=20` uses offset pagination. As new posts are created, the page boundaries shift. A user on page 2 sees the same posts they already saw on page 1 (because new posts pushed old ones to page 2). Users are frustrated by duplicate content.
+
+**Resolution:** Switch to cursor-based pagination. The client sends the last seen post's ID or timestamp as a cursor. The server returns posts after that cursor, with `hasNextPage` and `nextCursor` in the response.
 
 ```java
-@PostMapping("/bulk")
-public ResponseEntity<List<UserResponse>> bulkCreate(
-        @Valid @RequestBody List<@Valid CreateUserRequest> requests) {
-    List<User> users = requests.stream()
-        .map(UserMapper::toEntity)
-        .collect(Collectors.toList());
-    return ResponseEntity.ok(
-        userService.bulkCreate(users).stream()
-            .map(UserMapper::toResponse)
-            .collect(Collectors.toList())
-    );
-}
-
-@DeleteMapping("/bulk")
-public ResponseEntity<Void> bulkDelete(@RequestBody List<Long> ids) {
-    userService.bulkDelete(ids);
-    return ResponseEntity.noContent().build();
+@GetMapping("/feed")
+public ResponseEntity<FeedResponse> getFeed(
+        @AuthenticationPrincipal User user,
+        @RequestParam(required = false) String cursor,
+        @RequestParam(defaultValue = "20") int limit) {
+    List<Post> posts = feedService.getPostsAfter(user.getId(), cursor, limit + 1);
+    boolean hasNextPage = posts.size() > limit;
+    if (hasNextPage) posts = posts.subList(0, limit);
+    String nextCursor = hasNextPage ? posts.get(posts.size() - 1).getCreatedAt().toString() : null;
+    return ResponseEntity.ok(new FeedResponse(posts, nextCursor, hasNextPage));
 }
 ```
 
-## 6. Performance
-
-### Connection Pooling
-
-```java
-spring.datasource.hikari.maximum-pool-size=20
-spring.datasource.hikari.minimum-idle=5
-spring.datasource.hikari.connection-timeout=30000
-spring.datasource.hikari.idle-timeout=600000
-spring.datasource.hikari.max-lifetime=1800000
-```
-
-### Caching with Spring Cache
-
-```java
-@EnableCaching
-@Configuration
-public class CacheConfig {
-
-    @Bean
-    public CacheManager cacheManager() {
-        ConcurrentMapCacheManager cacheManager = new ConcurrentMapCacheManager(
-            "users", "roles", "permissions"
-        );
-        cacheManager.setAllowNullValues(false);
-        return cacheManager;
-    }
-}
-
-@Service
-public class CachedUserService {
-
-    @Cacheable(value = "users", key = "#id", unless = "#result == null")
-    public User findById(Long id) {
-        return userRepository.findById(id)
-            .orElseThrow(() -> new ResourceNotFoundException("User not found"));
-    }
-
-    @CachePut(value = "users", key = "#user.id")
-    public User update(User user) {
-        return userRepository.save(user);
-    }
-
-    @CacheEvict(value = "users", key = "#id")
-    public void delete(Long id) {
-        userRepository.deleteById(id);
-    }
-}
-```
-
-### Response Compression
-
-```yaml
-server:
-  compression:
-    enabled: true
-    mime-types: application/json,application/xml,text/html
-    min-response-size: 2048
-```
-
-### Database Optimization
-
-- Use pagination with `LIMIT`/`OFFSET` or keyset pagination.
-- Add proper database indexes for frequently queried columns.
-- Use `@EntityGraph` for eager fetching of relationships.
-- Avoid N+1 queries by using `JOIN FETCH` or `@BatchSize`.
-- Use read replicas for read-heavy workloads.
-
-### Asynchronous Request Processing
-
-```java
-@RestController
-public class AsyncController {
-
-    @GetMapping("/async/users")
-    public CompletableFuture<List<UserResponse>> getUsers() {
-        return CompletableFuture.supplyAsync(() ->
-            userService.findAll().stream()
-                .map(UserMapper::toResponse)
-                .collect(Collectors.toList())
-        );
-    }
-}
-```
-
-## 7. Security
-
-### CORS Configuration
-
-```java
-@Configuration
-public class CorsConfig implements WebMvcConfigurer {
-
-    @Override
-    public void addCorsMappings(CorsRegistry registry) {
-        registry.addMapping("/api/**")
-            .allowedOrigins("https://app.example.com")
-            .allowedMethods("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS")
-            .allowedHeaders("*")
-            .exposedHeaders("X-Total-Count")
-            .allowCredentials(true)
-            .maxAge(3600);
-    }
-}
-```
-
-### Rate Limiting
-
-```java
-@Component
-public class RateLimitingInterceptor implements HandlerInterceptor {
-
-    private final RateLimiter rateLimiter;
-
-    public RateLimitingInterceptor(RateLimiter rateLimiter) {
-        this.rateLimiter = rateLimiter;
-    }
-
-    @Override
-    public boolean preHandle(HttpServletRequest request,
-                           HttpServletResponse response,
-                           Object handler) throws Exception {
-        String clientIp = request.getRemoteAddr();
-        if (!rateLimiter.tryAcquire(clientIp)) {
-            response.setStatus(429);
-            response.getWriter().write("Too many requests");
-            return false;
-        }
-        return true;
-    }
-}
-```
-
-### Input Validation and Sanitization
-
-```java
-@PostMapping
-public ResponseEntity<UserResponse> createUser(
-        @Valid @RequestBody CreateUserRequest request) {
-    // Validate that email doesn't contain malicious patterns
-    if (request.email().matches(".*[<>].*")) {
-        throw new BadRequestException("Email contains invalid characters");
-    }
-    // Sanitize name
-    String sanitizedName = HtmlUtils.htmlEscape(request.name());
-    CreateUserRequest sanitized = new CreateUserRequest(
-        sanitizedName, request.email()
-    );
-    return ResponseEntity.status(201).body(
-        UserMapper.toResponse(userService.create(UserMapper.toEntity(sanitized)))
-    );
-}
-```
-
-## 8. Common Mistakes
-
-- **Using GET for mutations**: Always use the correct HTTP method.
-- **Inconsistent error responses**: Standardize error response format across all endpoints.
-- **Ignoring idempotency**: PUT and DELETE should be idempotent; POST should not.
-- **Exposing internal IDs**: Use UUIDs or opaque identifiers instead of auto-increment IDs.
-- **No pagination for list endpoints**: Always paginate list responses.
-- **Returning stack traces in production**: Never expose internal error details.
-- **Not versioning APIs**: Always version your API from day one.
-- **Incorrect HTTP status codes**: Use appropriate status codes (201 for create, 204 for delete).
-- **N+1 query problem**: Use JOIN FETCH or EntityGraph for relationships.
-- **No input validation**: Always validate and sanitize all inputs.
-
-## 9. Senior Engineer Perspective
-
-### API Design Maturity Levels (Richardson Maturity Model)
-
-```
-Level 0: The Swamp of POX - Using HTTP as a tunnel (single URI, one method)
-Level 1: Resources          - Multiple URIs but single HTTP method
-Level 2: HTTP Verbs         - Proper use of HTTP methods and status codes
-Level 3: Hypermedia Controls - HATEOAS enabling discoverability
-```
-
-### Design Considerations
-
-- **Plural vs Singular Nouns**: Use plural (`/users` not `/user`).
-- **Nested Resources**: Limit nesting to 2-3 levels (`/users/{id}/orders/{orderId}`).
-- **Query Complexity**: Implement query complexity limits to prevent expensive queries.
-- **API Contract First**: Use OpenAPI/Swagger to define the contract before implementation.
-- **Graceful Degradation**: Design for partial failures; use circuit breakers.
-- **Observability**: Log request IDs, trace IDs, and response times.
-- **Backward Compatibility**: Never break existing clients; use additive changes.
-
-### OpenAPI Contract Example
-
-```yaml
-openapi: 3.1.0
-info:
-  title: User Management API
-  version: 1.0.0
-paths:
-  /api/v1/users:
-    get:
-      summary: List all users
-      parameters:
-        - name: page
-          in: query
-          schema:
-            type: integer
-        - name: size
-          in: query
-          schema:
-            type: integer
-      responses:
-        '200':
-          description: Successful response
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/User'
-    post:
-      summary: Create a new user
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateUserRequest'
-      responses:
-        '201':
-          description: User created
-```
-
-## 10. Interview Questions (Easy)
-
-1. What does REST stand for and who introduced it?
-2. What are the six constraints of REST architecture?
-3. What is the difference between PUT and PATCH?
-4. What HTTP status code should be returned for a successful resource creation?
-5. What does idempotent mean in the context of HTTP methods?
-6. Which HTTP methods are safe (no side effects)?
-7. What is the purpose of the OPTIONS HTTP method?
-8. What is content negotiation in REST APIs?
-9. What is the difference between 401 Unauthorized and 403 Forbidden?
-10. What is the purpose of the Accept header in an HTTP request?
-
-## Medium
-
-1. What is HATEOAS and why is it important?
-2. How do you handle pagination in a REST API?
-3. What is the Richardson Maturity Model?
-4. How do you implement versioning in a REST API?
-5. What is the N+1 query problem and how do you solve it?
-6. How do you handle partial updates in REST?
-7. What are the best practices for designing REST API error responses?
-8. How does content negotiation work in Spring Boot?
-9. What is the difference between `@RestController` and `@Controller`?
-10. How do you implement sorting and filtering in REST APIs?
-
-## 11. Advanced Interview Questions (Hard)
-
-1. How would you design a REST API that supports both JSON and Protocol Buffers?
-2. Implement a request deduplication mechanism for POST requests.
-3. How do you handle distributed transactions across multiple REST API calls?
-4. Design an API that supports bulk operations with atomicity guarantees.
-5. How would you implement cursor-based pagination vs offset-based pagination?
-6. What strategies exist for handling concurrent updates to the same resource?
-7. How do you design an API that supports partial responses (fields filtering)?
-8. Implement an idempotency key system for a payment API.
-9. How do you handle API evolution without breaking existing clients?
-10. Design a rate-limiting strategy for a multi-tenant REST API.
-
-## System Design
-
-1. Design a REST API for a real-time collaborative document editing service.
-2. Design a REST API for a ride-sharing platform (Uber/Lyft).
-3. Design a REST API for a social media feed system.
-4. Design a REST API for an e-commerce order management system.
-5. Design a REST API for a video streaming platform.
-6. Design a REST API for a hotel booking system with availability search.
-7. Design a REST API for a payment processing system.
-8. Design a REST API for a notification delivery service.
-9. Design a REST API for a content moderation pipeline.
-10. Design a REST API for a multi-tenant SaaS platform.
-
-## 12. Expert-Level Interview Questions (Architect-Level)
-
-1. How would you design a globally distributed REST API that maintains consistency across regions while minimizing latency?
-2. Design an event-driven REST API where resources emit state change events that multiple downstream systems consume asynchronously.
-3. How do you evolve a monolithic REST API into microservices without breaking existing clients? Describe the strangler fig pattern in detail.
-4. Design an API versioning strategy that supports both URI versioning and header versioning simultaneously, with graceful deprecation.
-5. How would you implement a REST API with support for transactional guarantees across multiple resource types using the saga pattern?
-6. Design a hypermedia-driven API that enables clients to navigate complex workflows without prior knowledge of endpoint URLs.
-7. How do you design a REST API that handles backpressure from slow clients without degrading the entire system?
-8. Design an API gateway that routes requests to different backend services based on resource type, while providing unified authentication, rate limiting, and caching.
-9. How would you implement API analytics and usage billing for a REST API exposed as a paid product?
-10. Design a versionless API strategy where backward compatibility is maintained indefinitely through extensible schemas and capability negotiation.
-
-## 13. Debugging & Troubleshooting
-
-### Common Issues and Solutions
-
-- **Slow response times**: Check database queries, add indexes, enable caching, use async processing.
-- **Connection timeouts**: Check connection pool settings, database availability, network latency.
-- **Deserialization errors**: Verify JSON structure matches DTO fields, check for unknown properties.
-- **CORS errors**: Verify CORS configuration, check allowed origins and methods.
-- **415 Unsupported Media Type**: Check Content-Type header matches the expected media type.
-
-### Debugging with Spring Boot Actuator
-
-```yaml
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health,metrics,httptrace,loggers,env
-  endpoint:
-    health:
-      show-details: always
-```
-
-### Request Tracing
-
-```java
-@Component
-public class RequestTracingFilter implements Filter {
-
-    @Override
-    public void doFilter(ServletRequest request, ServletResponse response,
-                        FilterChain chain) throws IOException, ServletException {
-        HttpServletRequest httpRequest = (HttpServletRequest) request;
-        String requestId = UUID.randomUUID().toString();
-        httpRequest.setAttribute("requestId", requestId);
-        MDC.put("requestId", requestId);
-
-        long start = System.currentTimeMillis();
-        try {
-            chain.doFilter(request, response);
-        } finally {
-            long duration = System.currentTimeMillis() - start;
-            log.info("{} {} {} {} {}ms",
-                requestId,
-                httpRequest.getMethod(),
-                httpRequest.getRequestURI(),
-                ((HttpServletResponse) response).getStatus(),
-                duration);
-            MDC.remove("requestId");
-        }
-    }
-}
-```
-
-## 14. Comparison Section
-
-### REST vs GraphQL
-
-| Aspect | REST | GraphQL |
-|--------|------|---------|
-| Data Fetching | Fixed structure, may over/under-fetch | Client specifies exact data needed |
-| Endpoints | Multiple endpoints (one per resource) | Single endpoint |
-| Caching | Native HTTP caching | Requires custom caching |
-| Learning Curve | Low | Medium |
-| Tooling | Mature ecosystem | Growing ecosystem |
-| Real-time | WebSockets for real-time | Subscriptions for real-time |
-| File Upload | Multipart upload | Requires custom handling |
-| Versioning | URI/header based | Evolve schema, deprecate fields |
-
-### REST vs gRPC
-
-| Aspect | REST | gRPC |
-|--------|------|------|
-| Protocol | HTTP/1.1 (HTTP/2 optional) | HTTP/2 (mandatory) |
-| Data Format | JSON (human-readable) | Protocol Buffers (binary) |
-| Performance | Moderate | High |
-| Streaming | Via WebSockets | Native bidirectional streaming |
-| Code Generation | Manual/OpenAPI generators | Built-in from proto files |
-| Browser Support | Native | Requires gRPC-web proxy |
-| Contract | OpenAPI/Swagger | Proto files |
-
-## 15. Revision Notes
-
-- REST = Representational State Transfer, 6 constraints (Uniform Interface, Stateless, Cacheable, Client-Server, Layered System, Code on Demand)
-- HTTP Methods: GET (read), POST (create), PUT (replace), PATCH (partial), DELETE (remove)
-- Idempotent: GET, PUT, DELETE, HEAD, OPTIONS
-- Safe: GET, HEAD, OPTIONS
-- Use plural nouns, proper HTTP status codes, version from day one
-- Always paginate, use consistent error format, avoid N+1 queries
-- Spring Boot: `@RestController`, `@RequestMapping`, `@Valid`, `@ExceptionHandler`
-- HATEOAS for discoverability, OpenAPI for documentation
-- Richardson Maturity Model: Level 0-3
-
-## 16. Cheat Sheet
-
-```
-+------------------------------------------------------------------+
-| REST API CHEAT SHEET                                             |
-+------------------------------------------------------------------+
-| HTTP METHODS                                                     |
-|   GET    /users        -> 200 OK                                 |
-|   GET    /users/{id}   -> 200 OK                                 |
-|   POST   /users        -> 201 Created (+ Location header)        |
-|   PUT    /users/{id}   -> 200 OK                                 |
-|   PATCH  /users/{id}   -> 200 OK                                 |
-|   DELETE /users/{id}   -> 204 No Content                         |
-+------------------------------------------------------------------+
-| STATUS CODES                                                     |
-|   200 OK            201 Created      204 No Content              |
-|   301 Moved         304 Not Modified  400 Bad Request            |
-|   401 Unauthorized  403 Forbidden     404 Not Found              |
-|   409 Conflict      422 Unprocessable 429 Too Many Requests      |
-|   500 Internal      502 Bad Gateway   503 Service Unavailable    |
-+------------------------------------------------------------------+
-| SPRING BOOT ANNOTATIONS                                          |
-|   @RestController    @RequestMapping   @GetMapping              |
-|   @PostMapping       @PutMapping       @DeleteMapping           |
-|   @PatchMapping      @Valid            @RequestParam            |
-|   @PathVariable      @RequestBody      @ResponseStatus           |
-|   @RestControllerAdvice               @ExceptionHandler         |
-+------------------------------------------------------------------+
-| NAMING CONVENTIONS                                               |
-|   /api/v1/resources                                              |
-|   /api/v1/resources/{id}                                         |
-|   /api/v1/resources/{id}/sub-resources                           |
-|   ?page=0&size=20&sort=name,desc                                |
-+------------------------------------------------------------------+
-| ERROR RESPONSE FORMAT                                            |
-| {                                                                |
-|   "code": "NOT_FOUND",                                           |
-|   "message": "User not found with id: 123",                      |
-|   "details": null                                                 |
-| }                                                                |
-+------------------------------------------------------------------+
-| CACHE ANNOTATIONS                                                |
-|   @Cacheable    caches method result                              |
-|   @CachePut     updates cache                                    |
-|   @CacheEvict   removes from cache                                |
-|   @Caching      groups multiple cache annotations                |
-+------------------------------------------------------------------+
-```
+---
+
+## Scenario-Based Questions
+
+1. **Q: Your social media API fetches a user's feed by aggregating posts from 500 followed users. The database query times out at 30 seconds. How do you redesign this endpoint for <200ms response?**
+   - A: (1) Pre-compute the feed asynchronously — when a user logs in or posts, write the feed to Redis sorted set (score = timestamp). Reading is O(log N) — just fetch the top 20. (2) Fan-out on write: when a user posts, insert into all followers' feed caches. (3) For high-profile users (millions of followers), switch to pull model: followers fetch posts from the celebrity's timeline, and the server merges it with the pre-computed feed. (4) Use cursor-based pagination to avoid offset shifting.
+
+2. **Q: An e-commerce order placement endpoint receives duplicate requests from network retries, causing double charges. You implement idempotency keys, but your service is stateless and runs on 10 instances. How do you ensure idempotency across all instances?**
+   - A: Store idempotency keys in a shared data store (Redis) accessible to all instances. Use `SET idempotency:<key> <status> NX EX 86400` (NX = only set if not exists) to atomically claim the key. First instance to execute the SET gets to process; others return the cached result. This is a distributed lock with TTL. For critical payments, use a database-level unique constraint on `(idempotency_key)` as backup.
+
+3. **Q: Your REST API is slow because mobile clients call `GET /orders` then `GET /orders/{id}/items` for each order (N+1 network requests). How do you optimize without forcing clients to change?**
+   - A: (1) Support embedding: `GET /orders?include=items` — the server joins orders with items and returns them in one structure. (2) Create a composite endpoint: `GET /orders-with-items` that returns everything in one call. (3) Use JSON:API spec's `?include=items` for standardized embedding. (4) Implement an API gateway that aggregates responses from multiple services. Trade-off: embedding increases response size — only embed when requested.
+
+4. **Q: You need to support JSON and XML from the same REST API, but XML clients report missing fields while JSON clients get all data. What's happening?**
+   - A: XML serialization likely fails on fields without proper annotations. Solutions: (1) Use Jackson's XML extension (`jackson-dataformat-xml`) instead of JAXB — same annotations work for both JSON and XML. (2) Annotate fields with `@JsonProperty` and `@JacksonXmlProperty` for consistent serialization. (3) Test both formats in integration tests. (4) Consider dropping XML support if usage is low (<1% of traffic) — the maintenance cost often exceeds the benefit.
+
+5. **Q: Your API returns 500 errors intermittently under load. Error logs show "Connection pool exhausted" but CPU is only 30%. What's the real bottleneck and how do you fix it?**
+   - A: The database connection pool is exhausted. 30% CPU means the app is waiting for database connections, not computing. Causes: (1) Connection pool too small (default HikariCP = 10). Fix: increase to `poolSize = Tomcat max-threads × (1 - blocking factor)`. With 200 threads and 30% blocking, target ~60 connections. (2) Slow queries holding connections longer. Fix: optimize queries, add indexes, increase `connectionTimeout`. (3) Connection leaks — not returning connections to pool. Fix: use connection pool monitoring (HikariCP metrics) and add leak detection.
+
+6. **Q: A mobile client needs offline support. Users create orders offline, and sync when connectivity returns. How do you design conflict resolution?**
+   - A: (1) Use ETags for optimistic concurrency — client sends `If-Match` header with the last known ETag. Server rejects if the resource changed since the client last synced. (2) Last-write-wins (simplest): server timestamps win. (3) CRDT (Conflict-Free Replicated Data Types): design endpoints to accept commutative operations — order of syncing doesn't matter. (4) Provide a `/sync` endpoint that returns all changes since a timestamp, using `Last-Modified` headers. (5) For critical conflicts (price changes, inventory depletion), return 409 Conflict with both versions — client must resolve.
+
+7. **Q: How do you handle partial updates without forcing clients to send the full resource, while still being RESTful?**
+   - A: (1) Use PATCH with JSON Merge Patch (RFC 7396): `PATCH /users/1` with body `{"name": "new name"}` — only the specified fields change. (2) Use JSON Patch (RFC 6902) for more complex operations: `[{ "op": "replace", "path": "/name", "value": "new name" }]`. (3) For simpler implementations, use POST with a `/users/{id}/fields` sub-resource pattern. (4) Spring Boot supports `@PatchMapping` with `HttpMessageConverter` — implement a custom `mergePatch()` that merges the patch into the existing entity.
+
+8. **Q: Your payment API charges users via a third-party gateway. The gateway sometimes returns 200 OK but the charge actually failed (eventually consistent). Users see "Payment Successful" but no money was charged. How do you handle this?**
+   - A: (1) Don't trust the gateway's initial response for critical operations. Implement a webhook callback pattern: the gateway processes asynchronously and sends a webhook with the final status. (2) Return `202 Accepted` immediately and update the order status when the webhook arrives. (3) Implement a reconciliation job that polls the gateway for pending transactions. (4) Add a "pending" order state — show "Payment processing" to the user until the webhook confirms. (5) Use idempotency keys to prevent duplicate webhook processing.
+
+9. **Q: You are migrating from REST to GraphQL. REST endpoints have been public for 3 years with 500+ clients. How do you handle this transition safely?**
+   - A: (1) Run both systems in parallel. Keep REST endpoints unchanged. Add `/graphql` endpoint. (2) Implement the strangler fig pattern: route new features through GraphQL, keep old REST for existing clients. (3) Build GraphQL resolvers that delegate to existing REST services internally — no need to rewrite business logic. (4) Send migration guides to clients and announce REST deprecation timeline (18+ months). (5) Monitor REST usage and only sunset endpoints when traffic drops to zero. (6) Use OpenAPI-to-GraphQL wrapper for automatic GraphQL schema generation from existing REST APIs.
+
+10. **Q: How do you design rate limiting for a multi-tenant REST API where one tenant's burst traffic shouldn't affect others?**
+    - A: (1) Tenant-level rate limiting using token bucket per tenant in Redis. Each tenant gets a `tenant:<id>:rate` key with a counter and TTL. (2) Endpoint-level rate limiting: different limits for expensive endpoints (reports = 10/min) vs cheap ones (list = 1000/min). (3) Global rate limiting to protect infrastructure. (4) Use sliding window (not fixed window) to prevent traffic spikes at window boundaries. (5) Return `429 Too Many Requests` with `Retry-After` header and `X-RateLimit-*` headers for transparency. (6) Implement priority queues — paid tenants get higher limits and priority during contention.
+
+---
+
+## Interview Questions
+
+1. **What are the six constraints of REST?**
+   - A: Uniform Interface, Stateless, Cacheable, Client-Server, Layered System, Code on Demand (optional). These ensure scalability, modifiability, and visibility in distributed systems.
+
+2. **What is the difference between PUT and PATCH?**
+   - A: PUT replaces the entire resource (idempotent). PATCH applies a partial modification (not necessarily idempotent). PUT sends the full resource; PATCH sends only the changes. PUT is idempotent — sending it N times has the same effect as once.
+
+3. **What is HATEOAS?**
+   - A: Hypermedia as the Engine of Application State (Level 3 Richardson Maturity Model). Responses include links to related actions, enabling clients to discover the API dynamically without out-of-band documentation.
+
+4. **How do you implement pagination in REST?**
+   - A: Offset pagination (`?page=0&size=20`) for static datasets. Cursor-based pagination (`?cursor=2024-01-01T00:00:00Z&limit=20`) for real-time feeds and large datasets. Keyset pagination for databases without offset performance issues. Return total count only when necessary (it's expensive).
+
+5. **What are idempotency keys and why are they important?**
+   - A: An `Idempotency-Key` header (UUID) ensures exactly-once processing despite retries. The server checks if the key was processed; if so, returns the cached result. Critical for payment, order placement, and any operation with side effects.
+
+6. **How do you handle errors in REST APIs?**
+   - A: Use appropriate HTTP status codes (201 for create, 400 for validation, 401 for auth, 404 for not found, 409 for conflict, 422 for unprocessable, 500 for server errors). Return a consistent error response format with code, message, and optional details. Never expose stack traces.
+
+7. **What is content negotiation?**
+   - A: The server determines the response format based on the client's `Accept` header. Clients specify desired format (JSON, XML, etc.). The server selects the appropriate `HttpMessageConverter`. Also supports versioning via custom media types.
+
+8. **How do you secure a REST API?**
+   - A: Use TLS for all communications. Implement authentication (JWT/OAuth2) and authorization (role/permission checks). Validate and sanitize all inputs. Rate limit per user and endpoint. Use security headers (HSTS, CSP, X-Content-Type-Options). Never expose internal IDs or stack traces.
+
+9. **What is the N+1 query problem in REST APIs?**
+   - A: When serializing a list of N resources, each resource triggers an additional query. Example: fetching 100 orders, then querying items for each order individually — 101 queries total. Fix: batch fetching, JOIN queries, or using a graph-based query layer.
+
+10. **How do you version a REST API?**
+    - A: URI path versioning (`/api/v1/users`) — most common, CDN-friendly. Header versioning (`Accept: application/vnd.myapp.v1+json`) — clean URLs, standards-based. Support maximum 3 active versions. Deprecate with 18+ months notice and sunset headers.
+
+---
+
+## Developer Recommendations
+
+- **Always implement idempotency for mutation endpoints** — `POST /payments` and `POST /orders` will inevitably receive duplicate requests from network retries, mobile app retries, and client timeouts. An `Idempotency-Key` header prevents double charges and duplicate orders at minimal implementation cost. Store keys in Redis with TTL matching the business window (typically 24 hours). This is more reliable than relying on clients to deduplicate.
+
+- **Use cursor-based pagination over offset-based for production APIs** — Offset pagination breaks when new records are inserted (pages shift, duplicates appear) and is slow on large offsets (`OFFSET 100000` scans and discards rows). Cursor-based pagination (using a unique sortable field like `created_at` or `id`) is O(log N) and stable regardless of concurrent inserts. Trade-off: no random page access (no "go to page 5"). Acceptable for most real-world APIs — users rarely jump to arbitrary pages.
+
+- **Batch database queries to avoid N+1** — The N+1 problem is the single most common performance issue in REST APIs. When returning a list of resources that include related data, always batch-fetch the related data using `IN` clauses or JOIN queries. Use Spring's `@EntityGraph` or Hibernate's `JOIN FETCH` for JPA. For GraphQL, use DataLoader. Monitor query counts in production — a sudden increase in database queries per request indicates N+1 regression.
+
+- **Design for API evolution from day one** — Start versioning before you think you need it. The cost of adding versioning later (breaking existing clients, coordinated deploys, migrations) dwarfs the minimal upfront cost of prefixing URIs with `/api/v1/`. Use additive-only changes for as long as possible. Deprecate before removing. Keep max 3 active versions. Add `Sunset` and `Deprecated` headers to responses.
+
+- **Use appropriate HTTP status codes consistently** — Every status code tells the client what to do next: 201 for creation (client knows the resource was created), 204 for deletion (no content to return), 400 for bad request (client should fix the request), 401 for unauthenticated (client should log in), 403 for unauthorized (client lacks permission), 409 for conflict (client should retry with updated data), 422 for validation (client should fix specific fields). Inconsistent status codes force clients to parse error messages — always use the correct code.
+
+- **Implement rate limiting before you need it** — A single abusive client can take down your entire API. Implement rate limiting from the first deployment. Use the token bucket algorithm with Redis for distributed rate limiting. Set per-tenant, per-endpoint, and global limits. Return `429 Too Many Requests` with `Retry-After` and `X-RateLimit-*` headers. Monitor rate limit hit rates — a rising trend indicates a client with a bug or an attacker probing your API.**
+   A: Use `GET /api/v1/feed?page=0&size=20` returning a paginated response. Implement cursor-based pagination for real-time feeds to avoid duplicates when new posts are created. Use keyset pagination for better performance on large datasets.
+
+2. **Q: An e-commerce order placement endpoint is receiving duplicate requests due to network retries, causing double charges. How do you solve this?**
+   A: Implement idempotency using an `Idempotency-Key` header. The client generates a unique key per request. The server checks if the key was already processed; if so, returns the cached response instead of processing again.
+
+3. **Q: Your REST API is slow because clients are making many sequential calls to fetch related data (e.g., get orders, then get items for each order). How do you optimize?**
+   A: Implement bulk endpoints (`GET /orders?ids=1,2,3` with items included), add composite resources, support embedding via query params (`?include=items,user`), or use GraphQL for flexible client-driven queries.
+
+4. **Q: You need to support both JSON and XML responses from the same REST API. How would you implement this?**
+   A: Use content negotiation. Clients send `Accept: application/json` or `Accept: application/xml`. Spring Boot's `ContentNegotiationManager` automatically selects the appropriate `HttpMessageConverter`. Configure both Jackson and JAXB converters.
+
+5. **Q: Your API returns 500 errors intermittently on high load. How do you diagnose the issue?**
+   A: Enable request tracing with `MDC.put("requestId", requestId)`, log response times, monitor database connection pool usage (HikariCP metrics), check for thread pool exhaustion, and use Spring Boot Actuator for real-time metrics.
+
+6. **Q: A mobile client needs offline support and data synchronization. How does this affect your REST API design?**
+   A: Use optimistic locking with `ETag` and `If-Match` headers for conflict detection. Implement `Last-Modified` headers for incremental sync. Provide a `/sync` endpoint that returns changes since a timestamp.
+
+7. **Q: How do you handle partial updates without forcing clients to send the full resource?**
+   A: Use PATCH with JSON Patch (RFC 6902) or JSON Merge Patch (RFC 7396). Alternatively, use a `/users/{id}/fields` endpoint pattern where clients send only the changed fields.
+
+8. **Q: Your payment API must ensure that a charge is processed exactly once, even if the client retries. What pattern do you use?**
+   A: Idempotency keys. The client generates a UUID and sends it as `Idempotency-Key` header. The server stores the key with the result. On retry with the same key, return the stored result. Expire keys after 24 hours.
+
+9. **Q: You are migrating from REST to GraphQL. How do you handle this transition without breaking existing clients?**
+   A: Run both systems in parallel. Keep REST endpoints unchanged. Add a `/graphql` endpoint alongside. Redirect clients incrementally. Use the strangler fig pattern: route some traffic to GraphQL while keeping REST alive for legacy clients.
+
+10. **Q: How do you design a rate-limiting strategy for a multi-tenant REST API?**
+    A: Use token bucket or sliding window algorithm. Apply per-tenant, per-endpoint, and per-IP limits. Store counters in Redis for distributed rate limiting. Return `429 Too Many Requests` with `Retry-After` header. Queue excess requests when possible.

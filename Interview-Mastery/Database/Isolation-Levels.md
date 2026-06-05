@@ -1,625 +1,309 @@
-# Isolation Levels
+# Database Isolation Levels
 
-## 1. Executive Summary
+---
 
-Isolation levels define how and when changes made by one transaction become visible to other concurrent transactions. They control the trade-off between data consistency and concurrency. The SQL standard defines four isolation levels: READ UNCOMMITTED, READ COMMITTED, REPEATABLE READ, and SERIALIZABLE. Higher isolation levels prevent more concurrency anomalies but reduce throughput. In Spring Boot/JPA, isolation is configured via @Transactional(isolation = ...) and maps to the underlying database's implementation. Understanding isolation is critical for building correct concurrent applications.
+## What are Isolation Levels?
 
-## 2. Core Theory
+**Isolation levels** define how and when changes made by one transaction become visible to other concurrent transactions. They control the trade-off between **data consistency** and **concurrency**. The SQL standard defines four levels: **READ UNCOMMITTED**, **READ COMMITTED**, **REPEATABLE READ**, and **SERIALIZABLE**. Higher isolation levels prevent more anomalies but reduce throughput.
 
-### 2.1 Concurrency Anomalies
+### Key Concepts:
 
-| Anomaly | Description | Occurs At |
-|---------|-------------|-----------|
-| Dirty Read | Read uncommitted changes from another transaction | READ UNCOMMITTED |
-| Non-Repeatable Read | Same row read twice gives different values (row was updated by another tx) | READ UNCOMMITTED, READ COMMITTED |
-| Phantom Read | Same query gives different set of rows (rows were inserted/deleted by another tx) | READ UNCOMMITTED, READ COMMITTED, REPEATABLE READ |
-| Lost Update | Two transactions read same value, both update, last write overwrites first | All levels (unless explicitly prevented) |
-| Dirty Write | Write to uncommitted data | None (prevented at all levels) |
-| Read Skew | Inconsistent state due to reading different versions of related data | Below SNAPSHOT/SERIALIZABLE |
-| Write Skew | Two transactions read overlapping data and write inconsistently | Below SERIALIZABLE |
+1. **Concurrency Anomalies**:
 
-### 2.2 SQL Standard Isolation Levels
+   - **Dirty Read** — Reading uncommitted changes from another transaction. Occurs at READ UNCOMMITTED.
+   - **Non-Repeatable Read** — Same row read twice gives different values (another tx updated and committed between reads). Occurs at READ UNCOMMITTED and READ COMMITTED.
+   - **Phantom Read** — Same query returns different rows (another tx inserted/deleted rows). Occurs below SERIALIZABLE.
+   - **Lost Update** — Two transactions read the same value, both update, the last write overwrites the first. Can occur at any level unless explicitly prevented.
+   - **Write Skew** — Two transactions read overlapping data and make inconsistent writes. Only prevented by SERIALIZABLE.
 
-| Level | Dirty Read | Non-Repeatable Read | Phantom Read |
-|-------|-----------|-------------------|-------------|
-| READ UNCOMMITTED | Possible | Possible | Possible |
-| READ COMMITTED | Prevented | Possible | Possible |
-| REPEATABLE READ | Prevented | Prevented | Possible |
-| SERIALIZABLE | Prevented | Prevented | Prevented |
+2. **Isolation Level Matrix**:
 
-### 2.3 Snapshot Isolation
+   - **READ UNCOMMITTED** — Dirty reads, non-repeatable reads, and phantoms are all possible. Lowest consistency, highest performance.
+   - **READ COMMITTED** — Prevents dirty reads. Non-repeatable reads and phantoms are still possible. Default for PostgreSQL, Oracle, SQL Server.
+   - **REPEATABLE READ** — Prevents dirty and non-repeatable reads. Phantoms still possible. Default for MySQL/InnoDB.
+   - **SERIALIZABLE** — Prevents all anomalies. Highest consistency, lowest concurrency. Requires retry logic for serialization failures.
 
-Snapshot isolation (not in the original SQL standard but widely implemented):
-- Each transaction sees a consistent snapshot of the database as of the transaction start
-- Write-write conflicts are detected (first committer wins)
-- Prevents dirty reads, non-repeatable reads, and phantoms
-- Does NOT prevent write skew
-- Used by: PostgreSQL (REPEATABLE READ), Oracle (default), SQL Server (snapshot isolation), MySQL (REPEATABLE READ with MVCC)
+3. **Snapshot Isolation**:
 
-## 3. Under-the-Hood Deep Dive
+   Not in the original SQL standard but widely implemented:
+   - Each transaction sees a consistent snapshot from the transaction start.
+   - Write-write conflicts are detected (first committer wins).
+   - Prevents dirty reads, non-repeatable reads, and phantoms.
+   - Does **NOT** prevent write skew.
+   - Used by PostgreSQL (REPEATABLE READ), Oracle (default), SQL Server (SNAPSHOT), and MySQL (REPEATABLE READ with MVCC).
 
-### 3.1 How READ COMMITTED Works
+4. **MVCC-Based Implementation**:
 
-Implementation in MVCC databases:
+   Most modern databases use **Multi-Version Concurrency Control** (MVCC):
+   - Every write creates a new row version; old versions remain for concurrent readers.
+   - Readers never block writers, writers never block readers.
+   - READ COMMITTED uses a statement-level snapshot.
+   - REPEATABLE READ uses a transaction-level snapshot.
+
+---
+
+## Core Concepts
+
+### 1. How READ COMMITTED Works
+
+   Each statement sees the latest committed data as of the statement start:
+
+   ```
+   Tx A: BEGIN
+   Tx A: SELECT * FROM accounts WHERE id = 1 → balance = 100
+   Tx B: UPDATE accounts SET balance = 200 WHERE id = 1
+   Tx B: COMMIT
+   Tx A: SELECT * FROM accounts WHERE id = 1 → balance = 200 (different!)
+   Tx A: COMMIT
+   ```
+
+   In MVCC databases, this is implemented via **statement-level snapshots** — each query gets a fresh snapshot.
+
+### 2. How REPEATABLE READ Works
+
+   The transaction sees a consistent snapshot from its first read:
+
+   ```
+   Tx A: BEGIN (xid = 100)
+   Tx A: SELECT * FROM accounts WHERE id = 1 → balance = 100
+   Tx B: UPDATE accounts SET balance = 200 WHERE id = 1
+   Tx B: COMMIT (xid = 101)
+   Tx A: SELECT * FROM accounts WHERE id = 1 → balance = 100 (same!)
+   Tx A: COMMIT
+   ```
+
+   - PostgreSQL REPEATABLE READ: transaction snapshot from first query.
+   - MySQL REPEATABLE READ (InnoDB): transaction snapshot from first read + gap locks for phantom prevention.
+
+### 3. How SERIALIZABLE Works
+
+   PostgreSQL uses **Serializable Snapshot Isolation (SSI)** — true serializable with predicate locks:
+
+   ```
+   Tx A: BEGIN ISOLATION LEVEL SERIALIZABLE
+   Tx A: SELECT SUM(balance) FROM accounts WHERE type = 'CHECKING' → 1000
+   Tx B: BEGIN ISOLATION LEVEL SERIALIZABLE
+   Tx B: SELECT SUM(balance) FROM accounts WHERE type = 'SAVINGS' → 500
+   Tx A: UPDATE accounts SET balance = balance + 100 WHERE id = 1 AND type = 'CHECKING'
+   Tx A: COMMIT → succeeds
+   Tx B: UPDATE accounts SET balance = balance - 100 WHERE id = 2 AND type = 'SAVINGS'
+   Tx B: COMMIT → FAILS: "could not serialize access"
+   ```
+
+   SSI detects serialization anomalies using **conflict detection** based on read-write and write-write dependencies between concurrent transactions. One transaction is aborted to ensure serializability.
+
+### 4. Setting Isolation Levels in Spring
+
+   ```java
+   @Transactional(isolation = Isolation.READ_COMMITTED)
+   public void transfer(Long fromId, Long toId, BigDecimal amount) {
+       Account from = accountRepository.findById(fromId).get();
+       Account to = accountRepository.findById(toId).get();
+       from.setBalance(from.getBalance().subtract(amount));
+       to.setBalance(to.getBalance().add(amount));
+   }
+
+   @Transactional(isolation = Isolation.SERIALIZABLE)
+   public void transferSerializable(Long fromId, Long toId, BigDecimal amount) {
+       // Full isolation; may get serialization failures
+       Account from = accountRepository.findById(fromId).get();
+       Account to = accountRepository.findById(toId).get();
+       from.setBalance(from.getBalance().subtract(amount));
+       to.setBalance(to.getBalance().add(amount));
+   }
+   ```
+
+### 5. Retry for Serialization Failures
+
+   ```java
+   @Retryable(
+       value = CannotSerializeTransactionException.class,
+       maxAttempts = 3,
+       backoff = @Backoff(delay = 100, multiplier = 2)
+   )
+   @Transactional(isolation = Isolation.SERIALIZABLE)
+   public void transfer(Long fromId, Long toId, BigDecimal amount) {
+       Account from = accountRepository.findById(fromId).get();
+       Account to = accountRepository.findById(toId).get();
+       from.setBalance(from.getBalance().subtract(amount));
+       to.setBalance(to.getBalance().add(amount));
+   }
+
+   @Recover
+   public void recover(CannotSerializeTransactionException e,
+                       Long fromId, Long toId, BigDecimal amount) {
+       throw new TransferFailedException("Transfer failed, please try again later");
+   }
+   ```
+
+### 6. Lost Update Prevention
+
+   Lost updates require explicit mechanisms even at REPEATABLE READ:
+   - **Pessimistic locking**: `SELECT ... FOR UPDATE`
+   - **Optimistic locking**: `@Version` column with retry
+   - **Atomic operations**: `UPDATE table SET col = col + 1`
+   - **Serializable isolation**: Prevents all anomalies including lost updates
+
+### 7. Write Skew Example
+
+   Two doctors both check if they are the only on-call, both see zero others, both go off-call:
+
+   ```sql
+   -- Doctor A: SELECT count(*) FROM on_call WHERE doctor_id != 1 AND date = '2024-01-01';
+   -- Returns 0 (Doctor B is the only other on-call)
+   -- Doctor B: SELECT count(*) FROM on_call WHERE doctor_id != 2 AND date = '2024-01-01';
+   -- Returns 0 (Doctor A is the only other on-call)
+   -- Doctor A: DELETE FROM on_call WHERE doctor_id = 1 AND date = '2024-01-01';
+   -- Doctor B: DELETE FROM on_call WHERE doctor_id = 2 AND date = '2024-01-01';
+   -- Result: No doctors on call! (Write skew)
+   ```
+
+   Prevention requires SERIALIZABLE isolation or explicit locking:
+   ```sql
+   SELECT * FROM on_call WHERE date = '2024-01-01' FOR UPDATE;
+   ```
+
+---
+
+## Common Mistakes
+
+1. **Using default isolation without understanding database defaults** — PostgreSQL defaults to READ COMMITTED, MySQL to REPEATABLE READ.
+2. **Assuming REPEATABLE READ prevents all anomalies** — it doesn't prevent phantoms or write skew.
+3. **Not handling serialization failures** — SERIALIZABLE requires retry logic.
+4. **Using SERIALIZABLE everywhere** — massive performance impact; use only where needed.
+5. **Assuming READ UNCOMMITTED provides dirty reads in PostgreSQL** — PostgreSQL treats RU as RC.
+6. **Forgetting that READ COMMITTED allows non-repeatable reads** — same query, different results in same transaction.
+7. **Not testing for concurrency issues** — isolation bugs only appear under load.
+8. **Confusing database isolation with application-level locking** — isolation is per-transaction.
+9. **Not understanding MVCC interaction with isolation** — MVCC provides snapshot isolation, not true serializable.
+10. **Setting isolation at database level but overriding with different session/transaction settings.**
+
+---
+
+## Real-World Scenarios
+
+### 1. Inventory Reservation Under READ COMMITTED
+
+An e-commerce site checks stock before adding to cart. Under READ COMMITTED, two users both see 1 item in stock and both add to cart. The read is non-repeatable — between checking and updating, the stock changes:
+
+```sql
+-- Both transactions see stock = 1
+SELECT stock FROM inventory WHERE product_id = 100; -- Returns 1
+-- Both update, losing one update
+UPDATE inventory SET stock = 0 WHERE product_id = 100;
 ```
-Transaction A: BEGIN
-Transaction A: SELECT * FROM accounts WHERE id = 1
-    -> Returns current committed version
-Transaction B: UPDATE accounts SET balance = 100 WHERE id = 1
-Transaction B: COMMIT
-Transaction A: SELECT * FROM accounts WHERE id = 1
-    -> Returns NEW committed version (balance = 100)
-Transaction A: COMMIT
+
+Fix with `SELECT ... FOR UPDATE`:
+
+```sql
+SELECT stock FROM inventory WHERE product_id = 100 FOR UPDATE;
 ```
 
-- Each statement sees the latest committed data as of statement start
-- Row versions: Transaction B creates a new row version on UPDATE; Transaction A sees the new version on its next SELECT
+### 2. Consistent Report with REPEATABLE READ
 
-### 3.2 How REPEATABLE READ Works
-
-```
-Transaction A: BEGIN (xid = 100)
-Transaction A: SELECT * FROM accounts WHERE id = 1
-    -> Returns version as of xid=100 snapshot
-Transaction B: UPDATE accounts SET balance = 100 WHERE id = 1
-Transaction B: COMMIT (xid = 101)
-Transaction A: SELECT * FROM accounts WHERE id = 1
-    -> Returns SAME version as first SELECT (ignores xid 101 changes)
-Transaction A: COMMIT
-```
-
-- PostgreSQL REPEATABLE READ: Transaction sees snapshot from first query in transaction
-- MySQL REPEATABLE READ (InnoDB): Transaction sees snapshot from first read in transaction
-- Both prevent non-repeatable reads using MVCC
-
-### 3.3 How SERIALIZABLE Works
-
-PostgreSQL implements true SERIALIZABLE using Serializable Snapshot Isolation (SSI):
-```
-Transaction A: BEGIN ISOLATION LEVEL SERIALIZABLE
-Transaction A: SELECT SUM(balance) FROM accounts WHERE type = 'CHECKING'
-    -> Reads snapshot
-Transaction B: BEGIN ISOLATION LEVEL SERIALIZABLE
-Transaction B: SELECT SUM(balance) FROM accounts WHERE type = 'SAVINGS'
-    -> Reads snapshot
-Transaction A: UPDATE accounts SET balance = balance + 100 WHERE id = 1 AND type = 'CHECKING'
-    -> Works
-Transaction A: COMMIT
-    -> Succeeds
-Transaction B: UPDATE accounts SET balance = balance - 100 WHERE id = 2 AND type = 'SAVINGS'
-    -> Works
-Transaction B: COMMIT
-    -> FAILS: "could not serialize access due to read/write dependencies"
-```
-
-SSI detects serialization anomalies using predicate locks and conflict detection. A transaction that would produce a non-serializable execution is aborted.
-
-### 3.4 Lock-Based vs MVCC Implementations
-
-| Database | READ UNCOMMITTED | READ COMMITTED | REPEATABLE READ | SERIALIZABLE |
-|----------|-----------------|----------------|-----------------|--------------|
-| PostgreSQL | Like RC | MVCC (statement snapshot) | MVCC (tx snapshot) | SSI (true serializable) |
-| MySQL/InnoDB | Dirty reads possible | MVCC (statement snapshot) | MVCC (tx snapshot) | Locks + gap locks |
-| Oracle | N/A (default RC) | MVCC (statement snapshot) | N/A (use Serializable) | MVCC + ORA-08177 |
-| SQL Server | Dirty reads | Lock-based or SNAPSHOT | Lock-based or SNAPSHOT | Lock-based |
-
-### 3.5 Lost Update Prevention
-
-Lost updates require explicit mechanisms:
-1. **Pessimistic locking**: `SELECT ... FOR UPDATE`
-2. **Optimistic locking**: `@Version` column with retry
-3. **Atomic operations**: `UPDATE table SET col = col + 1`
-4. **Serializable isolation**: Prevents all anomalies including lost updates
-
-## 4. Production Code Examples
-
-### 4.1 Setting Isolation Levels in Spring
+A financial report runs for 30 seconds scanning millions of transactions. Under READ COMMITTED, each query sees different committed data. REPEATABLE READ gives a transaction-level snapshot:
 
 ```java
-@Service
+@Transactional(isolation = Isolation.REPEATABLE_READ)
+public Report generateMonthlyReport(YearMonth period) {
+    BigDecimal revenue = transactionRepo.sumByType("REVENUE", period);
+    BigDecimal expenses = transactionRepo.sumByType("EXPENSE", period);
+    return new Report(revenue, expenses);
+}
+```
+
+### 3. Doctor On-Call Write Skew
+
+Two on-call doctors check the schedule. Each sees exactly one other doctor on call, so each goes off call. Under REPEATABLE READ, neither sees the other's DELETE. Result: no doctor on call (write skew):
+
+```java
 @Transactional
-public class AccountService {
-
-    // Default: database's default (usually READ COMMITTED)
-    public BigDecimal getBalance(Long accountId) {
-        return accountRepository.findById(accountId)
-            .map(Account::getBalance)
-            .orElse(BigDecimal.ZERO);
-    }
-
-    @Transactional(isolation = Isolation.READ_COMMITTED)
-    // Prevents dirty reads but allows non-repeatable reads
-    public void transferReadCommitted(Long fromId, Long toId, BigDecimal amount) {
-        Account from = accountRepository.findById(fromId).get();
-        Account to = accountRepository.findById(toId).get();
-        from.setBalance(from.getBalance().subtract(amount));
-        to.setBalance(to.getBalance().add(amount));
-    }
-
-    @Transactional(isolation = Isolation.REPEATABLE_READ)
-    // Prevents dirty reads and non-repeatable reads
-    // In PostgreSQL: snapshot isolation (no phantoms in practice)
-    public void transferRepeatableRead(Long fromId, Long toId, BigDecimal amount) {
-        Account from = accountRepository.findById(fromId).get();
-        Account to = accountRepository.findById(toId).get();
-        from.setBalance(from.getBalance().subtract(amount));
-        to.setBalance(to.getBalance().add(amount));
-    }
-
-    @Transactional(isolation = Isolation.SERIALIZABLE)
-    // Full isolation; may get serialization failures requiring retry
-    public void transferSerializable(Long fromId, Long toId, BigDecimal amount) {
-        Account from = accountRepository.findById(fromId).get();
-        Account to = accountRepository.findById(toId).get();
-        from.setBalance(from.getBalance().subtract(amount));
-        to.setBalance(to.getBalance().add(amount));
+public void goOffCall(Long doctorId, LocalDate date) {
+    int onCallCount = onCallRepo.countByDateExcludingDoctor(date, doctorId);
+    if (onCallCount >= 1) { // Both see 1
+        onCallRepo.deleteByDoctorIdAndDate(doctorId, date);
     }
 }
 ```
 
-### 4.2 Retry for Serialization Failures
-
-```java
-@Service
-public class RetryableTransferService {
-
-    @Retryable(
-        value = CannotSerializeTransactionException.class,
-        maxAttempts = 3,
-        backoff = @Backoff(delay = 100, multiplier = 2)
-    )
-    @Transactional(isolation = Isolation.SERIALIZABLE)
-    public void transfer(Long fromId, Long toId, BigDecimal amount) {
-        Account from = accountRepository.findById(fromId).get();
-        Account to = accountRepository.findById(toId).get();
-        from.setBalance(from.getBalance().subtract(amount));
-        to.setBalance(to.getBalance().add(amount));
-    }
-
-    @Recover
-    public void recover(CannotSerializeTransactionException e,
-                        Long fromId, Long toId, BigDecimal amount) {
-        log.error("Transfer failed after retries: {} -> {} amount {}",
-                fromId, toId, amount, e);
-        throw new TransferFailedException("Transfer failed, please try again later");
-    }
-}
-```
-
-### 4.3 READ UNCOMMITTED for Reporting
-
-```java
-@Service
-public class ReportingService {
-
-    @Transactional(isolation = Isolation.READ_UNCOMMITTED)
-    // Accepts dirty reads for performance; reporting data needn't be perfectly accurate
-    public ReportSummary generateSummary() {
-        // These reads may see uncommitted data
-        // But it's OK for approximate reports
-        long totalOrders = orderRepository.count();
-        BigDecimal revenue = orderRepository.calculateTotalRevenue();
-        return new ReportSummary(totalOrders, revenue);
-    }
-}
-```
-
-### 4.4 Using SNAPSHOT Isolation (SQL Server)
-
-```java
-// SQL Server with Snapshot Isolation
-@Transactional(isolation = Isolation.REPEATABLE_READ)
-// This maps to SQL Server's SNAPSHOT isolation level if enabled
-public List<Order> getOrdersForReporting() {
-    // Consistent snapshot without blocking writers
-    return orderRepository.findAll();
-}
-```
-
-### 4.5 Checking Database Isolation Level
-
-```java
-@Component
-public class IsolationLevelChecker {
-
-    private final JdbcTemplate jdbcTemplate;
-
-    public String getCurrentIsolationLevel() {
-        // PostgreSQL
-        return jdbcTemplate.queryForObject(
-            "SHOW transaction_isolation", String.class);
-    }
-
-    public void setSessionIsolationLevel(String level) {
-        jdbcTemplate.execute(
-            "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL " + level);
-    }
-}
-```
-
-## 5. Real-World Scenarios
-
-### 5.1 Financial Transfer (SERIALIZABLE or Pessimistic Locking)
-
-```sql
--- SERIALIZABLE transaction
-BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;
-SELECT balance FROM accounts WHERE id = 1 FOR UPDATE;
--- Check balance >= amount
-UPDATE accounts SET balance = balance - 100 WHERE id = 1;
-SELECT balance FROM accounts WHERE id = 2 FOR UPDATE;
-UPDATE accounts SET balance = balance + 100 WHERE id = 2;
-COMMIT;
-```
-
-Without SERIALIZABLE or FOR UPDATE, concurrent transfers could cause lost updates or inconsistent reads.
-
-### 5.2 E-Commerce Cart (READ COMMITTED + Optimistic Lock)
-
-```java
-@Transactional(isolation = Isolation.READ_COMMITTED)
-public boolean addToCart(Long cartId, Long productId, int quantity) {
-    // Check stock (may be slightly stale - acceptable)
-    Product product = productRepository.findById(productId).get();
-    if (product.getStockQuantity() < quantity) {
-        return false;
-    }
-    // Add to cart
-    cartItemRepository.save(new CartItem(cartId, productId, quantity));
-    return true;
-}
-
-// Actual inventory reservation uses pessimistic lock in separate transaction
-@Transactional(isolation = Isolation.REPEATABLE_READ)
-public void reserveInventory(Long orderId, Long productId, int quantity) {
-    Product product = productRepository.findByIdWithLock(productId);
-    product.setStockQuantity(product.getStockQuantity() - quantity);
-}
-```
-
-### 5.3 Reporting with READ UNCOMMITTED
-
-```sql
-SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
--- Or in PostgreSQL:
-BEGIN;
-SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
--- PostgreSQL treats this as READ COMMITTED
-SELECT COUNT(*), SUM(amount) FROM orders WHERE created_at > NOW() - INTERVAL '1 hour';
-COMMIT;
-```
-
-### 5.4 Write Skew Scenario
-
--- Write skew: Two doctors both check if they are on call, both see they're the only one, both go off call
-```sql
--- Doctor A checks: SELECT count(*) FROM on_call WHERE doctor_id != 1 AND date = '2024-01-01';
--- Returns 0 (Doctor B is the only other on call)
--- Doctor B checks: SELECT count(*) FROM on_call WHERE doctor_id != 2 AND date = '2024-01-01';
--- Returns 0 (Doctor A is the only other on call)
--- Doctor A: DELETE FROM on_call WHERE doctor_id = 1 AND date = '2024-01-01';
--- Doctor B: DELETE FROM on_call WHERE doctor_id = 2 AND date = '2024-01-01';
--- Result: No doctors on call! (Write skew)
-```
-
-Prevention requires SERIALIZABLE isolation or explicit locking:
-```sql
--- SELECT FOR UPDATE on the relevant rows
-SELECT * FROM on_call WHERE date = '2024-01-01' FOR UPDATE;
-```
-
-## 6. Performance
-
-### 6.1 Isolation Level Performance Impact
-
-| Level | Read Overhead | Write Overhead | Contention |
-|-------|--------------|---------------|------------|
-| READ UNCOMMITTED | Lowest | Lowest | Lowest |
-| READ COMMITTED | Low | Low | Low |
-| REPEATABLE READ | Medium | Medium | Medium |
-| SERIALIZABLE | High | High | High (retries) |
-
-### 6.2 Throughput vs Consistency Trade-off
-
-- **READ UNCOMMITTED**: Highest throughput, risky data quality
-- **READ COMMITTED**: Good balance; default for most databases
-- **REPEATABLE READ**: Lower throughput, needed for consistent snapshots
-- **SERIALIZABLE**: Lowest throughput, maximum consistency
-
-### 6.3 Connection Pool Impact
-
-Higher isolation levels hold transactions longer (waiting for locks), which ties up connection pool resources. Monitor:
-- Connection wait time
-- Active vs idle connections
-- Transaction duration distribution
-
-## 7. Security
-
-### 7.1 Isolation Level and Data Exposure
-
-Lower isolation levels can expose sensitive data:
-- **Dirty reads**: User could see another user's uncommitted (potentially incorrect) data
-- **Non-repeatable reads**: Reporting inconsistency could lead to incorrect security decisions
-
-Set minimum isolation level based on data sensitivity:
-```java
-@Transactional(isolation = Isolation.REPEATABLE_READ)
-public SensitiveData readSensitiveData() {
-    // Stronger isolation for sensitive operations
-}
-```
-
-### 7.2 Anomaly-Based Attacks
-
-Attackers could exploit isolation anomalies:
-- **Read skew**: Exploit inconsistent state for fraud
-- **Write skew**: Bypass business rules (e.g., both withdraw from last shared funds)
-
-Use SERIALIZABLE for security-critical operations.
-
-## 8. Common Mistakes
-
-1. **Using default isolation without understanding what it means** — database defaults vary
-2. **Assuming REPEATABLE READ prevents all anomalies** — doesn't prevent phantoms or write skew
-3. **Not handling serialization failures** — SERIALIZABLE requires retry logic
-4. **Confusing database isolation with application-level locking** — isolation is per-transaction
-5. **Using SERIALIZABLE everywhere** — massive performance impact; use only where needed
-6. **Not testing for concurrency issues** — isolation bugs only appear under load
-7. **Assuming READ UNCOMMITTED provides no dirty reads in PostgreSQL** — PostgreSQL treats RU as RC
-8. **Forgetting that READ COMMITTED allows non-repeatable reads** — same query, different results in same tx
-9. **Not understanding MVCC interaction with isolation** — MVCC provides snapshot isolation, not true serializable
-10. **Setting isolation at database level but overriding with different session/transaction settings**
-
-## 9. Senior Engineer Perspective
-
-### Isolation Level Decision Matrix
-
-| Application Type | Recommended Isolation | Rationale |
-|-----------------|----------------------|-----------|
-| Financial transactions | SERIALIZABLE or READ COMMITTED + FOR UPDATE | Must prevent all anomalies |
-| E-commerce | READ COMMITTED (carts) + lower for browsing | Balance consistency vs performance |
-| Social media | READ COMMITTED | Inconsistencies acceptable |
-| Reporting/analytics | READ UNCOMMITTED / SNAPSHOT | Avoid blocking; approximate OK |
-| Inventory management | REPEATABLE READ + optimistic lock | Prevent overselling without serialization overhead |
-| Audit trailing | SERIALIZABLE | Must have consistent view |
-
-### Isolation Across Microservices
-
-Each service has its own database with its own isolation. Cross-service consistency requires:
-- Saga patterns with compensating transactions
-- Distributed tracing to detect anomalies
-- Event-driven eventual consistency
-
-### PostgreSQL Isolation Behavior
-
-PostgreSQL's isolation behavior:
-- READ UNCOMMITTED -> treated as READ COMMITTED
-- READ COMMITTED -> statement-level snapshot
-- REPEATABLE READ -> transaction-level snapshot (no phantoms in practice due to MVCC)
-- SERIALIZABLE -> SSI with predicate locks; may abort with serialization failure
-
-## 10. Interview Questions (20)
-
-### Easy (10)
-
-1. What is a transaction isolation level?
-2. What is a dirty read?
-3. What is a non-repeatable read?
-4. What is a phantom read?
-5. List the four standard isolation levels from lowest to highest.
-6. Which isolation level prevents dirty reads?
-7. Which isolation level prevents all anomalies?
-8. What is the default isolation level in PostgreSQL?
-9. What is the default isolation level in MySQL/InnoDB?
-10. How do you set isolation level in Spring @Transactional?
-
-### Medium (10)
-
-11. Explain the difference between READ COMMITTED and REPEATABLE READ.
-12. What is snapshot isolation and how does it differ from SERIALIZABLE?
-13. What is a write skew anomaly? How does SERIALIZABLE prevent it?
-14. How does MVCC enable READ COMMITTED without read locks?
-15. What happens when two concurrent transactions use SERIALIZABLE and both modify the same data?
-16. Explain the "first committer wins" rule in snapshot isolation.
-17. How do you handle serialization failures in a Spring Boot application?
-18. What is the difference between pessimistic and optimistic concurrency control?
-19. How does REPEATABLE READ prevent non-repeatable reads?
-20. What is the performance impact of using SERIALIZABLE vs READ COMMITTED?
-
-## 11. Advanced Interview Questions (20)
-
-### Hard (10)
-
-1. Explain how PostgreSQL's Serializable Snapshot Isolation (SSI) detects serialization anomalies.
-2. What are predicate locks and how do they prevent phantoms in SERIALIZABLE isolation?
-3. How does MySQL/InnoDB REPEATABLE READ prevent phantoms using gap locks?
-4. Explain the difference between "read skew" and "write skew" anomalies.
-5. How does Oracle's snapshot isolation differ from PostgreSQL's REPEATABLE READ?
-6. What is the "lost update" problem and why isn't it prevented by REPEATABLE READ?
-7. How does the ANSI SQL standard definition of isolation levels differ from practical implementations?
-8. Explain the concept of "anomaly-strong" vs "anomaly-weak" isolation and the Adya classification.
-9. How does SQL Server's SNAPSHOT isolation level compare to PostgreSQL's REPEATABLE READ?
-10. What is the "SI anomaly" that can occur with snapshot isolation but not with serializable?
-
-### System Design (11-20)
-
-11. Design a system where different operations use different isolation levels.
-12. How would you design a multi-region database system supporting serializable isolation?
-13. Design a financial system that uses READ COMMITTED but prevents all anomalies programmatically.
-14. How would you implement a monitoring system that tracks isolation-level-related anomalies?
-15. Design a system that dynamically adjusts isolation level based on query type and system load.
-16. How would you design a testing framework for detecting isolation-related bugs?
-17. Design a multi-tenant database where each tenant can choose their isolation level.
-18. How would you design a system where reports run at READ UNCOMMITTED without impacting OLTP workloads?
-19. Design a system that provides serializable isolation without the performance cost using application-level locking.
-20. How would you implement a distributed isolation level across shards?
-
-## 12. Expert-Level Interview Questions (10)
-
-1. Design a concurrency control system that automatically chooses between optimistic and pessimistic strategies based on contention probability prediction.
-2. How would you implement a true serializable isolation level on top of a database that only supports snapshot isolation?
-3. Design a system that detects phantom reads in production and alerts when they occur.
-4. How would you implement a distributed serializable snapshot isolation protocol across a multi-region database?
-5. Design a transaction scheduler that uses machine learning to predict and prevent serialization anomalies before they happen.
-6. How would you implement an isolation level that is stronger than REPEATABLE READ but weaker than SERIALIZABLE (e.g., "repeatable read with no phantoms but allows write skew")?
-7. Design a system that can transparently upgrade isolation level for certain operations based on learned query patterns.
-8. How would you implement a correctness checker that verifies isolation guarantees are being met in production?
-9. Design a cost model that quantifies the dollar value of isolation anomalies (how much should we spend to prevent them?).
-10. How would you implement a linearizable isolation level on top of a Non-Volatile Memory (NVM) storage engine?
-
-## 13. Debugging & Troubleshooting
-
-### Check Current Isolation Level
-
-```sql
--- PostgreSQL
-SHOW transaction_isolation;
-
--- MySQL
-SELECT @@transaction_isolation;
-
--- SQL Server
-SELECT CASE transaction_isolation_level
-    WHEN 0 THEN 'Unspecified'
-    WHEN 1 THEN 'Read Uncommitted'
-    WHEN 2 THEN 'Read Committed'
-    WHEN 3 THEN 'Repeatable Read'
-    WHEN 4 THEN 'Serializable'
-    WHEN 5 THEN 'Snapshot'
-END AS isolation_level
-FROM sys.dm_exec_sessions
-WHERE session_id = @@SPID;
-```
-
-### Detect Isolation Anomalies
-
-```sql
--- Check for serialization failures
-SELECT datname, xact_commit, xact_rollback,
-       ROUND(100.0 * xact_rollback / NULLIF(xact_commit + xact_rollback, 0), 2) AS rollback_pct
-FROM pg_stat_database;
-
--- PostgreSQL: count serialization failures
-SELECT count(*) AS serialization_failures
-FROM pg_stat_database
-WHERE xact_rollback > 0
-  AND datname = current_database();
-```
-
-### Spring Boot Isolation Logging
-
-```yaml
-logging:
-  level:
-    org.springframework.transaction: TRACE
-    org.springframework.orm.jpa.JpaTransactionManager: DEBUG
-```
-
-## 14. Comparison Section
-
-| Aspect | READ UNCOMMITTED | READ COMMITTED | REPEATABLE READ | SERIALIZABLE |
-|--------|-----------------|----------------|-----------------|--------------|
-| Dirty Read | X | OK | OK | OK |
-| Non-Repeatable Read | X | X | OK | OK |
-| Phantom Read | X | X | X | OK |
-| Write Skew | X | X | X | OK |
-| Lost Update | X | X | X | OK |
-| Typical Use | Reporting, dashboard | OLTP (default) | Inventory, billing | Financial, critical |
-| Lock Usage | None | Short read locks | Read locks held | Full locking/predicate locks |
-| MVCC | Statement snapshot | Statement snapshot | Tx snapshot | SSI / lock-based |
-| PostgreSQL Impl | Like RC | Statement snapshot | Tx snapshot | SSI (true serializable) |
-| MySQL Impl | Dirty reads possible | Statement snapshot | Tx snapshot + gap locks | Lock-based + gap locks |
-| Performance | Best | Good | Fair | Worst |
-
-## 15. Revision Notes
-
-- Four levels: READ UNCOMMITTED < READ COMMITTED < REPEATABLE READ < SERIALIZABLE
-- Dirty read: seeing uncommitted data (prev at RC+)
-- Non-repeatable read: same row, different values in same tx (prev at RR+)
-- Phantom read: same query, different rows in same tx (prev at SERIALIZABLE)
-- Write skew: inconsistent writes based on stale snapshot (only SERIALIZABLE prevents)
-- PostgreSQL MVCC provides snapshot isolation at REPEATABLE READ
-- PostgreSQL SERIALIZABLE uses SSI (Serializable Snapshot Isolation) — true serializable
-- Higher isolation = more consistency, less concurrency
-- Always handle serialization failures with retry logic
-- Default isolation varies by database (PG=RC, MySQL=RR, Oracle=RC, SQL Server=RC)
-
-## 16. Cheat Sheet
-
-```
-+-------------------------------------------------------------------+
-|                  ISOLATION LEVELS CHEAT SHEET                     |
-+-------------------------------------------------------------------+
-|                                                                   |
-|  ANOMALY PROTECTION MATRIX:                                       |
-|                                                                   |
-|  +------------------+------+------+------+-----------+          |
-|  |                  | RU   | RC   | RR   | SERIAL    |          |
-|  +------------------+------+------+------+-----------+          |
-|  | Dirty Read       | FAIL | PASS | PASS | PASS      |          |
-|  | Non-Repeat Read  | FAIL | FAIL | PASS | PASS      |          |
-|  | Phantom Read     | FAIL | FAIL | FAIL | PASS      |          |
-|  | Lost Update      | FAIL | FAIL | FAIL | PASS      |          |
-|  | Write Skew       | FAIL | FAIL | FAIL | PASS      |          |
-|  +------------------+------+------+------+-----------+          |
-|                                                                   |
-|  RU = READ UNCOMMITTED                                            |
-|  RC = READ COMMITTED                                              |
-|  RR = REPEATABLE READ                                             |
-|  SERIAL = SERIALIZABLE                                            |
-|                                                                   |
-+-------------------------------------------------------------------+
-|  DATABASE DEFAULTS AND BEHAVIOR:                                  |
-|                                                                   |
-|  PostgreSQL:       RC (default), RR=Snapshot, SERIAL=SSI          |
-|  MySQL/InnoDB:     RR (default), uses MVCC + gap locks            |
-|  Oracle:           RC (default), RR unavailable, SERIAL=Snapshot  |
-|  SQL Server:       RC (default), offers SNAPSHOT isolation        |
-|                                                                   |
-+-------------------------------------------------------------------+
-|  SPRING BOOT CONFIGURATION:                                       |
-|                                                                   |
-|  @Transactional(isolation = Isolation.READ_COMMITTED)             |
-|  @Transactional(isolation = Isolation.REPEATABLE_READ)            |
-|  @Transactional(isolation = Isolation.SERIALIZABLE)               |
-|                                                                   |
-|  Global default:                                                   |
-|  spring.jpa.properties.hibernate.connection.isolation: 2          |
-|  # 1=RU, 2=RC, 4=RR, 8=SERIAL                                    |
-|                                                                   |
-+-------------------------------------------------------------------+
-|  ANOMALY EXAMPLES:                                                |
-|                                                                   |
-|  Dirty Read:                                                      |
-|    Tx1: UPDATE account SET balance=200                             |
-|    Tx2: SELECT balance -> sees 200 (uncommitted!)                  |
-|    Tx1: ROLLBACK (balance back to 100)                            |
-|    Tx2: used wrong value!                                         |
-|                                                                   |
-|  Non-Repeatable Read:                                             |
-|    Tx1: SELECT balance -> 100                                     |
-|    Tx2: UPDATE balance=200; COMMIT                                |
-|    Tx1: SELECT balance -> 200 (different!)                        |
-|                                                                   |
-|  Phantom Read:                                                    |
-|    Tx1: SELECT count(*) WHERE status='PENDING' -> 5               |
-|    Tx2: INSERT order (status='PENDING'); COMMIT                  |
-|    Tx1: SELECT count(*) WHERE status='PENDING' -> 6 (phantom!)   |
-|                                                                   |
-+-------------------------------------------------------------------+
-|  SERIALIZABLE RETRY PATTERN:                                      |
-|                                                                   |
-|  @Retryable(value = CannotSerializeTransactionException.class,    |
-|             maxAttempts = 3, backoff = @Backoff(delay = 100))     |
-|  @Transactional(isolation = Isolation.SERIALIZABLE)              |
-|  public void criticalOperation() { ... }                          |
-|                                                                   |
-+-------------------------------------------------------------------+
-|  LOST UPDATE PREVENTION (without SERIALIZABLE):                   |
-|                                                                   |
-|  1. SELECT ... FOR UPDATE (pessimistic lock)                     |
-|  2. @Version column (optimistic lock)                             |
-|  3. Atomic SQL: UPDATE table SET col = col + 1                   |
-|  4. LAST_UPDATED timestamp check                                 |
-|                                                                   |
-+-------------------------------------------------------------------+
+Fix with `SELECT ... FOR UPDATE` or SERIALIZABLE isolation.
+
+## Scenario-Based Questions
+
+1. **Q: Your booking system uses READ COMMITTED. Two users simultaneously book the last seat. Both see "available" and both book successfully — overselling by 1. How do you prevent this?**
+   A: Use pessimistic locking: `SELECT ... FOR UPDATE` locks the row until the transaction commits, forcing the second user to wait. Or use SERIALIZABLE isolation with retry logic. With optimistic locking (`@Version`), the second commit fails with `OptimisticLockException` and you retry, but under high contention retries degrade throughput.
+
+2. **Q: A reporting job at REPEATABLE READ produces inconsistent counts between users and orders tables. The report shows order counts that don't match the users table. What's happening?**
+   A: REPEATABLE READ prevents non-repeatable reads within a single table but doesn't prevent phantoms across tables. If the report queries users first, then orders, and new orders are inserted between the queries, counts are inconsistent. Use SERIALIZABLE or take a snapshot timestamp and filter by `created_at <= snapshot_time`.
+
+3. **Q: Your app uses `@Transactional(isolation = Isolation.SERIALIZABLE)`. Under high load, 30% of transactions fail with "could not serialize access". How do you fix this?**
+   A: Add retry logic with exponential backoff using `@Retryable`. If contention is intrinsic, consider relaxing to REPEATABLE READ with explicit locking on critical paths. Redesign transactions to be shorter — read in SERIALIZABLE, compute, retry on conflict.
+
+4. **Q: Two transactions both read the same set of rows, then make decisions based on what they read. Neither updates the same rows, yet the final state is inconsistent. What anomaly is this?**
+   A: Write skew — each transaction reads an overlapping data set and makes writes that are individually correct but collectively inconsistent. Example: two doctors going off call. Only SERIALIZABLE or `SELECT ... FOR UPDATE` on the overlapping predicate prevents this.
+
+5. **Q: Your PostgreSQL app uses READ UNCOMMITTED expecting dirty reads, but they don't occur. Why?**
+   A: PostgreSQL does not support dirty reads — READ UNCOMMITTED behaves identically to READ COMMITTED. MVCC makes dirty reads impossible because readers always see a consistent snapshot from the statement start.
+
+6. **Q: A heavy analytics query at READ COMMITTED blocks OLTP writes for several seconds. You cannot change the query. How do you fix this?**
+   A: The analytics query may acquire shared locks. Use a read-only replica. Without replicas, set `SET TRANSACTION READ ONLY` and `SET TRANSACTION ISOLATION LEVEL SERIALIZABLE` in PostgreSQL — SSI doesn't block writes. Alternatively, lower `lock_timeout` so the analytics query fails fast.
+
+7. **Q: You need to choose an isolation level for a financial trading system where every trade must be accurate, but SERIALIZABLE causes too many conflicts. What do you do?**
+   A: Use REPEATABLE READ for reads. For critical writes (order placement, balance updates), use `SELECT ... FOR UPDATE`. For balance updates, use atomic SQL: `UPDATE accounts SET balance = balance + ? WHERE id = ? AND balance + ? >= 0`.
+
+8. **Q: An app at REPEATABLE READ has a long-running transaction (5 minutes) that blocks VACUUM from cleaning dead tuples. What happens?**
+   A: MVCC retains old row versions visible to the long-running transaction, causing table bloat. Autovacuum cannot remove dead tuples visible to any active transaction. Keep transactions short, or set `old_snapshot_threshold` in PostgreSQL to forcibly terminate long snapshots.
+
+9. **Q: Your PostgreSQL at READ COMMITTED has a transaction that reads a row, processes for 2 seconds, then writes. Under high concurrency, writes fail with "could not serialize access" even though you're not using SERIALIZABLE. Why?**
+   A: A trigger or function may use SERIALIZABLE internally, or a deferred constraint check causes the failure. Check for serializable functions in the call stack. In rare cases, pgBouncer transaction mode can cause unexpected serialization errors.
+
+10. **Q: Your MySQL REPEATABLE READ transaction sometimes gets duplicate key errors on INSERT from concurrent transactions. How is this possible at REPEATABLE READ?**
+    A: MySQL's REPEATABLE READ uses MVCC where INSERTs don't see each other's uncommitted data due to gap locks, but the unique constraint is checked at commit time. The second committer fails. Use SERIALIZABLE to prevent it entirely, or handle unique violation errors in application code.
+
+## Interview Questions
+
+1. **What are the four SQL standard isolation levels?**
+   A: READ UNCOMMITTED, READ COMMITTED, REPEATABLE READ, and SERIALIZABLE. Higher levels prevent more anomalies but reduce concurrency.
+
+2. **What is a dirty read?**
+   A: Reading uncommitted changes from another transaction. If that transaction rolls back, you've read data that never existed. Prevented by READ COMMITTED and above.
+
+3. **What is the difference between non-repeatable read and phantom read?**
+   A: Non-repeatable read: same row read twice gives different values (row updated). Phantom read: same query returns different rows (rows inserted). REPEATABLE READ prevents non-repeatable but allows phantoms.
+
+4. **What is snapshot isolation?**
+   A: Each transaction gets a consistent snapshot at start time. Implemented via MVCC in PostgreSQL, Oracle, SQL Server, and MySQL. Prevents dirty reads, non-repeatable reads, and phantoms, but not write skew.
+
+5. **What is write skew?**
+   A: Two transactions read overlapping data and make individually correct but collectively inconsistent writes. Example: two doctors go off call leaving no coverage. Only SERIALIZABLE prevents write skew.
+
+6. **How does MVCC implement REPEATABLE READ?**
+   A: Each transaction gets a snapshot at its first read. Queries see row versions committed before snapshot time. Later writes by other transactions are invisible.
+
+7. **Does READ COMMITTED prevent lost updates?**
+   A: No. Lost updates can occur at any isolation level unless explicitly prevented with `SELECT FOR UPDATE`, `@Version`, or atomic updates.
+
+8. **What is SSI (Serializable Snapshot Isolation)?**
+   A: PostgreSQL's SERIALIZABLE implementation. Uses predicate locks to detect read-write conflicts that would produce non-serializable behavior, including write skew. One conflicting transaction is aborted.
+
+9. **Why would you avoid SERIALIZABLE everywhere?**
+   A: Highest overhead — more conflicts, more aborts, requires retry logic. Use where absolute correctness is needed (financial) and READ COMMITTED/REPEATABLE READ for everything else.
+
+10. **What is the default isolation level in PostgreSQL vs MySQL?**
+    A: PostgreSQL defaults to READ COMMITTED. MySQL (InnoDB) defaults to REPEATABLE READ. Know your database's default.
+
+## Developer Recommendations
+
+- **Use READ COMMITTED as the default isolation level** — It balances consistency and concurrency for most workloads. PostgreSQL uses it by default. Only escalate when data anomalies are identified and unacceptable.
+
+- **Prefer explicit locking (SELECT FOR UPDATE) over SERIALIZABLE** — SERIALIZABLE has global overhead and requires retry logic. `SELECT FOR UPDATE` locks only specific rows, providing the same guarantee with much lower contention.
+
+- **Always handle serialization failures with retry logic** — SERIALIZABLE transactions can abort at any time. Use `@Retryable` with exponential backoff for `CannotSerializeTransactionException`.
+
+- **Use REPEATABLE READ for reporting queries** — Reports running for seconds should use REPEATABLE READ so all queries see a consistent snapshot. Under READ COMMITTED, different queries may see different data.
+
+- **Test with realistic concurrency** — Isolation bugs only appear under load. Write integration tests simulating concurrent transactions using testcontainers.
+
+- **Use atomic UPDATE instead of read-then-write** — `UPDATE accounts SET balance = balance + 100 WHERE id = 1` is immune to lost updates. The read-then-write pattern is vulnerable regardless of isolation level.
+
+- **Know your database's MVCC behavior** — PostgreSQL's REPEATABLE READ allows phantoms via snapshots. MySQL's uses gap locks preventing some phantoms at higher contention cost.

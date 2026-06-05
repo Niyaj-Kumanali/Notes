@@ -1,934 +1,229 @@
 # Domain-Driven Design (DDD)
 
-## 1. Executive Summary
+---
 
-Domain-Driven Design is a software development approach introduced by Eric Evans in 2003 that emphasizes modeling software to closely reflect the business domain. DDD provides a set of strategic and tactical patterns for building complex systems by focusing on the core domain, establishing a ubiquitous language between developers and domain experts, and defining clear bounded contexts. It is particularly valuable for microservices decomposition and complex business logic implementation.
+## Overview
 
-## 2. Core Theory
+- **Definition:** A software development approach introduced by Eric Evans that emphasizes modeling software to closely reflect the business domain using a shared language between developers and domain experts.
+- **Why It Exists:** Complex business domains require a model that evolves with business understanding. DDD provides strategic patterns (bounded contexts, context maps) and tactical patterns (entities, value objects, aggregates) to manage complexity and align software with business goals.
+- **Key Concepts:** **Ubiquitous Language** (shared language between devs and domain experts), **Bounded Context** (logical boundary for a domain model), **Entity** (object with identity), **Value Object** (immutable, defined by attributes), **Aggregate** (cluster of objects with a root entity), **Repository** (persistence abstraction), **Domain Event** (something the business cares about), **Domain Service** (stateless domain logic), **Anti-Corruption Layer** (translation between contexts)
 
-### Strategic Design
+---
 
-**Ubiquitous Language:** A shared language between developers and domain experts, used in code, discussions, and documentation. Every term has a precise, agreed-upon meaning.
+## Core Concepts
 
-**Bounded Context:** A logical boundary within which a particular domain model applies. Each bounded context has its own ubiquitous language and internal models. Microservices often correspond to bounded contexts.
-
-**Context Map:** A diagram showing the relationships between bounded contexts (partnership, shared kernel, customer-supplier, conformist, anticorruption layer, open-host service, published language, separate ways, big ball of mud).
-
-### Tactical Design (Building Blocks)
-
-- **Entity**: An object with a distinct identity that runs through time and different states.
-- **Value Object**: An immutable object defined by its attributes (no identity).
-- **Aggregate**: A cluster of associated objects treated as a unit with a root entity.
-- **Repository**: Provides access to aggregates, encapsulating storage and retrieval.
-- **Domain Service**: Stateless service that holds domain logic that doesn't naturally fit in an entity or value object.
-- **Domain Event**: Something that happened in the domain that domain experts care about.
-- **Factory**: Encapsulates complex creation logic for aggregates.
-
-## 3. Under-the-Hood Deep Dive
-
-### Entity vs Value Object
+- **Entity vs Value Object:** Entity has a distinct identity that persists across time and states — equals by ID. Value Object is immutable, has no identity, and equals by its attributes — e.g., `Money(amount, currency)`.
+- **Aggregate and Aggregate Root:** A cluster of associated objects treated as a unit with a root entity that controls access. External objects reference the aggregate by ID only. One transaction per aggregate. Invariants are enforced within aggregate boundaries.
+- **Repository:** Provides access to aggregates, encapsulating storage and retrieval. Defined in the domain layer, implemented in the infrastructure layer. Returns aggregates in a consistent state.
+- **Domain Service:** Stateless service that holds domain logic that doesn't naturally fit in an entity or value object. Different from Application Service which orchestrates use cases.
+- **Domain Event:** An immutable fact about something that happened in the domain that domain experts care about. Published after aggregate changes are persisted. Used for cross-aggregate and cross-context communication.
+- **Strategic Design Patterns:** Core Domain (competitive advantage, invest heavily), Supporting Subdomain (necessary but not core), Generic Subdomain (common — buy or use open source). Bounded Contexts and Context Maps define inter-context relationships.
 
 ```java
-// Entity - has identity (id field)
-@Entity
-public class Order {
-    @Id
-    private String orderId; // Identity
-    private String customerId;
-    private Money totalAmount;
-    private OrderStatus status;
-    private List<OrderLine> items;
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (!(o instanceof Order)) return false;
-        Order order = (Order) o;
-        return Objects.equals(orderId, order.orderId);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(orderId);
-    }
-}
-
-// Value Object - no identity, immutable
+// Value Object — immutable, no identity
 @Value
 public class Money {
     BigDecimal amount;
     Currency currency;
 
     public Money add(Money other) {
-        if (!this.currency.equals(other.currency)) {
-            throw new IllegalArgumentException("Currency mismatch");
-        }
+        if (!this.currency.equals(other.currency)) throw new IllegalArgumentException("Currency mismatch");
         return new Money(this.amount.add(other.amount), this.currency);
-    }
-
-    public Money multiply(int quantity) {
-        return new Money(this.amount.multiply(BigDecimal.valueOf(quantity)), this.currency);
     }
 }
 
-// Usage
-Money price = new Money(new BigDecimal("29.99"), Currency.getInstance("USD"));
-Money total = price.multiply(3); // Returns new Money instance
-```
-
-### Aggregate and Aggregate Root
-
-```java
-// Aggregate Root - Order is the root entity
+// Aggregate Root — enforces invariants
 @Entity
-@Table(name = "orders")
 public class Order {
-
-    @Id
-    private String orderId;
-
-    @Version
-    private Long version; // Optimistic concurrency
-
-    @Embedded
-    private Money totalAmount;
-
-    @Enumerated(EnumType.STRING)
+    @Id private String orderId;
+    @Version private Long version;
     private OrderStatus status;
+    @OneToMany(cascade = ALL) private List<OrderLine> items = new ArrayList<>();
 
-    @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true)
-    @JoinColumn(name = "order_id")
-    private List<OrderLine> items = new ArrayList<>();
-
-    // Aggregate invariant: total must match sum of line items
     public void addItem(Product product, int quantity, Money price) {
-        // Business rule validation inside aggregate
-        if (this.status != OrderStatus.DRAFT) {
-            throw new IllegalStateException("Cannot modify confirmed order");
-        }
-        if (quantity <= 0) {
-            throw new IllegalArgumentException("Quantity must be positive");
-        }
-
-        OrderLine line = new OrderLine(product, quantity, price);
-        this.items.add(line);
-        this.totalAmount = calculateTotal(); // Invariant maintained
+        if (this.status != OrderStatus.DRAFT) throw new IllegalStateException("Cannot modify confirmed order");
+        if (quantity <= 0) throw new IllegalArgumentException("Quantity must be positive");
+        this.items.add(new OrderLine(product, quantity, price));
     }
 
     public void submit() {
-        if (this.items.isEmpty()) {
-            throw new IllegalStateException("Cannot submit empty order");
-        }
-        // Additional business rules
+        if (this.items.isEmpty()) throw new IllegalStateException("Cannot submit empty order");
         this.status = OrderStatus.SUBMITTED;
-        // Register domain event
-        registerEvent(new OrderSubmittedEvent(this.orderId, this.totalAmount));
-    }
-
-    private Money calculateTotal() {
-        return items.stream()
-            .map(OrderLine::getSubtotal)
-            .reduce(Money.zero(Currency.getInstance("USD")), Money::add);
-    }
-
-    // Event registration
-    @Transient
-    private final List<DomainEvent> domainEvents = new ArrayList<>();
-
-    public List<DomainEvent> getDomainEvents() {
-        return Collections.unmodifiableList(domainEvents);
-    }
-
-    public void clearEvents() {
-        domainEvents.clear();
-    }
-
-    protected void registerEvent(DomainEvent event) {
-        domainEvents.add(event);
+        registerEvent(new OrderSubmittedEvent(this.orderId));
     }
 }
 
-// Entity inside aggregate
-@Embeddable
-public class OrderLine {
-    private String productId;
-    private String productName;
-    private int quantity;
-
-    @Embedded
-    private Money unitPrice;
-
-    public Money getSubtotal() {
-        return unitPrice.multiply(quantity);
-    }
-}
-```
-
-### Repository
-
-```java
-// Repository interface - in domain layer
+// Repository — abstraction in domain layer
 public interface OrderRepository {
     Order findById(OrderId id);
     void save(Order order);
     void delete(Order order);
 }
-
-// Repository implementation - in infrastructure layer
-@Repository
-public class JpaOrderRepository implements OrderRepository {
-
-    @PersistenceContext
-    private EntityManager entityManager;
-
-    @Override
-    public Order findById(OrderId id) {
-        return entityManager.find(Order.class, id.getValue());
-    }
-
-    @Override
-    public void save(Order order) {
-        // Domain events should be published after save
-        entityManager.persist(order);
-    }
-
-    @Override
-    public void delete(Order order) {
-        entityManager.remove(order);
-    }
-}
 ```
 
-### Domain Service
+---
+
+## Common Mistakes
+
+- **Anemic Domain Model** — domain objects are just data containers (getters/setters) with no behavior, while all logic lives in services. Instead, put behavior in the domain objects: `order.submit()` not `orderService.submitOrder(order)`.
+- **Exposing Internal State** — returning internal collections that can be modified externally. Return unmodifiable copies or streams.
+- **Large Aggregates** — loading hundreds of entities per aggregate causes performance issues. Keep aggregates small (usually fewer than 10 entities).
+- **Ignoring Bounded Contexts** — using the same "User" model across all contexts instead of context-specific models tailored to each bounded context's needs.
+- **Infrastructure Coupling in Domain** — domain layer depending on JPA, Spring, or database concerns. Domain should be plain Java objects with no framework annotations.
+
+---
+
+## Key Design Considerations
+
+- **DDD and Microservices Decomposition** — each bounded context maps to a potential microservice. Start with the business domain model, identify bounded contexts via communication patterns, define context maps for inter-service relationships.
+- **Event Storming** — a collaborative workshop technique where domain experts and developers identify domain events, group them into flows, identify aggregates, and draw bounded context boundaries.
+- **Aggregate Design Rules** — reference other aggregates by ID only; keep aggregates small; one transaction per aggregate; use eventual consistency across aggregates; enforce invariants within aggregate boundaries; use domain events for cross-aggregate communication.
+- **Anti-Corruption Layer** — a translation layer that prevents a legacy system's model from corrupting the new domain model. Translates between the legacy model and the domain model at the bounded context boundary.
+- **Layered Architecture** — Application layer (orchestrates, thin), Domain layer (business logic, core), Infrastructure layer (persistence, messaging, external APIs), Presentation layer (REST controllers, DTOs).
+
+---
+
+## Real-World Scenarios
+
+### Scenario 1: E-Commerce Order Domain with Bounded Contexts
+**Context:** An e-commerce company has a monolithic "Order" concept used everywhere — order management, inventory, shipping, billing, analytics. Each team has different definitions of what an "Order" is. The same entity is pulled in conflicting directions.
+
+**Resolution:** Split into bounded contexts. The **Ordering** context has `Order` with items, prices, and status (DRAFT → SUBMITTED). The **Shipping** context has `Shipment` with addresses, carrier, and tracking. The **Billing** context has `Invoice` with amounts, payment status, and refunds. Each context has its own understanding of the order — the Shipping context doesn't need item prices, and the Billing context doesn't need the shipping carrier. Context maps define the relationships between these bounded contexts.
 
 ```java
-// Domain Service - stateless, holds domain logic not fitting in entity
-@DomainService
-public class OrderPricingService {
-
-    private final DiscountCalculator discountCalculator;
-    private final TaxCalculator taxCalculator;
-
-    public Money calculateTotal(Order order, Customer customer) {
-        Money subtotal = order.calculateSubtotal();
-        Money discount = discountCalculator.applyDiscount(customer, subtotal);
-        Money afterDiscount = subtotal.subtract(discount);
-        Money tax = taxCalculator.calculateTax(order.getItems(), customer.getAddress());
-        return afterDiscount.add(tax);
-    }
-}
-```
-
-### Domain Event
-
-```java
-// Domain Event - immutable fact about the domain
-@Value
-public class OrderSubmittedEvent implements DomainEvent {
-    String eventId;
-    String orderId;
-    Money totalAmount;
-    Instant occurredOn;
-
-    public OrderSubmittedEvent(String orderId, Money totalAmount) {
-        this.eventId = UUID.randomUUID().toString();
-        this.orderId = orderId;
-        this.totalAmount = totalAmount;
-        this.occurredOn = Instant.now();
-    }
-
-    @Override
-    public Instant occurredOn() {
-        return occurredOn;
-    }
-}
-
-// Publishing events after aggregate save
-@Component
-public class DomainEventPublisher {
-
-    @Autowired
-    private ApplicationEventPublisher applicationEventPublisher;
-
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    public void publishEvents(AggregateSavedEvent event) {
-        AggregateRoot<?> aggregate = event.getAggregate();
-        aggregate.getDomainEvents().forEach(domainEvent -> {
-            applicationEventPublisher.publishEvent(domainEvent);
-        });
-        aggregate.clearEvents();
-    }
-}
-```
-
-## 4. Production Code Examples
-
-### Complete DDD Order Module
-
-```java
-// --- Domain Layer ---
-
-// Value Object: OrderId
-@Value
-public class OrderId {
-    String value;
-    
-    public OrderId(String value) {
-        if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException("OrderId must not be blank");
-        }
-        this.value = value;
-    }
-    
-    public static OrderId generate() {
-        return new OrderId(UUID.randomUUID().toString());
-    }
-}
-
-// Value Object: CustomerId
-@Value
-public class CustomerId {
-    String value;
-}
-
-// Aggregate Root
+// Ordering Bounded Context
 @Entity
-public class Order {
-    @EmbeddedId
-    private OrderId id;
-    private CustomerId customerId;
-    @Embedded
-    private ShippingAddress shippingAddress;
-    @Embedded
-    @AttributeOverrides({
-        @AttributeOverride(name = "amount", column = @Column(name = "total_amount")),
-        @AttributeOverride(name = "currency", column = @Column(name = "total_currency"))
-    })
-    private Money totalAmount;
+@Table(name = "orders")
+public class Order { // Aggregate Root
+    @Id private OrderId id;
     private OrderStatus status;
-    @Version
-    private long version;
-    @ElementCollection
-    @CollectionTable(name = "order_items", joinColumns = @JoinColumn(name = "order_id"))
-    private List<OrderItem> items = new ArrayList<>();
-    @Transient
-    private final List<DomainEvent> domainEvents = new ArrayList<>();
-
-    protected Order() {} // JPA
-
-    public Order(CustomerId customerId, ShippingAddress address) {
-        this.id = OrderId.generate();
-        this.customerId = customerId;
-        this.shippingAddress = address;
-        this.status = OrderStatus.DRAFT;
-        this.totalAmount = Money.zero(Currency.getInstance("USD"));
-    }
-
-    public void addItem(String productId, String productName, Money unitPrice, int quantity) {
-        if (status != OrderStatus.DRAFT) {
-            throw new OrderAlreadyConfirmedException(id);
-        }
-        items.add(new OrderItem(productId, productName, unitPrice, quantity));
-        recalculateTotal();
-    }
+    @OneToMany(cascade = ALL) private List<OrderLine> items;
+    private Money total;
 
     public void submit() {
-        if (items.isEmpty()) {
-            throw new CannotSubmitEmptyOrderException(id);
-        }
-        if (customerId == null) {
-            throw new InvalidOrderStateException(id, "Customer not set");
-        }
+        if (items.isEmpty()) throw new IllegalStateException("Empty order");
         this.status = OrderStatus.SUBMITTED;
-        registerEvent(new OrderSubmittedEvent(id, customerId, totalAmount));
-    }
-
-    public void confirm() {
-        if (status != OrderStatus.SUBMITTED) {
-            throw new InvalidOrderStateException(id, "Can only confirm submitted orders");
-        }
-        this.status = OrderStatus.CONFIRMED;
-        registerEvent(new OrderConfirmedEvent(id));
-    }
-
-    public void cancel(CancelReason reason) {
-        if (status == OrderStatus.SHIPPED || status == OrderStatus.DELIVERED) {
-            throw new CannotCancelOrderException(id, "Order already shipped");
-        }
-        this.status = OrderStatus.CANCELLED;
-        registerEvent(new OrderCancelledEvent(id, reason));
-    }
-
-    private void recalculateTotal() {
-        this.totalAmount = items.stream()
-            .map(OrderItem::getSubtotal)
-            .reduce(Money.zero(Currency.getInstance("USD")), Money::add);
-    }
-
-    // Domain events
-    public List<DomainEvent> getDomainEvents() {
-        return Collections.unmodifiableList(domainEvents);
-    }
-
-    public void clearEvents() {
-        domainEvents.clear();
-    }
-
-    protected void registerEvent(DomainEvent event) {
-        domainEvents.add(event);
+        registerEvent(new OrderSubmittedEvent(id, total, items.stream()
+            .map(OrderLine::getProductId).toList()));
     }
 }
 
-// Repository interface
-public interface OrderRepository {
-    Optional<Order> findById(OrderId id);
-    void save(Order order);
-    void delete(Order order);
-}
-
-// Domain Service
-@DomainService
-public class OrderValidationService {
-    public void validateForSubmission(Order order) {
-        if (order.getItems().isEmpty()) {
-            throw new ValidationException("Order must have items");
-        }
-        if (order.getTotalAmount().isNegativeOrZero()) {
-            throw new ValidationException("Order total must be positive");
-        }
-    }
-}
-
-// --- Application Layer ---
-
-@Service
-@Transactional
-public class OrderApplicationService {
-    private final OrderRepository orderRepository;
-    private final OrderValidationService validationService;
-    private final DomainEventPublisher eventPublisher;
-
-    public OrderId createOrder(CreateOrderCommand command) {
-        CustomerId customerId = new CustomerId(command.getCustomerId());
-        ShippingAddress address = new ShippingAddress(
-            command.getStreet(), command.getCity(), command.getZipCode());
-        
-        Order order = new Order(customerId, address);
-        orderRepository.save(order);
-        return order.getId();
-    }
-
-    public void addItem(AddItemCommand command) {
-        Order order = orderRepository.findById(new OrderId(command.getOrderId()))
-            .orElseThrow(() -> new OrderNotFoundException(command.getOrderId()));
-        
-        order.addItem(
-            command.getProductId(),
-            command.getProductName(),
-            new Money(command.getUnitPrice(), Currency.getInstance("USD")),
-            command.getQuantity()
-        );
-        orderRepository.save(order);
-    }
-
-    public void submitOrder(SubmitOrderCommand command) {
-        Order order = orderRepository.findById(new OrderId(command.getOrderId()))
-            .orElseThrow(() -> new OrderNotFoundException(command.getOrderId()));
-        
-        validationService.validateForSubmission(order);
-        order.submit();
-        orderRepository.save(order);
-    }
-}
-
-// --- Infrastructure Layer ---
-
-@Repository
-public class JpaOrderRepository implements OrderRepository {
-    @PersistenceContext
-    private EntityManager em;
-
-    @Override
-    public Optional<Order> findById(OrderId id) {
-        return Optional.ofNullable(em.find(Order.class, id));
-    }
-
-    @Override
-    public void save(Order order) {
-        em.persist(order);
-    }
-
-    @Override
-    public void delete(Order order) {
-        em.remove(order);
-    }
+// Shipping Bounded Context — different concept of "order"
+@Document
+public class Shipment {
+    @Id private String id;
+    private String orderId; // References order by ID only
+    private Address shippingAddress;
+    private String carrier;
+    private TrackingStatus status;
 }
 ```
 
-### Anti-Corruption Layer
+### Scenario 2: Banking Domain with Ubiquitous Language
+**Context:** A banking team building a loan application system. Developers use technical terms ("Insert into loans table", "Update the status flag"), while domain experts use business terms ("Underwrite the application", "Disburse the funds"). Miscommunication causes constant rework.
+
+**Resolution:** Establish a ubiquitous language. Business experts and developers agree that "Loan Application" goes through states: SUBMITTED → UNDERWRITING → APPROVED → DISBURSED → ACTIVE. The codebase uses exactly these terms. The `LoanApplication` entity has methods like `submit()`, `startUnderwriting()`, `approve()`, `disburse()`. Repository methods are named after business concepts: `findPendingUnderwriting()`. The language is used in code, database schemas, REST endpoints, and Jira tickets.
+
+### Scenario 3: Legacy Integration with Anti-Corruption Layer
+**Context:** A company is migrating from a 20-year-old legacy ERP system to a new microservices platform. The legacy system has a 50-column `ORDERS` table with cryptic column names (`ORD_ID`, `CUST_NUM`, `PRD_CD`, `AMT_BASE`, `AMT_TAX`).
+
+**Resolution:** Build an Anti-Corruption Layer (ACL) between the new domain model and the legacy system. The ACL translates between the legacy schema and the new domain model. The new services work with clean domain objects (`Order`, `Customer`, `Product`). The ACL handles the ugly mapping, shielding the new system from the legacy model's complexity.
 
 ```java
-// Anti-corruption layer between legacy system and new domain
+// Anti-Corruption Layer
 @Component
-public class LegacyOrderAntiCorruptionLayer {
-
-    private final LegacyOrderService legacyService;
-
-    public Order toDomainOrder(LegacyOrder legacyOrder) {
-        // Translate legacy model to domain model
-        CustomerId customerId = new CustomerId(String.valueOf(legacyOrder.getCustNum()));
-        ShippingAddress address = new ShippingAddress(
-            legacyOrder.getAddrLine1(),
-            legacyOrder.getAddrCity(),
-            legacyOrder.getAddrZip()
-        );
-
-        Order order = new Order(customerId, address);
-        for (LegacyItem item : legacyOrder.getItems()) {
-            order.addItem(
-                String.valueOf(item.getProdCode()),
-                item.getProdDesc(),
-                new Money(item.getPrice(), Currency.getInstance("USD")),
-                item.getQty()
-            );
-        }
-        return order;
-    }
-
-    public LegacyOrder toLegacyOrder(Order order) {
-        // Translate domain model to legacy model
-        LegacyOrder legacy = new LegacyOrder();
-        legacy.setCustNum(Integer.parseInt(order.getCustomerId().getValue()));
-        legacy.setTotal(order.getTotalAmount().getAmount().doubleValue());
-        return legacy;
+public class LegacyOrderTranslator {
+    public Order toDomain(LegacyOrder legacy) {
+        return Order.builder()
+            .orderId(new OrderId(legacy.getOrdId()))
+            .customerId(new CustomerId(legacy.getCustNum()))
+            .items(parseItems(legacy.getPrdCd(), legacy.getAmtBase()))
+            .total(new Money(legacy.getAmtBase().add(legacy.getAmtTax()), USD))
+            .build();
     }
 }
 ```
 
-## 5. Real-World Scenarios
-
-### E-Commerce Domain
-
-**Bounded Contexts:**
-- **Ordering**: Order aggregate, returns, cancellations.
-- **Catalog**: Product, Category, Inventory.
-- **Billing**: Invoices, Payments, Refunds.
-- **Shipping**: Shipments, Carriers, Tracking.
-- **Customer**: Accounts, Addresses, Preferences.
-
-**Ubiquitous Language:** "Order" means confirmed purchase intent (not cart). "Cart" is transient, "Order" is permanent.
-
-### Banking Domain
-
-**Bounded Contexts:**
-- **Accounts**: Account aggregate, balance management.
-- **Payments**: Transfers, Wire, ACH.
-- **Compliance**: AML checks, KYC.
-- **Risk**: Fraud detection, scoring.
-- **Reporting**: Statements, ledgers.
-
-## 6. Performance
-
-### DDD Performance Considerations
-
-| Concept | Performance Impact | Mitigation |
-|---------|-------------------|------------|
-| Aggregate loading | Loading entire aggregate | Keep aggregates small |
-| Version locking | Optimistic concurrency | Retry on conflict |
-| Event publishing | After-commit hook | Async event publishing |
-| Repository abstraction | Mapping overhead | Use efficient ORM |
-| Value Object immutability | Object creation | Shared flyweights |
-
-### Guidelines
-- Keep aggregates small (no more than 10-20 entities per aggregate).
-- Use lazy loading for large collections.
-- Consider CQRS for read-heavy workloads (bypass aggregate loading for queries).
-- Use domain events asynchronously when immediate consistency isn't required.
-
-## 7. Security
-
-### Domain Security
-
-- **Authorization**: Check permissions in application layer before calling domain methods.
-- **Validation**: Domain invariants prevent invalid state (e.g., cannot submit empty order).
-- **Encryption**: Sensitive value objects (SSN, credit card) should be encrypted.
-- **Audit**: Domain events provide natural audit trail.
-
-```java
-// Application layer handles authorization before domain
-@Service
-public class OrderApplicationService {
-    public void cancelOrder(CancelOrderCommand command, User currentUser) {
-        // Authorization check in application layer
-        if (!authService.canCancelOrder(currentUser, command.getOrderId())) {
-            throw new AccessDeniedException("Cannot cancel order");
-        }
-
-        // Domain logic
-        Order order = orderRepository.findById(command.getOrderId())
-            .orElseThrow(() -> new OrderNotFoundException(command.getOrderId()));
-        order.cancel(command.getReason());
-        orderRepository.save(order);
-    }
-}
-```
+---
 
-## 8. Common Mistakes
-
-### Mistake 1: Anemic Domain Model
-Domain objects are just data containers (getters/setters) with no behavior. All logic in services.
+## Scenario-Based Questions
 
-```java
-// WRONG - anemic domain model
-@Entity
-public class Order {
-    private String status;
+1. **Q: You're building a hotel booking system where the "Room" concept means different things to different teams: Front Desk cares about room number and cleanliness status, Housekeeping cares about supplies and maintenance, and Accounting cares about rate and occupancy. How do you model this?**
+   - A: Use bounded contexts. Each team gets its own "Room" model tailored to its needs. Front Desk context: `Room(roomNumber, status: CLEAN/DIRTY/OCCUPIED)`. Housekeeping context: `MaintenanceTask(roomId, suppliesNeeded, lastService)`. Accounting context: `RoomRate(roomType, basePrice, seasonalAdjustment)`. They share a room ID but have different models. Context maps define the relationships between these bounded contexts.
 
-    public void setStatus(String status) { this.status = status; }
-    public String getStatus() { return status; }
-}
+2. **Q: You're working on a payment system where domain experts talk about "Settling a transaction" but developers have implemented it as `updatePaymentStatus(transactionId, "SETTLED")`. What's wrong and how do you fix it?**
+   - A: This violates the ubiquitous language principle. The code should express the business concept. Refactor to `payment.settle()` on a `Payment` aggregate. The method name matches the business language. Tests become readable: `assertThat(payment.isSettled()).isTrue()`. This prevents misinterpretation between domain experts and developers.
 
-// Service does all the work
-public void submitOrder(String orderId) {
-    Order order = repo.findById(orderId);
-    if (order.getItems().isEmpty()) throw ...;
-    order.setStatus("SUBMITTED");
-    repo.save(order);
-}
+3. **Q: Your aggregate loads 200+ entities for a single order, causing performance problems. How do you redesign it?**
+   - A: Review the true transactional boundary. Does updating an order line item really require loading all 200 line items? Split into smaller aggregates: `Order(header)` + `OrderLineItem` as a separate aggregate referenced by ID. The `Order` aggregate holds invariants (total amount, status). Individual line items can be updated independently. Reference other aggregates by ID only.
 
-// RIGHT - rich domain model
-public class Order {
-    private OrderStatus status;
+4. **Q: Your team is doing Event Storming for a new insurance claims system. The whiteboard is chaos with 200+ sticky notes and everyone arguing. How do you bring structure?**
+   - A: Start with the happy path — identify the core domain events in chronological order (Claim Filed → Claim Assessed → Claim Approved → Payment Sent). Then add alternate paths and exceptions. Group events by bounded context (Claims Assessment, Payment Processing, Fraud Detection). Timebox each phase: 30min for events, 30min for aggregates, 30min for bounded contexts. Use different colored stickies for events (orange), commands (blue), aggregates (yellow), and actors (green).
 
-    public void submit() {
-        if (items.isEmpty()) throw new CannotSubmitEmptyOrderException(id);
-        this.status = OrderStatus.SUBMITTED;
-        registerEvent(new OrderSubmittedEvent(id));
-    }
-}
-```
+5. **Q: You're introducing DDD to a team with a strong CRUD mindset. They keep creating getters/setters and putting all logic in services. How do you shift to a rich domain model?**
+   - A: Start with one aggregate and enforce the behavioral style. Instead of `order.setStatus(OrderStatus.SUBMITTED)`, use `order.submit()`. Instead of `order.getItems().add(item)`, use `order.addItem(product, quantity)`. Review these in code review. Show how encapsulating behavior in the aggregate makes service code thinner and more testable. The anemic domain model is the most common DDD anti-pattern — fight it early.
 
-### Mistake 2: Exposing Internal State
-Returning internal collections that can be modified externally.
+6. **Q: Your order processing has a requirement: "Orders over $1000 require manager approval." Where does this logic belong — entity, service, or somewhere else?**
+   - A: This is domain logic and belongs in the `Order` aggregate. The `submit()` method checks the total: `if (this.total.isGreaterThan(new Money(1000))) { this.status = PENDING_APPROVAL; }`. The application service calls `order.submit()` and handles the resulting domain event (`OrderWaitingForApproval`). This keeps the business rule explicit in the domain model, testable, and visible to domain experts.
 
-### Mistake 3: Large Aggregates
-Loading hundreds of entities per aggregate causes performance issues.
+7. **Q: Your team is implementing a new notification feature. A senior engineer says "just add an Email field to the Account entity and a sendEmail method." Why might this be problematic from a DDD perspective?**
+   - A: Sending email is not a core domain concern — it's a generic subdomain. Adding it to the Account entity violates SRP and distracts from the core domain. Instead, publish a domain event (`AccountCreated`) and let an infrastructure service consume it and send the email. The domain model stays focused on business logic, not technical concerns.
 
-### Mistake 4: Ignoring Bounded Contexts
-Using the same "User" model across all contexts instead of context-specific models.
+8. **Q: Your company is acquiring another company with its own customer database. The legacy customer model has fields your new system doesn't need, and your model has fields the legacy system doesn't have. How do you integrate?**
+   - A: Build an Anti-Corruption Layer between the two systems. The ACL translates between the legacy customer model and your domain model. Each system maintains its own bounded context. The ACL handles the mapping for shared operations (customer creation, address update) and prevents the legacy model's complexity from leaking into your clean domain.
 
-### Mistake 5: Infrastructure Coupling in Domain
-Domain layer depending on JPA, Spring, or database concerns.
+9. **Q: A product manager asks for a feature: "When an order is shipped, notify the customer via email." Where should this logic live in a DDD architecture?**
+   - A: The domain model publishes `OrderShippedEvent` after the `Order.ship()` method executes. An application-layer event handler subscribes to this event and calls `NotificationService.sendOrderShippedEmail(customerId, orderId)`. The email sending itself is infrastructure. The domain knows that shipping triggers something; it doesn't know or care about email protocols, templates, or delivery status.
 
-## 9. Senior Engineer Perspective
+10. **Q: Your team is struggling with microservices boundaries. Services keep growing and overlapping. How does DDD help you decompose?**
+    - A: Use bounded contexts as microservice boundaries. Start with Event Storming to discover aggregates and bounded contexts. Each bounded context maps to a potential microservice. Define context maps to show relationships (partner, shared kernel, anti-corruption layer). If two services share too much data or need to be deployed together, they're likely the same bounded context and should stay as one service.
 
-### DDD and Microservices Decomposition
+---
 
-Each bounded context maps to a potential microservice:
-1. Start with the business domain model.
-2. Identify bounded contexts via communication patterns between domain experts.
-3. Each context becomes a microservice candidate.
-4. Define context map (which services communicate how).
+## Interview Questions
 
-### Strategic DDD Patterns
+1. **What is Domain-Driven Design?**
+   - A: A software development approach by Eric Evans that emphasizes modeling software to match the business domain using a shared language (ubiquitous language) between developers and domain experts.
 
-- **Core Domain**: The most important part of the system (competitive advantage). Invest heavily.
-- **Supporting Subdomain**: Supports the core but not critical. Can use simpler solutions.
-- **Generic Subdomain**: Common functionality (authentication, email). Buy or use open source.
+2. **What is the difference between an Entity and a Value Object?**
+   - A: Entity has a distinct identity (equals by ID, mutable state). Value Object has no identity, is immutable, and equals by its attributes — e.g., `Money(amount, currency)`.
 
-### Event Storming
-Workshop technique to discover domain events and bounded contexts:
-1. Domain experts + developers identify domain events (past tense).
-2. Group events into flows ("Happy path" vs "Exceptions").
-3. Identify aggregates that produce/consume events.
-4. Draw bounded context boundaries.
-5. Result: Context map for microservice decomposition.
+3. **What is an Aggregate?**
+   - A: A cluster of domain objects treated as a single unit with an aggregate root that controls access. External objects reference the aggregate by ID only. One transaction per aggregate. Invariants are enforced within the aggregate boundary.
 
-## 10. Interview Questions (20: 10 easy + 10 medium)
+4. **What is the difference between a Domain Service and an Application Service?**
+   - A: Domain Service holds domain logic that doesn't naturally fit in an entity or value object (e.g., `TransferService.transferFunds(from, to, amount)`). Application Service orchestrates use cases — it's thin and delegates to domain objects.
 
-### Easy
+5. **How does DDD help with microservices decomposition?**
+   - A: Each bounded context maps naturally to a microservice. Context maps define inter-service communication (events, APIs). Subdomain analysis (core/supporting/generic) guides investment decisions.
 
-1. **Q:** What is Domain-Driven Design?
-   **A:** A software development approach that focuses on modeling software to match the business domain, using a shared language between developers and domain experts.
+6. **What is Event Storming?**
+   - A: A collaborative workshop technique where domain experts and developers identify domain events, group them into flows, identify aggregates, and draw bounded context boundaries using sticky notes on a wall.
 
-2. **Q:** Who wrote the DDD "Blue Book"?
-   **A:** Eric Evans ("Domain-Driven Design: Tackling Complexity in the Heart of Software", 2003).
+7. **What is the difference between Core, Supporting, and Generic subdomains?**
+   - A: Core domain (competitive advantage — invest heavily, build in-house). Supporting (necessary but not differentiating — simpler solutions). Generic (common functionality — buy or use open source).
 
-3. **Q:** What is ubiquitous language?
-   **A:** A shared, precise language used by both domain experts and developers in code, conversations, and documentation.
+8. **What is an Anti-Corruption Layer?**
+   - A: A translation layer that prevents a legacy or external system's model from corrupting your domain model. It translates between the two models, keeping your domain clean.
 
-4. **Q:** What is a bounded context?
-   **A:** A logical boundary where a particular domain model applies. Each bounded context has its own ubiquitous language.
+9. **What is the Ubiquitous Language?**
+   - A: A shared language between developers and domain experts used in code, database schemas, REST endpoints, documentation, and conversations. It ensures that business concepts map directly to code constructs.
 
-5. **Q:** What is the difference between Entity and Value Object?
-   **A:** Entity has identity (equals by ID). Value Object has no identity, is immutable, and equals by attributes.
+10. **What are the rules for aggregate design?**
+    - A: Reference other aggregates by ID only, keep aggregates small (usually <10 entities), one transaction per aggregate, use eventual consistency across aggregates, enforce invariants within the aggregate boundary.
 
-6. **Q:** What is an Aggregate?
-   **A:** A cluster of domain objects treated as a unit, with a root entity that controls access to all objects within.
+---
 
-7. **Q:** What are domain events?
-   **A:** Events that domain experts care about, representing something that happened in the domain.
+## Developer Recommendations
 
-8. **Q:** What is a repository in DDD?
-   **A:** A pattern that provides access to aggregates, abstracting the underlying storage mechanism.
+- **Start with Event Storming before writing code** — Event Storming sessions with domain experts reveal the true domain model in hours, not weeks. You'll discover aggregates, bounded contexts, and domain events before writing a single line of code. The cost of fixing a wrong model in Event Storming is zero; the cost of fixing it in code is exponential.
 
-9. **Q:** What is the difference between domain service and application service?
-   **A:** Domain service holds domain logic that doesn't fit in an entity. Application service orchestrates use cases, coordinates domain objects.
+- **Use anemic domain models only for simple CRUD, never for complex domains** — An anemic domain model (entities with only getters/setters, all logic in services) is the #1 DDD anti-pattern. For complex domains, put behavior in the domain objects: `order.submit()`, not `orderService.submitOrder(order)`. Rich domain models are more testable, more maintainable, and more aligned with business language.
 
-10. **Q:** What is an anti-corruption layer?
-    **A:** A translation layer that prevents a legacy system's model from corrupting a new domain model.
+- **Keep aggregates small** — The most common aggregate design mistake is making them too large. If an aggregate loads 50+ entities, it's too big. True transactional boundaries are smaller than you think. If two entities can be updated independently (different transactions, different times), they should be separate aggregates. Reference other aggregates by ID only — never by object reference.
 
-### Medium
+- **Use Value Objects extensively for primitive obsession** — Replace `String email`, `String phone`, `BigDecimal amount` with `EmailAddress`, `PhoneNumber`, `Money`. Value Objects encapsulate validation (is this email valid?), formatting, and behavior (money addition). They eliminate scattered validation logic and make the domain model self-documenting.
 
-11. **Q:** How does DDD help with microservices decomposition?
-    **A:** Each bounded context is a natural microservice boundary. Context maps define inter-service communication patterns.
+- **Don't use DDD everywhere** — DDD is for complex business domains where the model provides competitive advantage. For simple CRUD screens, reporting dashboards, and generic functionality, DDD adds ceremony without benefit. Reserve tactical patterns (Entities, Value Objects, Aggregates) for core domains; use simpler approaches for supporting and generic subdomains.
 
-12. **Q:** What is event storming?
-    **A:** A collaborative workshop technique to discover domain events, aggregates, and bounded contexts with domain experts.
-
-13. **Q:** What is the difference between core, supporting, and generic subdomains?
-    **A:** Core domain (competitive advantage, invest heavily), supporting (necessary but not core, simpler), generic (common, buy/use open source).
-
-14. **Q:** How do you keep aggregates small?
-    **A:** Identify true transactional boundaries. If two entities can be updated independently, they should be separate aggregates.
-
-15. **Q:** What is the rule of thumb for aggregate design?
-    **A:** Make aggregates as small as possible while maintaining invariants. Reference other aggregates by ID, not by object reference.
-
-16. **Q:** How do you handle transactions across aggregates?
-    **A:** Use eventual consistency with domain events. One transaction per aggregate. Saga pattern for multi-aggregate workflows.
-
-17. **Q:** What is the difference between tactical and strategic DDD?
-    **A:** Strategic DDD (bounded contexts, context maps) handles large-scale structure. Tactical DDD (entities, value objects, aggregates) handles implementation details.
-
-18. **Q:** How does DDD relate to CQRS?
-    **A:** CQRS is often used with DDD: command side uses aggregates for writes; query side uses read models for queries.
-
-19. **Q:** What is a factory in DDD?
-    **A:** A pattern for encapsulating complex aggregate creation logic that doesn't belong in the aggregate itself.
-
-20. **Q:** How do you validate DDD models?
-    **A:** Continuous collaboration with domain experts. Model validation workshops. Test domain logic with unit tests using the ubiquitous language.
-
-## 11. Advanced Interview Questions (20: 10 hard + 10 system design)
-
-### Hard
-
-1. **Q:** Design aggregate boundaries for an e-commerce order system.
-    **A:** Order aggregate (Order + OrderLines). Customer aggregate (Customer + Addresses). Product aggregate (Product + Inventory). Order references Customer by ID, Product by ID. Separate aggregates because they have different transactional boundaries.
-
-2. **Q:** How do you handle eventual consistency between aggregates in the same bounded context?
-    **A:** Domain events published after aggregate save. Event handlers update other aggregates asynchronously. Example: OrderSubmitted event triggers Inventory aggregate to reserve stock.
-
-3. **Q:** Design a value object that must be encrypted at rest.
-    **A:** EncryptedValue wrapper in infrastructure layer. Domain layer uses the value object (e.g., CreditCardNumber). Repository implementation encrypts/decrypts when persisting. Domain never sees raw encryption.
-
-4. **Q:** How do you version domain events?
-    **A:** Event header with type name and version. Backward-compatible schema evolution. Schema registry for compatibility checks.
-
-5. **Q:** Design a domain model for a subscription billing system.
-    **A:** Subscription aggregate (status, plan, billing cycle). PaymentMethod value object. Invoice aggregate generated by domain service. Domain event: SubscriptionCharged, InvoiceGenerated, PaymentFailed.
-
-6. **Q:** How do you refactor an anemic domain model to a rich one?
-    **A:** Identify business rules in services, move them into domain entities as behavior (methods). Add validation in setters. Encapsulate internal state. Add domain events for side effects.
-
-7. **Q:** Design aggregate for a banking account.
-    **A:** Account aggregate (balance, transactions list). AccountOperationsService (deposit, withdraw, transfer). Transaction as value object (immutable event). Balance invariant: cannot go below zero (unless overdraft allowed).
-
-8. **Q:** How do you handle cross-bounded-context authentication?
-    **A:** Identity and Access Context handles authentication. Issues tokens. Other contexts validate tokens (anti-corruption layer translates user representation).
-
-9. **Q:** Design a context map for an e-commerce platform.
-    **A:** Ordering (partnership with Billing), Catalog (shared kernel with Inventory), Shipping (customer-supplier with Ordering), Recommendations (separate ways from Catalog).
-
-10. **Q:** How does DDD apply to reporting and analytics?
-    **A:** Reporting is a separate bounded context. Uses CQRS read models (materialized views) from other contexts. Anti-corruption layer translates domain events to reporting model.
-
-### System Design
-
-11. **Q:** Design an online food delivery platform using DDD.
-    **A:** Bounded contexts: Restaurant (menu, hours, location), Ordering (cart, order, status), Delivery (rider, route, tracking), Payment (charges, refunds), Customer (profile, preferences). Context map with events connecting contexts.
-
-12. **Q:** Design a healthcare system using DDD.
-    **A:** Bounded contexts: Patient (records, demographics), Appointment (scheduling, availability), Billing (insurance, claims), Pharmacy (prescriptions, inventory). Aggregate: PatientRecord (medical history, appointments). Strong privacy boundaries.
-
-13. **Q:** Design a flight booking system using DDD.
-    **A:** Bounded contexts: Inventory (flights, seats), Booking (reservations, passengers), Pricing (fares, rules), Payment (transactions, refunds). Aggregate: Booking (passengers, flights, payment info). Saga for booking flow.
-
-14. **Q:** Design a SaaS platform using DDD with multi-tenancy.
-    **A:** Bounded contexts: Tenant (provisioning, config), Billing (subscription, usage), Core (domain per tenant type). Tenant context provides tenant identity; all other contexts use it for isolation.
-
-15. **Q:** Design a content management system using DDD.
-    **A:** Bounded contexts: Content (documents, versions, publishing), Author (writers, permissions), Media (images, videos), Workflow (review, approval). Aggregate: Document (content, metadata, version history).
-
-16. **Q:** Design a ride-sharing application using DDD.
-    **A:** Bounded contexts: Rider (profile, payment), Driver (profile, vehicle, status), Trip (ride, route, fare), Matching (dispatch, geolocation), Payment (charges, payouts). Aggregate: Trip (rider, driver, route, fare, status).
-
-17. **Q:** Design an inventory management system using DDD.
-    **A:** Bounded contexts: Stock (inventory, warehouse), Procurement (purchase orders, suppliers), Sales (orders, allocations), Forecasting (demand, trends). Aggregate: InventoryItem (SKU, quantity, location, reservation).
-
-18. **Q:** Design a social media platform using DDD.
-    **A:** Bounded contexts: User (profile, friends), Content (posts, media), Feed (timeline, ranking), Notification (alerts, digests), Moderation (reports, filters). Aggregate: Post (content, author, comments, likes).
-
-19. **Q:** Design a project management tool using DDD.
-    **A:** Bounded contexts: Project (tasks, milestones), Team (members, roles), Time (tracking, reports), Billing (invoicing, rates). Aggregate: Task (title, assignee, status, due date, comments).
-
-20. **Q:** Design a hotel booking system using DDD.
-    **A:** Bounded contexts: Inventory (rooms, availability), Booking (reservations, guests), Pricing (rates, seasons), Housekeeping (room status, cleaning). Aggregate: Reservation (guest, room, dates, rate, status).
-
-## 12. Expert-Level Interview Questions (10: architect-level)
-
-1. **Q:** How do you evolve a domain model over years as business requirements change?
-    **A:** Version bounded contexts independently. Create new version of aggregate with new behavior. Run old + new versions in parallel during migration. Event versioning in event store. Anti-corruption layer between old and new. Eventually deprecate old version.
-
-2. **Q:** Design a domain model that must support both synchronous and eventual consistency use cases.
-    **A:** Core transactional boundaries use aggregates (strong consistency). Across aggregates, use domain events (eventual consistency). For reads needing strong consistency, use query service that loads aggregate directly (bypass read model cached data).
-
-3. **Q:** How do you handle domain events in a microservices environment where each service owns its database?
-    **A:** Outbox pattern: events stored in same DB transaction as aggregate. Outbox publisher sends events to message broker. Consumer services process events. Schema registry for event versioning.
-
-4. **Q:** Design a strategy for introducing DDD to a team that uses CRUD/transaction script pattern.
-    **A:** Start small: pick one complex domain (not CRUD). Model aggregates with domain experts. Extract domain logic from services into aggregates. Add unit tests. Prove benefits before expanding.
-
-5. **Q:** How do you reconcile DDD aggregates with database normalization and query performance?
-    **A:** CQRS: write model uses aggregates (normalized for consistency). Read model uses denormalized views (optimized for queries). Eventual consistency between them.
-
-6. **Q:** Design a domain model for a financial trading platform with millisecond latency requirements.
-    **A:** Aggregates must be very small (order book per symbol). In-memory state (event sourced). No database in critical path. Events persisted asynchronously after trade execution. Rigorous aggregate sizing for performance.
-
-7. **Q:** How do you validate that bounded contexts are correctly identified?
-    **A:** Check: each context has its own ubiquitous language. Contexts have clear relationships (partnership, shared kernel). Business experts agree on boundaries. Change frequency: if two parts change for different reasons, they may be separate contexts.
-
-8. **Q:** Design a governance model for DDD adoption across a large organization.
-    **A:** DDD Center of Excellence. Event Storming workshops for new domains. Architecture Decision Records. Code review with DDD principles checklist. Shared model repository. Regular model validation sessions with domain experts.
-
-9. **Q:** How do you split a large aggregate that has become a performance bottleneck?
-    **A:** Identify parts that don't need transactional consistency. Move them to separate aggregates. Reference by ID instead of by object. Use eventual consistency for updates. Add domain events for cross-aggregate notifications.
-
-10. **Q:** Design a system that uses DDD for core domain but CRUD for generic subdomains.
-    **A:** Core domain: full DDD (aggregates, events, rich model). Supporting subdomain: simplified DDD (entities only, no event sourcing). Generic subdomain: CRUD with services. Anti-corruption layer between DDD core and non-DDD contexts.
-
-## 13. Debugging & Troubleshooting
-
-### Common DDD Issues
-
-**Issue: Aggregate loading is slow**
-- Check if aggregate references too many objects.
-- Consider lazy loading for large collections.
-- Review aggregate boundaries (too large?).
-
-**Issue: Domain events not publishing**
-- Check transactional event listener.
-- Verify save happens before event publication.
-- Check outbox pattern if using async events.
-
-**Issue: Ubiquitous language mismatch**
-- Schedule regular sessions with domain experts.
-- Review code together: does code match business terms?
-- Maintain a glossary of domain terms.
-
-**Issue: Anemic domain model returns**
-- Monitor code reviews for logic leaking into services.
-- Ensure new features add behavior to domain objects.
-
-## 14. Comparison Section
-
-### DDD vs Transaction Script
-
-| Aspect | DDD | Transaction Script |
-|--------|-----|-------------------|
-| Logic location | Domain objects/aggregates | Services/procedures |
-| Model | Rich domain model | Anemic data model |
-| Complexity handling | Excellent | Poor for complex domains |
-| When to use | Complex business rules | Simple CRUD |
-| Learning curve | Steep | Shallow |
-| Testability | High (isolated domain) | Medium |
-
-### DDD vs Active Record
-
-| Aspect | DDD | Active Record |
-|--------|-----|---------------|
-| Pattern | Aggregate with repositories | Object that wraps DB row |
-| Business logic | Rich methods on aggregate | Mix of data access + logic |
-| Persistence | Repository abstraction | Direct CRUD on object |
-| Complexity | Better for complex | Simple CRUD |
-| Framework | Axon, custom | Rails, Spring Data |
-
-### Strategic vs Tactical DDD
-
-| Aspect | Strategic | Tactical |
-|--------|-----------|----------|
-| Focus | Large-scale structure | Implementation patterns |
-| Tools | Context map, bounded context | Entities, value objects, aggregates |
-| Audience | Architects | Developers |
-| Output | Bounded context map | Domain model code |
-| When | System design phase | Implementation phase |
-
-## 15. Revision Notes
-
-### Quick Recap
-- **Ubiquitous Language**: Shared language between devs and domain experts.
-- **Bounded Context**: Boundary within which a model applies.
-- **Entity**: Has identity, mutable, changes over time.
-- **Value Object**: No identity, immutable, defined by attributes.
-- **Aggregate**: Cluster of entities/value objects owned by root entity.
-- **Domain Event**: Something the business cares about that happened.
-- **Repository**: Persistence abstraction for aggregates.
-- **Domain Service**: Stateless logic that doesn't fit in entity.
-- **Application Service**: Orchestrates use cases, delegates to domain.
-- **Anti-Corruption Layer**: Translation between bounded contexts.
-
-### Aggregate Design Rules
-1. Reference other aggregates by ID only.
-2. Keep aggregates small - one transaction per aggregate.
-3. Use eventual consistency across aggregates.
-4. Apply invariants within aggregate boundaries.
-5. Domain events for cross-aggregate communication.
-
-## 16. Cheat Sheet
-
-```
-+-------------------------------------------------------------------+
-|               DOMAIN-DRIVEN DESIGN CHEAT SHEET                     |
-+-------------------------------------------------------------------+
-| STRATEGIC PATTERNS           | TACTICAL PATTERNS                  |
-+------------------------------+------------------------------------+
-| Bounded Context              | Entity (has identity)               |
-| Ubiquitous Language          | Value Object (no identity,          |
-| Context Map                  |   immutable)                        |
-| Core / Supporting / Generic  | Aggregate (cluster, root entity)   |
-|   Subdomain                  | Repository (persistence)            |
-| Anti-Corruption Layer        | Domain Service (stateless logic)    |
-| Open-Host Service            | Domain Event (something happened)   |
-| Published Language           | Factory (creation)                  |
-+------------------------------+------------------------------------+
-| LAYERED ARCHITECTURE                                              |
-+-------------------------------------------------------------------+
-| Application: orchestrates use cases (thin)                        |
-| Domain: business logic, entities, value objects, aggregates (core)|
-| Infrastructure: persistence, messaging, external APIs             |
-| Presentation: REST controllers, DTOs, views                       |
-+-------------------------------------------------------------------+
-| UBIQUITOUS LANGUAGE EXAMPLE                                       |
-+-------------------------------------------------------------------+
-| Business Term | Code Representation                               |
-+---------------+---------------------------------------------------+
-| Order         | Order aggregate root                              |
-| Order Line    | OrderLine value object                            |
-| Submit Order  | order.submit() method                            |
-| Order         | OrderSubmitted domain event                       |
-| Submitted     |                                                     |
-| Reserve       | inventoryService.reserve() domain service         |
-| Inventory     |                                                     |
-| Cancel Order  | order.cancel(reason) method                      |
-+---------------+---------------------------------------------------+
-| AGGREGATE DESIGN RULES                                            |
-+-------------------------------------------------------------------+
-| [x] Aggregate root is the only entry point                         |
-| [x] External objects reference aggregate by ID, not object        |
-| [x] One transaction creates/updates one aggregate                 |
-| [x] Events for cross-aggregate consistency                       |
-| [x] Aggregate invariants are always enforced                     |
-| [x] Keep aggregates small (usually < 10 entities)                |
-+-------------------------------------------------------------------+
-```
+- **Build an Anti-Corruption Layer when integrating with legacy systems** — Without an ACL, the legacy system's bad design choices, confusing terminology, and tangled relationships leak into your new domain model. The ACL is a one-time investment that preserves the integrity of your domain model for the lifetime of the system.

@@ -1,165 +1,45 @@
 # CQRS (Command Query Responsibility Segregation)
 
-## 1. Executive Summary
+---
 
-CQRS is an architectural pattern that separates read and write operations into distinct models. Commands handle mutations (create, update, delete) while queries handle data retrieval. This separation allows each model to be optimized independently for its specific workload, enabling different data stores, schemas, scaling strategies, and consistency models for reads vs writes.
+## Overview
 
-## 2. Core Theory
+- **Definition:** An architectural pattern that separates read and write operations into distinct models — Commands handle mutations, Queries handle data retrieval.
+- **Why It Exists:** Traditional CRUD uses a single model for both reads and writes, forcing compromises. CQRS allows each model to be optimized independently for its specific workload with different data stores, schemas, scaling strategies, and consistency models.
+- **Key Concepts:** **Command** (changes state, returns no data), **Query** (returns data, no side effects), **Command Handler** (validates and executes commands), **Query Handler** (fetches from read model), **Read Model** (denormalized data optimized for queries), **Write Model** (domain model with business logic), **Event Bus** (communicates changes from write to read side), **Projection** (transforms events into read model state)
 
-### Fundamental Principle
-Traditional CRUD uses a single model for both reads and writes. CQRS splits them:
-- **Command**: Changes state. Returns no data (or just ID/status). Should be a void operation.
-- **Query**: Returns data. Should not change state. Should be idempotent.
+---
 
-### When to Use CQRS
-- Different read/write workloads (read-heavy, write-heavy, or both).
-- Complex domain logic on writes but simple reads.
-- Need to optimize read performance independently.
-- Teams need to work on read and write models separately.
-- When eventual consistency is acceptable.
+## Core Concepts
 
-### When NOT to Use CQRS
-- Simple CRUD applications with no complex domain.
-- When strong consistency between read and write is always required.
-- Small teams/simple domains where overhead outweighs benefits.
-
-## 3. Under-the-Hood Deep Dive
-
-### Command Processing Pipeline
-```
-[Client] -> [Command] -> [Command Handler] -> [Aggregate/Entity] -> [Event Store/DB]
-                              |
-                       [Event Bus] -> [Event Handlers] -> [Read Model Update]
-```
-
-### Query Processing Pipeline
-```
-[Client] -> [Query] -> [Query Handler] -> [Read Model (Materialized View)] -> [Response]
-```
-
-### Key Components
-- **Command**: DTO with data needed to perform an action. Named imperatively: `CreateOrderCommand`.
-- **Command Handler**: Validates command, invokes domain logic, persists changes.
-- **Query**: DTO with query parameters. Named declaratively: `GetOrderByIdQuery`.
-- **Query Handler**: Fetches data from read model, returns result.
-- **Read Model**: Denormalized data optimized for queries (may differ from write model schema).
-- **Write Model**: Domain model with business logic, constraints, and invariants.
-
-### Separate Models Example
+- **Command Processing Pipeline:** Client sends Command → Command Handler validates and executes → Aggregate/Entity persists changes → Event published → Read Model updated asynchronously.
+- **Query Processing Pipeline:** Client sends Query → Query Handler fetches from Read Model → Denormalized data returned directly.
+- **Separate Models:** Write model contains domain logic, invariants, and validation. Read model is denormalized, pre-joined, and optimized for specific query patterns. They can use the same database (different tables), different databases, or different database technologies.
+- **Eventual Consistency:** Read models are updated asynchronously after writes. Typical lag is 10ms–100ms. For critical reads, the write model can be queried directly.
 
 ```java
-// Command model (write side)
-@Entity
-@Table(name = "orders")
-public class Order {
-    @Id
-    private String id;
-    private String customerId;
-    private BigDecimal totalAmount;
-    @Enumerated(EnumType.STRING)
-    private OrderStatus status;
-    @OneToMany(cascade = ALL)
-    private List<OrderLineItem> items;
-
-    // Business logic methods
-    public void addItem(Product product, int quantity) {
-        // Validate inventory, calculate price, check limits
-        this.items.add(new OrderLineItem(product, quantity));
-        this.totalAmount = calculateTotal();
-    }
-
-    public void submit() {
-        if (items.isEmpty()) throw new IllegalStateException("Cannot submit empty order");
-        this.status = OrderStatus.SUBMITTED;
-    }
-}
-
-// Read model (query side) - denormalized for fast retrieval
-@Table(name = "order_summaries")
-public class OrderSummary {
-    @Id
-    private String orderId;
-    private String customerId;
-    private String customerName;    // Denormalized from user service
-    private BigDecimal totalAmount;
-    private String status;
-    private int itemCount;
-    private String firstItemName;   // Denormalized
-    private Instant createdAt;
-}
-```
-
-## 4. Production Code Examples
-
-### Command and Command Handler
-
-```java
-// Command
-@Data
-@Builder
+// Command (write side)
 public class CreateOrderCommand {
     private String customerId;
     private List<OrderItemDto> items;
 }
 
-public class OrderItemDto {
-    private String productId;
-    private String productName;
-    private int quantity;
-    private BigDecimal unitPrice;
-}
-
 // Command Handler
 @Component
 public class CreateOrderCommandHandler implements CommandHandler<CreateOrderCommand, String> {
-
-    @Autowired
-    private OrderRepository orderRepository;
-
-    @Autowired
-    private ProductRepository productRepository;
-
-    @Autowired
-    private EventBus eventBus;
-
-    @Override
     @Transactional
     public String handle(CreateOrderCommand command) {
-        // Validate
-        if (command.getItems() == null || command.getItems().isEmpty()) {
-            throw new ValidationException("Order must have at least one item");
-        }
-
-        // Create domain aggregate
         Order order = new Order();
         order.setId(UUID.randomUUID().toString());
         order.setCustomerId(command.getCustomerId());
-
-        for (OrderItemDto itemDto : command.getItems()) {
-            Product product = productRepository.findById(itemDto.getProductId())
-                .orElseThrow(() -> new ProductNotFoundException(itemDto.getProductId()));
-            order.addItem(product, itemDto.getQuantity());
-        }
-
-        order.submit();
-
-        // Persist
+        // ... add items, validate, submit
         orderRepository.save(order);
-
-        // Publish event
-        eventBus.publish(new OrderCreatedEvent(order.getId(), order.getCustomerId(),
-            order.getTotalAmount(), order.getStatus(), Instant.now()));
-
+        eventBus.publish(new OrderCreatedEvent(order.getId(), order.getCustomerId(), order.getTotalAmount(), Instant.now()));
         return order.getId();
     }
 }
-```
 
-### Query and Query Handler
-
-```java
-// Query
-@Data
+// Query (read side)
 public class GetOrderSummaryQuery {
     private String orderId;
 }
@@ -167,706 +47,157 @@ public class GetOrderSummaryQuery {
 // Query Handler
 @Component
 public class GetOrderSummaryQueryHandler implements QueryHandler<GetOrderSummaryQuery, OrderSummary> {
-
-    @Autowired
-    private OrderSummaryRepository orderSummaryRepository;
-
-    @Override
     public OrderSummary handle(GetOrderSummaryQuery query) {
         return orderSummaryRepository.findById(query.getOrderId())
             .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
     }
 }
-
-// Another query - list with filtering
-@Data
-public class ListCustomerOrdersQuery {
-    private String customerId;
-    private int page;
-    private int size;
-    private String statusFilter;
-}
-
-@Component
-public class ListCustomerOrdersQueryHandler
-        implements QueryHandler<ListCustomerOrdersQuery, Page<OrderSummary>> {
-
-    @Autowired
-    private OrderSummaryRepository orderSummaryRepository;
-
-    @Override
-    public Page<OrderSummary> handle(ListCustomerOrdersQuery query) {
-        Pageable pageable = PageRequest.of(query.getPage(), query.getSize(),
-            Sort.by("createdAt").descending());
-
-        if (query.getStatusFilter() != null) {
-            return orderSummaryRepository
-                .findByCustomerIdAndStatus(query.getCustomerId(),
-                    OrderStatus.valueOf(query.getStatusFilter()), pageable);
-        }
-
-        return orderSummaryRepository.findByCustomerId(query.getCustomerId(), pageable);
-    }
-}
 ```
 
-### Read Model Updater (Event Handler)
+---
+
+## Common Mistakes
+
+- **CQRS for Simple CRUD** — adding CQRS overhead to a simple application that doesn't need separate read/write models.
+- **Coupling Read and Write Models** — using the same entity class for both read and write, defeating the purpose of separation.
+- **Ignoring Eventual Consistency** — not handling the lag between write and read model update, causing users to see stale data after a write.
+- **Command Returning Data** — commands should be void (return ID only); if commands return data, they become queries and blur the separation.
+- **Duplicating Business Logic in Query Handlers** — query handlers should not duplicate validation or calculation logic from the write side.
+
+---
+
+## Key Design Considerations
+
+- **CQRS + Event Sourcing Synergy** — write side appends events to an event store; read side projects events to materialized views. Read models can be rebuilt by replaying all events from scratch.
+- **Read Model Rebuilding** — drop and recreate read model tables, replay all events from the event store. Supports zero-downtime by creating a new version in parallel and switching when caught up.
+- **When to Use Separate Databases** — same database, different tables (simple CQRS); same DB type, different instances (read replicas for scale); different database types (PostgreSQL for writes, Elasticsearch for reads).
+- **Transactional Boundaries** — one transaction per aggregate. Use the Outbox pattern to ensure events are published atomically with state changes. Saga pattern for multi-aggregate workflows.
+- **Command Validation** — validate in command handlers before executing domain logic. Authorization checks belong in the application layer, not the domain model.
+
+---
+
+## Real-World Scenarios
+
+### Scenario 1: E-Commerce Order Processing
+**Context:** An e-commerce platform has a monolithic `OrderService` handling both order placement (validation, inventory check, payment) and order queries (history, status, analytics). As traffic grows, write-heavy operations contend with complex read queries. A single dashboard query scanning millions of orders blocks a simple order placement.
+
+**Resolution:** Split into CQRS. The write side uses a normalized `orders` table with transactional integrity. The read side maintains denormalized `order_summary` and `customer_dashboard` tables updated asynchronously via domain events. Read queries hit indexed, pre-joined tables returning in <10ms instead of scanning the full order history.
 
 ```java
+// Write side — command handler
 @Component
-public class OrderReadModelUpdater {
-
-    @Autowired
-    private OrderSummaryRepository summaryRepository;
-
-    @Autowired
-    private UserServiceClient userServiceClient;
-
-    @EventListener
+public class PlaceOrderHandler {
     @Transactional
-    public void onOrderCreated(OrderCreatedEvent event) {
-        // Fetch customer name from user service (denormalize)
-        String customerName = userServiceClient.getUserName(event.getCustomerId());
-
-        OrderSummary summary = new OrderSummary();
-        summary.setOrderId(event.getOrderId());
-        summary.setCustomerId(event.getCustomerId());
-        summary.setCustomerName(customerName);
-        summary.setTotalAmount(event.getTotalAmount());
-        summary.setStatus(event.getStatus().name());
-        summary.setItemCount(event.getItemCount());
-        summary.setCreatedAt(event.getTimestamp());
-
-        summaryRepository.save(summary);
-    }
-
-    @EventListener
-    @Transactional
-    public void onOrderStatusChanged(OrderStatusChangedEvent event) {
-        summaryRepository.findById(event.getOrderId()).ifPresent(summary -> {
-            summary.setStatus(event.getNewStatus().name());
-            summaryRepository.save(summary);
-        });
-    }
-}
-```
-
-### Separate Database Configuration
-
-```java
-@Configuration
-public class DatabaseConfig {
-
-    // Write database
-    @Bean
-    @Primary
-    @ConfigurationProperties(prefix = "spring.datasource.write")
-    public DataSource writeDataSource() {
-        return DataSourceBuilder.create().build();
-    }
-
-    @Bean
-    @Primary
-    public LocalContainerEntityManagerFactoryBean writeEntityManagerFactory(
-            EntityManagerFactoryBuilder builder) {
-        return builder
-            .dataSource(writeDataSource())
-            .packages("com.example.domain.write")
-            .persistenceUnit("write")
-            .build();
-    }
-
-    // Read database
-    @Bean
-    @ConfigurationProperties(prefix = "spring.datasource.read")
-    public DataSource readDataSource() {
-        return DataSourceBuilder.create().build();
-    }
-
-    @Bean
-    public LocalContainerEntityManagerFactoryBean readEntityManagerFactory(
-            EntityManagerFactoryBuilder builder) {
-        return builder
-            .dataSource(readDataSource())
-            .packages("com.example.domain.read")
-            .persistenceUnit("read")
-            .build();
-    }
-
-    @Bean
-    public PlatformTransactionManager readTransactionManager(
-            @Qualifier("readEntityManagerFactory") EntityManagerFactory emf) {
-        return new JpaTransactionManager(emf);
-    }
-}
-```
-
-### Command Validation with MediatR-style Bus
-
-```java
-// Command Bus (inspired by MediatR pattern)
-@Component
-public class CommandBus {
-
-    @Autowired
-    private ApplicationContext applicationContext;
-
-    @SuppressWarnings("unchecked")
-    public <R> R dispatch(Command<R> command) {
-        Class<?> handlerClass = resolveHandlerClass(command.getClass());
-        CommandHandler<Command<R>, R> handler =
-            (CommandHandler<Command<R>, R>) applicationContext.getBean(handlerClass);
-        return handler.handle(command);
-    }
-
-    private Class<?> resolveHandlerClass(Class<?> commandClass) {
-        // Convention: CreateOrderCommand -> CreateOrderCommandHandler
-        String handlerName = commandClass.getSimpleName() + "Handler";
-        String packageName = commandClass.getPackageName();
-
-        try {
-            return Class.forName(packageName + ".handlers." + handlerName);
-        } catch (ClassNotFoundException e) {
-            throw new HandlerNotFoundException(commandClass);
-        }
-    }
-}
-
-// Usage
-@RestController
-@RequestMapping("/api/orders")
-public class OrderController {
-
-    @Autowired
-    private CommandBus commandBus;
-
-    @Autowired
-    private QueryBus queryBus;
-
-    @PostMapping
-    public ResponseEntity<String> createOrder(@RequestBody CreateOrderCommand command) {
-        String orderId = commandBus.dispatch(command);
-        return ResponseEntity.created(URI.create("/api/orders/" + orderId)).body(orderId);
-    }
-
-    @GetMapping("/{id}")
-    public ResponseEntity<OrderSummary> getOrder(@PathVariable String id) {
-        GetOrderSummaryQuery query = new GetOrderSummaryQuery(id);
-        return ResponseEntity.ok(queryBus.dispatch(query));
-    }
-}
-```
-
-## 5. Real-World Scenarios
-
-### E-Commerce Product Catalog
-
-**Write Model:** Product aggregate with validation rules (SKU uniqueness, pricing rules, inventory thresholds). Event-sourced (ProductCreated, PriceChanged, InventoryUpdated).
-
-**Read Model:** Denormalized product view for search/catalog. Fields from multiple aggregates. Pre-joined for fast queries. Search index (Elasticsearch).
-
-### Banking System
-
-**Write Model:** Account aggregate. Transaction processing with balance validation, overdraft rules, fraud checks.
-
-**Read Model:** Account summary (balance, transactions). Optimized for customer dashboard queries. Updated asynchronously via events.
-
-### Content Management System
-
-**Write Model:** Document aggregate with versioning, approval workflow, permissions.
-
-**Read Model:** Published content (multiple versions). Rendered HTML cached. Search index.
-
-## 6. Performance
-
-### Optimization Strategies
-
-**Read Side:**
-- Denormalized tables avoiding joins.
-- Redis cache for hot queries.
-- Read replicas for horizontal scaling.
-- Elasticsearch for full-text search.
-- Pagination, filtering, projection in queries.
-
-**Write Side:**
-- Event sourcing for audit and replay.
-- Batch command processing.
-- Optimistic concurrency control.
-
-### Read Model Refresh Lag
-```
-Event Publication -> Queue -> Read Model Update
-Typical lag: 10ms - 100ms (near real-time)
-For critical reads: synchronously update read model in same transaction
-```
-
-### CQRS Caching Strategy
-```java
-@Component
-public class CachedOrderSummaryRepository {
-
-    @Autowired
-    private RedisTemplate<String, OrderSummary> redisTemplate;
-
-    @Autowired
-    private OrderSummaryRepository jpaRepository;
-
-    private static final Duration CACHE_TTL = Duration.ofMinutes(5);
-
-    public Optional<OrderSummary> findById(String orderId) {
-        String cacheKey = "order_summary:" + orderId;
-
-        OrderSummary cached = redisTemplate.opsForValue().get(cacheKey);
-        if (cached != null) {
-            return Optional.of(cached);
-        }
-
-        Optional<OrderSummary> result = jpaRepository.findById(orderId);
-        result.ifPresent(summary ->
-            redisTemplate.opsForValue().set(cacheKey, summary, CACHE_TTL));
-        return result;
-    }
-
-    @EventListener
-    public void onOrderStatusChanged(OrderStatusChangedEvent event) {
-        redisTemplate.delete("order_summary:" + event.getOrderId());
-    }
-}
-```
-
-## 7. Security
-
-### Command Authorization
-```java
-@Component
-public class CancelOrderCommandHandler implements CommandHandler<CancelOrderCommand, Void> {
-
-    @Autowired
-    private OrderRepository orderRepository;
-
-    @Autowired
-    private AuthorizationService authService;
-
-    @Override
-    @Transactional
-    public Void handle(CancelOrderCommand command) {
-        Order order = orderRepository.findById(command.getOrderId())
-            .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
-
-        // Authorization check
-        if (!authService.canCancelOrder(command.getUserId(), order)) {
-            throw new AccessDeniedException("User cannot cancel this order");
-        }
-
-        order.cancel();
+    public OrderId handle(PlaceOrderCommand cmd) {
+        Order order = new Order(cmd.customerId(), cmd.items());
         orderRepository.save(order);
-        return null;
+        eventBus.publish(new OrderPlacedEvent(
+            order.getId(), cmd.customerId(), order.getTotal(), Instant.now()));
+        return order.getId();
     }
 }
-```
 
-### Data Access Control on Read Side
-```java
+// Read side — projection
 @Component
-public class GetOrderSummaryQueryHandler implements QueryHandler<GetOrderSummaryQuery, OrderSummary> {
-
-    @Override
-    public OrderSummary handle(GetOrderSummaryQuery query) {
-        OrderSummary summary = summaryRepository.findById(query.getOrderId())
-            .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
-
-        // Ensure user can only see their own orders (unless admin)
-        if (!authService.hasAccess(query.getCurrentUserId(), summary.getCustomerId())) {
-            throw new AccessDeniedException("Access denied");
-        }
-
-        return summary;
+public class OrderSummaryProjector {
+    @EventListener
+    public void on(OrderPlacedEvent event) {
+        OrderSummary summary = new OrderSummary(
+            event.orderId(), event.customerId(), event.total(),
+            "PENDING", event.timestamp());
+        orderSummaryRepository.save(summary);
     }
 }
 ```
 
-## 8. Common Mistakes
+### Scenario 2: Real-Time Analytics Dashboard
+**Context:** A SaaS analytics platform ingests 10K events/sec. Users query dashboards (aggregate counts, top-K, trends over time). The same normalized tables used for ingestion also serve dashboard queries, causing contention and slow responses.
 
-### Mistake 1: CQRS for Simple CRUD
-Adding CQRS overhead to a simple CRUD application that doesn't need separate read/write models.
+**Resolution:** The write side appends events to a time-series database (InfluxDB). A projection continuously runs aggregation pipelines and materializes pre-computed results into a dedicated read database (Elasticsearch). Dashboards query Elasticsearch with sub-second latency. Write throughput is unaffected by complex analytical queries.
 
-### Mistake 2: Coupling Read and Write Models
-```java
-// WRONG - using the same entity for both
-@Entity
-public class Order {
-    // Mix of read-optimized and write-validated fields
-    @Column(name = "customer_name") // Denormalized for read, but lives in write model
-    private String customerName;
-}
-```
+### Scenario 3: Multi-Team Development on a Banking System
+**Context:** A banking application needs both transaction processing (writes with strict validation) and customer-facing account history (reads with flexible filtering, pagination, export). Two teams need to work independently.
 
-### Mistake 3: Ignoring Eventual Consistency
-Not handling the lag between write and read model update. User creates order, then immediate read shows nothing.
+**Resolution:** Team A owns the command model: accounts, transfers, validations — the write database. Team B owns the query model: account statements, spending analysis, PDF exports — the read database. They agree on event schemas as their contract. Team A publishes `TransactionProcessed` events; Team B consumes them to build materialized views. Each team deploys independently, with their own schema and scaling strategy.
 
-### Mistake 4: Command Returning Data
-Commands should be void (return ID only). If commands return data, they're becoming queries.
+---
 
-### Mistake 5: Duplicating Business Logic in Query Handlers
-Query handlers should not duplicate validation or calculation logic from write side.
+## Scenario-Based Questions
 
-## 9. Senior Engineer Perspective
+1. **Q: You are building an order management system where customers place orders and later query order history. The same database handles both operations, and during sales events the system slows down. How do you fix this?**
+   - A: Split into CQRS. The write model uses a normalized schema optimized for transactional integrity (foreign keys, constraints, triggers). The read model uses denormalized `order_summary` tables with pre-joined customer and item data. Events flow from write to read asynchronously via a message broker. Writes remain fast during traffic spikes because reads no longer compete for the same database resources. Acceptable trade-off: read model may lag by 50-100ms, which is acceptable for order history queries.
 
-### CQRS + Event Sourcing Synergy
-CQRS pairs naturally with Event Sourcing:
-- Write side: append events to event store.
-- Read side: project events to materialized views.
-- Read models can be rebuilt by replaying events from scratch.
+2. **Q: Your team is implementing CQRS but the product owner insists that after placing an order, the user must immediately see it in their order list. How do you handle eventual consistency?**
+   - A: For the user who just placed the order, write directly to both the write and read models synchronously within the same transaction (or use transactional outbox with immediate projection for that specific user). For other users, the read model updates asynchronously via events. This hybrid approach gives the placing user immediate feedback while maintaining CQRS benefits for bulk queries. Track the read lag via a metric and alert if it exceeds 2 seconds.
 
-### Read Model Rebuilding
-```java
-@Component
-public class ReadModelRebuilder {
+3. **Q: You have separate read and write databases. A bug in the projection causes the read database to miss 30 minutes of events. How do you recover without data loss?**
+   - A: Rebuild the read model from scratch by replaying all events from the event store. Since the event store is append-only and immutable, you can replay events in order and reconstruct the complete read model. Run the new projection in parallel while the old one still serves traffic, then switch when caught up. This is a key benefit of CQRS + Event Sourcing — read models are disposable and rebuildable.
 
-    @Autowired
-    private EventStore eventStore;
+4. **Q: Your read models are getting complex with 15+ different projections for different query patterns. How do you manage this complexity?**
+   - A: Apply the same bounded context thinking from DDD to your projections. Group related projections into modules. Use a single materialized view per query pattern with clearly scoped data. For reporting queries, maintain a separate analytics read model. For real-time dashboards, use a streaming read model (Kafka Streams). Retire projections that are no longer queried.
 
-    @Autowired
-    private ApplicationContext applicationContext;
+5. **Q: A command needs to return data — for example, creating a user and returning the user ID. Does this violate CQRS?**
+   - A: It's acceptable to return the generated ID from a command. The principle is that commands shouldn't return business data needed for display. Returning a technical identifier (ID, URI) doesn't violate the pattern. The command handler can return the ID after persisting; the client then queries the read model for any display data.
 
-    public void rebuildAll() {
-        // Drop and recreate read model tables
-        summaryRepository.deleteAll();
+6. **Q: Your system uses CQRS but you're seeing stale data on dashboard widgets for several seconds after updates. How do you reduce the lag?**
+   - A: Optimize the projection pipeline: batch event processing instead of one-at-a-time, use in-memory processing before writing to the read database, increase projection worker threads. Add a "fast lane" for the most critical events (e.g., order status changes) with dedicated projection resources. Monitor projection lag as a critical metric and alert when it exceeds 500ms.
 
-        // Replay all events
-        List<Event> allEvents = eventStore.getAllEvents();
-        for (Event event : allEvents) {
-            // Find and invoke appropriate event handler
-            publishEvent(event);
-        }
-    }
+7. **Q: A junior developer puts business validation logic in both the command handler and the query handler. What's wrong with this approach?**
+   - A: Business logic duplication creates maintenance nightmares — the two implementations will inevitably diverge. Query handlers should only format and fetch data; they should never duplicate validation, calculation, or business rules from the command side. If a calculation is needed in both places (e.g., tax calculation), extract it into a shared domain service that both sides depend on.
 
-    private void publishEvent(Event event) {
-        // Use ApplicationEventPublisher to dispatch
-        // Each read model updater handles its relevant events
-    }
-}
-```
+8. **Q: You're migrating from a CRUD monolith to CQRS. How do you do this incrementally without a big-bang rewrite?**
+   - A: Use the strangler fig pattern. Start by identifying the most read-heavy endpoint (e.g., dashboard). Create a new read model for it while keeping writes unchanged. Gradually move more queries to the read model. Only then split the write side. Each step is independently deployable and revertable. The monolith's original tables serve as the initial source of truth for both sides.
 
-### When to Use Separate Databases
-- **Same database, different tables**: Simple CQRS, eventual consistency is fine.
-- **Same database type, different instances**: Read replicas for scale.
-- **Different database types**: Optimize each for workload (PostgreSQL for writes, Elasticsearch for reads).
+9. **Q: Your write model needs to support bulk operations (import 10K orders at once). How does this interact with CQRS?**
+   - A: Keep the bulk command as a single atomic write operation on the command side — it should succeed or fail as one unit. After persistence, publish individual events for each order. The read model processes these events in batch (using chunked projections) to avoid overwhelming the read database. Consider a dedicated bulk projection that updates the read model in batches of 500.
 
-## 10. Interview Questions (20: 10 easy + 10 medium)
+10. **Q: You're using separate databases for reads and writes, but a deployment that changes the write schema also requires read schema changes. How do you handle this coupling?**
+    - A: Decouple the deployment by versioning your events. The write side publishes v1 events for the new schema. The read side has v1 and v2 projections running simultaneously. The v2 projection on the read side consumes v1 events and handles the schema transformation. Deploy write changes first, then read changes after verifying the new events are flowing correctly.
 
-### Easy
+---
 
-1. **Q:** What does CQRS stand for?
-   **A:** Command Query Responsibility Segregation.
+## Interview Questions
 
-2. **Q:** What is the difference between a command and a query?
-   **A:** A command changes state and returns no data. A query returns data and does not change state.
+1. **What does CQRS stand for and what problem does it solve?**
+   - A: Command Query Responsibility Segregation. It solves the problem of a single model being suboptimal for both reads and writes by separating them into distinct models, each optimized for its workload.
 
-3. **Q:** What is the main benefit of CQRS?
-   **A:** Independent optimization of read and write models for their specific workloads.
+2. **What is the difference between a command and a query?**
+   - A: A command changes state and returns no data (void or ID only). A query returns data and has no side effects. This follows CQS at the architectural level.
 
-4. **Q:** Does CQRS require separate databases?
-   **A:** No, it requires separate models. They can use the same database, different tables, or different databases.
+3. **Does CQRS require separate databases?**
+   - A: No. It requires separate models. They can use the same database (different tables), the same database type (read replicas), or different database technologies (PostgreSQL for writes, Elasticsearch for reads).
 
-5. **Q:** What is a command handler?
-   **A:** A component that receives a command, validates it, executes business logic, and persists changes.
+4. **Is CQRS always used with Event Sourcing?**
+   - A: No. They are independent patterns. CQRS can use traditional CRUD for writes with events only for read model updates. Event Sourcing is a separate concern about how state is stored.
 
-6. **Q:** What is a read model in CQRS?
-   **A:** A denormalized data structure optimized for query performance.
+5. **How do you update the read model when the write side changes?**
+   - A: The write side publishes events after persisting changes. Projection handlers subscribe to these events and update the read model asynchronously. The outbox pattern ensures reliable event publication.
 
-7. **Q:** Is CQRS always used with Event Sourcing?
-   **A:** No, they are independent patterns. CQRS can be used without event sourcing.
+6. **What is the difference between CQRS and CQS?**
+   - A: CQS is a class-level design principle where methods are either commands (void) or queries (return value). CQRS is an architectural pattern with separate models, separate services, and often separate databases.
 
-8. **Q:** What is eventual consistency in CQRS?
-   **A:** The read model is updated asynchronously after the write, so there is a small delay before changes are visible.
+7. **How do you handle eventual consistency in CQRS?**
+   - A: Accept that read models lag behind writes (typically 10-100ms). For critical "read-your-write" scenarios, the command handler can write to both models synchronously. Communicate the async nature to users via UI patterns (loading states, optimistic updates).
 
-9. **Q:** Can CQRS help with performance?
-   **A:** Yes, by optimizing read queries with denormalized data and separate indexing.
+8. **How does CQRS help with team scalability?**
+   - A: Different teams can work on the command model (domain logic, validation) and query model (performance optimization, denormalization) independently. They agree on event schemas as their contract, enabling parallel development.
 
-10. **Q:** What is a materialized view in CQRS?
-    **A:** A pre-computed read model projection that contains data structured for specific query patterns.
+9. **What is a projection in CQRS?**
+   - A: A projection transforms domain events into a read model state. It subscribes to events, processes them, and updates the query database. Multiple projections can consume the same events for different read models.
 
-### Medium
+10. **How do you handle partial failures in read model updates?**
+    - A: Use a dead letter queue for failed events with exponential backoff retry. Ensure idempotent event handlers (same event processed twice produces same result). For catastrophic corruption, rebuild the read model from the event store.
 
-11. **Q:** How do you handle validation in CQRS commands?
-    **A:** Command handlers validate input, check business rules, and throw exceptions for invalid state.
+---
 
-12. **Q:** How do you update the read model when the write side changes?
-    **A:** Write side publishes events after state change. Event handlers subscribe and update the read model accordingly.
+## Developer Recommendations
 
-13. **Q:** What is the difference between CQRS and CRUD?
-    **A:** CRUD uses a single model for all operations. CQRS separates commands (CUD) from queries (R) into distinct models.
+- **Start with separate models in the same database before splitting databases** — CQRS is about model separation, not database separation. Begin with the same database using different tables for read models. This avoids distributed transaction complexity while gaining most benefits. Only add a separate read database when you need different indexing strategies or independent scaling.
 
-14. **Q:** How would you handle a read model that is out of sync with the write model?
-    **A:** Implement read model rebuilding from events, detect sync lag, and provide staleness information to clients.
+- **Use the outbox pattern to reliably publish events from the write side** — Dual-writes (DB update + event publish) are not atomic. If the event publish fails, the write succeeds but the read model never updates. The outbox pattern writes both the domain data and the event to the same DB transaction. A separate relay publishes events, ensuring exactly-once delivery semantics.
 
-15. **Q:** What is the role of events in CQRS?
-    **A:** Events communicate write-side state changes to update read models and trigger side effects.
+- **Keep projections idempotent and rebuildable** — A projection should produce the same read model state when replaying the same events, regardless of how many times it runs. Use upsert operations (not inserts) in projections. Store the last processed event position so projections can resume from failures. Test projection rebuilding in CI to verify correctness.
 
-16. **Q:** How do you implement pagination in CQRS queries?
-    **A:** Query parameters include page/size/cursor. Query handler uses database pagination or cursor-based pagination on the read model.
+- **Avoid CQRS for simple CRUD applications** — CQRS adds significant complexity: event handling, projection management, eventual consistency. Only use it when you have genuinely different read and write workloads — high write throughput with complex read queries, or read models that serve different purposes than the write model.
 
-17. **Q:** What is the difference between CQRS and Command-Query Separation (CQS)?
-    **A:** CQS is a class-level principle (methods are either commands or queries). CQRS is an architectural pattern with separate models and often separate databases.
-
-18. **Q:** How do you handle transactions across write and read models?
-    **A:** You don't. Write transaction completes, event is published, read model updates asynchronously.
-
-19. **Q:** What is a projection in CQRS?
-    **A:** A projection transforms events into a read model view. It subscribes to events and updates the query database.
-
-20. **Q:** How does CQRS help team scalability?
-    **A:** Different teams can work on command model (domain logic) and query model (performance optimization) independently.
-
-## 11. Advanced Interview Questions (20: 10 hard + 10 system design)
-
-### Hard
-
-1. **Q:** How do you maintain consistency between write and read models under high load?
-    **A:** Use idempotent event processing, exactly-once delivery, versioned events. For critical consistency, use transactional outbox + synchronous read model update. Monitor lag and alert on thresholds.
-
-2. **Q:** Design a CQRS system that supports rebuilding read models from an event store with zero downtime.
-    **A:** Create a new read model version (e.g., v2) in parallel. Start projecting events from event store to v2. When v2 catches up to real-time, switch queries to v2. Drop v1. Use database views or blue-green read model deployments.
-
-3. **Q:** How do you handle commands that affect multiple aggregates?
-    **A:** Use Saga pattern: a long-running process with compensating actions. Command creates saga, which coordinates commands across aggregates via events.
-
-4. **Q:** Design a CQRS system for a real-time bidding platform.
-    **A:** Write side: BidCommand processed sequentially by auction ID (Kafka partition). Bid aggregate validates bid > current price. Write to event store. Read side: Current auction state in Redis (sorted set of bids). Stream processor updates Redis from events. Query: webSocket push current state to bidders.
-
-5. **Q:** How do you handle partial failures in read model updates?
-    **A:** DLQ for failed events with retry. Idempotent event handlers ensure safe retry. Rebuild read model from event store if corruption. Monitor lag and alert.
-
-6. **Q:** What is the difference between event notification and event sourcing in CQRS?
-    **A:** Event notification: events just trigger read model updates (older events lost). Event sourcing: all events stored permanently, read model rebuilt by replaying events from beginning.
-
-7. **Q:** How do you version read models in CQRS?
-    **A:** Read model schema version in metadata. Multiple read model versions running in parallel during migration. Version-aware event handlers produce to appropriate version.
-
-8. **Q:** Design a CQRS system where read and write models use different database technologies.
-    **A:** Write: PostgreSQL with ACID transactions. Read: Elasticsearch for search, Redis for caching, MongoDB for flexible projections. Event bus (Kafka) for async synchronization.
-
-9. **Q:** How do you implement authorization at both command and query level?
-    **A:** Command handlers check permissions before executing mutation. Query handlers filter results based on user's access scope. Use attribute-based access control (ABAC) for fine-grained permissions.
-
-10. **Q:** Design a CQRS system that supports GDPR data deletion.
-    **A:** Write side: delete command sets user data to anonymized state. Event store: encrypt PII events, on deletion store anonymization event (not deletion). Read model: rebuild excluding anonymized user data.
-
-### System Design
-
-11. **Q:** Design an e-commerce platform using CQRS.
-    **A:** Write: Order aggregate (state machine), Product aggregate (inventory), Cart aggregate. Write DB: PostgreSQL. Read: OrderSummary (denormalized, including customer name, product names), ProductSearch (Elasticsearch), CartView (Redis). Event bus: Kafka, CDC (Debezium) for read model update.
-
-12. **Q:** Design a flight booking system with CQRS.
-    **A:** Write: Flight aggregate (capacity management), Booking aggregate (reservation flow). Strong consistency on capacity. Read: FlightSearch (Elasticsearch - cached prices, availability), BookingHistory (MongoDB - user-friendly format). Saga for booking flow: reserve -> pay -> confirm.
-
-13. **Q:** Design a social media news feed using CQRS.
-    **A:** Write: Post aggregate, Follow relationship. Read: Feed (Redis list per user, pre-computed on write). Timeline (MongoDB - paginated query). CQRS for feed: fan-out-on-write stores posts in followers' feed lists.
-
-14. **Q:** Design an inventory management system with CQRS.
-    **A:** Write: Inventory aggregate (strong consistency on stock count). Read: InventorySummary (Redis sorted sets by stock level for alerts), InventoryReport (time-series data in Cassandra). Event-sourced inventory changes for audit.
-
-15. **Q:** Design a hotel reservation system using CQRS.
-    **A:** Write: Room aggregate (calendar of availability), Reservation aggregate. Saga: book room -> charge card -> confirm. Read: RoomSearch (denormalized availability calendar), ReservationHistory (customer view). Caching at query layer.
-
-16. **Q:** Design a banking system using CQRS and Event Sourcing.
-    **A:** Write: Account aggregate (events: Deposited, Withdrawn, Transferred). Event Store: PostgreSQL or EventStoreDB. Read: AccountBalance (read model updated via projections), TransactionHistory (SQL or MongoDB). Query: balance, statements, transaction search.
-
-17. **Q:** Design a content management system with CQRS.
-    **A:** Write: Document aggregate (versioned, approval workflow). Read: PublishedContent (rendered HTML in Redis), DocumentSearch (Elasticsearch). Draft read model for editors. Multiple read models per content status.
-
-18. **Q:** Design a multi-tenant SaaS platform with CQRS.
-    **A:** Tenant isolation: database per tenant for writes, shared Elasticsearch with tenant filter for reads. Write models per tenant with custom validation rules. Read models with tenant-specific projections. Event schema includes tenant ID.
-
-19. **Q:** Design a healthcare records system with CQRS.
-    **A:** Write: PatientRecord aggregate (event sourced for audit). Strict access control on commands. Read: PatientSummary (denormalized), ClinicalDashboard (real-time vitals). HIPAA compliance: encrypt PII in events, audit trail of all reads/writes.
-
-20. **Q:** Design a real-time analytics dashboard using CQRS.
-    **A:** Write: Raw event ingestion (high throughput, Kafka). Stream processor aggregates events (tumbling windows). Write aggregated results to OLAP store. Read: Dashboard queries from pre-aggregated data. Multiple granularity read models (1min, 1h, 1d aggregates).
-
-## 12. Expert-Level Interview Questions (10: architect-level)
-
-1. **Q:** Design a globally distributed CQRS system with active-active writes and local reads.
-    **A:** Each region has a local write leader (Kafka partition leader). CRDTs for conflict resolution. Events replicated across regions asynchronously. Local read models built from local events + replicated cross-region events. Global read models use merged event streams. Conflict resolution strategies: last-writer-wins, CRDT merge, or application-specific reconciliation.
-
-2. **Q:** How would you design CQRS for a system requiring both strong consistency for some queries and eventual consistency for others?
-    **A:** Hybrid approach: critical queries read from write model synchronously (same DB). Non-critical queries read from optimized read model. Distinguish via query annotations (`@StrongConsistency` vs `@EventualConsistency`). Route to appropriate data source in query handler.
-
-3. **Q:** Design a CQRS system that handles schema evolution across read and write models for years.
-    **A:** Write schema: versioned events with schema registry (Avro/Protobuf). Read schemas: versioned projections. Multiple read model versions running in parallel during migration. Event schema evolution: backward/forward compatible. Read model evolution: new projection version processes events to new format.
-
-4. **Q:** How do you implement a CQRS system with 50+ different read model projections?
-    **A:** Projection orchestration: each projection subscribes to relevant events. Projection versioning and parallel run. Selective projection rebuild (by event type or time range). Monitoring per-projection lag. Shared projection infrastructure (stream processing framework like Kafka Streams, Apache Flink).
-
-5. **Q:** Design a CQRS system where writes need to be validated against read model data.
-    **A:** Anti-pattern warning: commands should not depend on read model. Instead, validate from write model (aggregate state). For performance, cache write model state in write-optimized form. If cross-aggregate validation needed, use domain service that queries write-side repository.
-
-6. **Q:** How do you implement a CQRS system that provides exactly-once guarantees for read model updates?
-    **A:** Idempotent event processing: store processed event IDs in read model transaction. Unique constraint on event ID in read model tables. Use Kafka exactly-once semantics with transactional API. Read model update within same transaction as dedup mark.
-
-7. **Q:** Design a CQRS system for a financial risk platform requiring sub-millisecond reads on complex aggregations.
-    **A:** Pre-compute all aggregations in read model during event processing. Use Redis or in-memory data grid for sub-millisecond lookups. Multiple read model granularities: raw trades, per-symbol aggregates, portfolio-level risk. Incremental updates on each event (no full recomputation).
-
-8. **Q:** How do you handle backpressure in CQRS read model updating?
-    **A:** Event store with retention (Kafka). Consumer lag monitoring. Auto-scale projection workers based on lag. Prioritize critical projections. Drop non-critical projections during load spikes (recover later). Dead letter queue for failed events.
-
-9. **Q:** Design a CQRS system that supports event-sourced aggregates with thousands of events per aggregate.
-    **A:** Snapshot strategy: store aggregate snapshot every N events (e.g., 100). On load: restore from latest snapshot, replay remaining events. Snapshot store in fast DB (Redis + PostgreSQL). Configurable snapshot frequency per aggregate type.
-
-10. **Q:** How would you design a CQRS system for a multi-tenant platform where each tenant can define custom fields and read models?
-    **A:** Write side: dynamic schema events with tenant-specific metadata. Read side: tenant-specific projections stored in document DB (MongoDB). Tenant schema registry for field definitions. Query handler constructs dynamic queries based on tenant schema. Event processing: tenant-specific stream processors.
-
-## 13. Debugging & Troubleshooting
-
-### Common CQRS Issues
-
-**Issue: Read model out of sync with write model**
-- Check event processing lag (Kafka consumer lag).
-- Check event handler logs for errors.
-- Verify event was published (check event store).
-- Rebuild read model if needed.
-
-**Issue: Slow command processing**
-- Check database transaction times.
-- Check for unnecessary event publication overhead.
-- Profile aggregate loading (too many events to replay).
-
-**Issue: Query returning stale data**
-- Check TTL on read model cache.
-- Check if event handler failed silently.
-- Check event ordering (partition assignment issues).
-
-### Debugging Commands
-```bash
-# Check Kafka consumer lag for read model updaters
-kafka-consumer-groups --bootstrap-server kafka:9092 \
-  --group order-read-model --describe
-
-# Check event store for specific aggregate
-curl -X GET "http://event-store/api/events/order/order-123"
-
-# Query read model directly
-psql -h read-db -c "SELECT * FROM order_summaries WHERE order_id = 'order-123'"
-
-# Compare write and read models
-diff <(psql -h write-db -c "SELECT id, status FROM orders WHERE id='order-123'") \
-     <(psql -h read-db -c "SELECT order_id, status FROM order_summaries WHERE order_id='order-123'")
-```
-
-## 14. Comparison Section
-
-### CQRS vs Traditional CRUD
-
-| Aspect | CQRS | Traditional CRUD |
-|--------|------|-----------------|
-| Model | Separate read/write | Single model |
-| Optimization | Per workload | Compromise |
-| Consistency | Eventually consistent | Strongly consistent |
-| Complexity | Higher | Lower |
-| Scalability | Higher (independent) | Limited |
-| Query Performance | Optimized (denormalized) | May need joins |
-| Audit | Natural (events) | Requires extra |
-| Best for | Complex domain, scale | Simple CRUD apps |
-
-### CQRS vs Event Sourcing
-
-| Aspect | CQRS | Event Sourcing |
-|--------|------|---------------|
-| Focus | Separate read/write models | State as event sequence |
-| Storage | Normalized write + denormalized read | Append-only event store |
-| Audit | Via events | Built-in |
-| Complexity | Medium | High |
-| Dependence | Can be used alone | Often used with CQRS |
-
-### CQRS + Event Sourcing vs CQRS + CRUD Write Model
-
-| Aspect | CQRS + Event Sourcing | CQRS + CRUD Write |
-|--------|----------------------|-------------------|
-| Audit | Full event history | Requires logging |
-| Rebuild | Replay all events | Not possible |
-| Temporal | Any point-in-time state | Current state only |
-| Complexity | Higher | Lower |
-| Event Store | Required | Not required |
-| Storage | More (all events) | Less (current state) |
-
-## 15. Revision Notes
-
-### Quick Recap
-- **Command**: Mutation (create, update, delete). Void return.
-- **Query**: Data retrieval. No side effects.
-- **Separate Models**: Write model (domain logic) != Read model (query optimization).
-- **Eventual Consistency**: Read model updates async after write.
-- **Event Bus**: Communicates changes from write to read side.
-- **Projection**: Transforms events into read model state.
-- **When to Use**: Different read/write workloads, complex domain, need independent scaling.
-- **When NOT to Use**: Simple CRUD, strong consistency always needed, small team.
-
-### Key Design Rules
-1. Commands change state; queries return state.
-2. Commands are named imperatively (`SubmitOrder`); queries declaratively (`GetOrder`).
-3. Read models are denormalized and optimized for specific queries.
-4. Use events to synchronize write -> read.
-5. Monitor read model lag.
-6. Rebuild read models from event history when schema changes.
-
-## 16. Cheat Sheet
-
-```
-+-------------------------------------------------------------------+
-|                      CQRS CHEAT SHEET                              |
-+-------------------------------------------------------------------+
-| PATTERN             | PURPOSE                           | EXAMPLE  |
-+---------------------+-----------------------------------+----------+
-| Command             | Change state                      | Create-  |
-|                     |                                   | OrderCmd |
-| Query               | Retrieve data                     | GetOrder |
-|                     | (no side effects)                 | Query    |
-| Command Handler     | Validates + executes command      | Create-  |
-|                     |                                   | OrderCmd |
-|                     |                                   | Handler  |
-| Query Handler       | Fetches from read model           | GetOrder |
-|                     |                                   | Query    |
-|                     |                                   | Handler  |
-| Read Model          | Denormalized query structures     | Order-   |
-|                     |                                   | Summary  |
-| Write Model         | Domain logic + invariants         | Order    |
-|                     |                                   | Aggregate|
-| Event               | Communication from write to read  | Order-   |
-|                     |                                   | Created  |
-| Projection          | Transforms events -> read model   | Order-   |
-|                     |                                   | Projector|
-+---------------------+-----------------------------------+----------+
-| ARCHITECTURE                                                     |
-+-------------------------------------------------------------------+
-| WRITE SIDE          | READ SIDE                                   |
-| [Command]           | [Query]                                     |
-|   v                 |   v                                         |
-| [Command Handler]   | [Query Handler]                             |
-|   v                 |   v                                         |
-| [Aggregate/Domain]  | [Read Model (denormalized)]                 |
-|   v                 |                                             |
-| [Event Store/DB]    | [Cache (Redis)] [Search (ES)] [DB]          |
-|   v                 |                                             |
-| [Event Bus/Kafka] -----> [Event Handler/Projection]               |
-+-------------------------------------------------------------------+
-| CONSISTENCY                                                        |
-+-------------------------------------------------------------------+
-| Write always consistent (ACID on write side)                      |
-| Read model eventually consistent (async update)                   |
-| Lag = time between event publication and read model update        |
-| Typical: 10ms - 100ms                                             |
-| Can bypass: query write model directly for critical reads         |
-+-------------------------------------------------------------------+
-| BEST PRACTICES                                                     |
-+-------------------------------------------------------------------+
-| 1. Commands return void (or ID only)                              |
-| 2. Queries are idempotent                                         |
-| 3. Read models are denormalized                                   |
-| 4. Event handlers are idempotent                                  |
-| 5. Monitor read model lag                                         |
-| 6. Support read model rebuilding                                  |
-| 7. Version events and read models                                 |
-| 8. Never use read model for command validation                    |
-+-------------------------------------------------------------------+
-```
+- **Monitor projection lag as a critical SLO** — Projection lag (time between event publication and read model update) is the key health metric for CQRS. Alert if lag exceeds 2 seconds for user-facing queries or 30 seconds for analytical queries. Use dedicated metrics per projection to identify which ones are falling behind.

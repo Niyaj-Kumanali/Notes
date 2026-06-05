@@ -1,633 +1,393 @@
-# Denormalization
+# Database Denormalization
 
-## 1. Executive Summary
+---
 
-Denormalization is the intentional introduction of redundancy into a database schema to improve read performance. While normalization eliminates redundancy to ensure data integrity, denormalization trades write efficiency and storage for faster reads. This is a performance optimization, not a design failure. Production systems commonly operate at a third-normal-form baseline with selective, documented denormalization for critical query paths. The key is understanding when redundancy is acceptable and how to maintain consistency.
+## What is Denormalization?
 
-## 2. Core Theory
+**Denormalization** is the intentional introduction of redundancy into a database schema to improve read performance. While normalization eliminates redundancy for data integrity, denormalization trades write efficiency and storage for faster reads. This is a performance optimization, not a design failure. Production systems typically operate at a 3NF baseline with selective, documented denormalization for critical query paths.
 
-### 2.1 Why Denormalize
+### Key Concepts:
 
-- **Reduce joins**: Eliminate expensive multi-table joins for frequent queries
-- **Pre-compute aggregates**: Store pre-calculated sums, counts, averages
-- **Optimize for read patterns**: Arrange data physically for common access patterns
-- **Support reporting/analytics**: Flatten complex data for quick scanning
-- **Reduce index overhead**: Fewer tables may mean fewer indexes needed
+1. **Why Denormalize**:
 
-### 2.2 Denormalization Techniques
+   - **Reduce joins** — Eliminate expensive multi-table joins for frequent queries.
+   - **Pre-compute aggregates** — Store pre-calculated sums, counts, averages.
+   - **Optimize for read patterns** — Arrange data for common access patterns.
+   - **Support reporting/analytics** — Flatten complex data for quick scanning.
+   - **Reduce index overhead** — Fewer tables may mean fewer indexes needed.
 
-| Technique | Description | Example |
-|-----------|-------------|---------|
-| Pre-joined tables | Merge related tables into one | Order with customer name instead of customer_id |
-| Computed columns | Pre-calculate aggregate values | Review count on product table |
-| Derived tables | Materialize complex query results | Daily sales summary table |
-| Array/JSON columns | Store related data inline | Product tags as JSON array |
-| Duplicate columns | Copy columns across tables | Category name on product table |
-| Summary tables | Pre-aggregated rollups | Monthly revenue by category |
+2. **Denormalization Techniques**:
 
-### 2.3 Consistency Challenges
+   - **Pre-joined tables** — Merge related tables into one (e.g., order with customer name instead of customer_id).
+   - **Computed columns** — Pre-calculate aggregate values (e.g., review count on product table).
+   - **Derived tables** — Materialize complex query results (e.g., daily sales summary).
+   - **Array/JSON columns** — Store related data inline (e.g., product tags as JSON array).
+   - **Duplicate columns** — Copy columns across tables (e.g., category name on product table).
+   - **Summary tables** — Pre-aggregated rollups (e.g., monthly revenue by category).
 
-Denormalized data must be kept consistent:
-- **Application-managed**: Code updates all copies
-- **Trigger-managed**: Database triggers propagate changes
-- **Eventual consistency**: Periodic batch sync (acceptable for some use cases)
-- **Materialized views**: Database-managed automatic refresh
+3. **Consistency Challenges**:
 
-## 3. Under-the-Hood Deep Dive
+   Denormalized data must be kept consistent:
+   - **Application-managed** — Code updates all copies.
+   - **Trigger-managed** — Database triggers propagate changes.
+   - **Materialized views** — Database-managed automatic refresh.
+   - **Eventual consistency** — Periodic batch sync (acceptable for some use cases).
 
-### 3.1 Read vs Write Optimization Trade-off
+4. **Read vs Write Trade-off**:
 
-```
-Normalized:     Writes are FAST (one table), Reads are SLOW (joins)
-Denormalized:   Reads are FAST (one table), Writes are SLOW (multiple copies)
+   ```
+   Normalized:   Writes are FAST (one table), Reads are SLOW (joins)
+   Denormalized: Reads are FAST (one table), Writes are SLOW (multiple copies)
+   ```
 
-The cost of a normalized write:    1 table update
-The cost of a denormalized write:  1+ table updates (maintain copies)
-The cost of a normalized read:     N-table join
-The cost of a denormalized read:  1 table scan
-```
+---
 
-### 3.2 Join Elimination
+## Core Concepts
 
-The primary benefit of denormalization is eliminating joins. In a database with billions of rows, a hash join may require:
-- Full sequential scan of both tables if no indexes
-- Building a hash table (memory intensive)
-- Probing the hash table (CPU intensive)
+### 1. Materialized Views as Managed Denormalization
 
-With denormalization, all data is in one table — just a sequential or index scan.
+   ```sql
+   -- Auto-maintained denormalized structure
+   CREATE MATERIALIZED VIEW order_summary AS
+   SELECT o.id AS order_id,
+          o.created_at,
+          u.username,
+          COUNT(oi.id) AS item_count,
+          SUM(oi.total) AS total_amount
+   FROM orders o
+   JOIN users u ON u.id = o.user_id
+   JOIN order_items oi ON oi.order_id = o.id
+   GROUP BY o.id, u.username;
 
-### 3.3 Materialized Views as Managed Denormalization
+   -- Refresh without blocking readers
+   REFRESH MATERIALIZED VIEW CONCURRENTLY order_summary;
+   ```
+
+### 2. Trigger-Based Consistency
+
+   ```sql
+   CREATE OR REPLACE FUNCTION sync_category_name()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   AS $$
+   BEGIN
+       UPDATE products SET category_name = NEW.name WHERE category_id = NEW.id;
+       RETURN NEW;
+   END;
+   $$;
+
+   CREATE TRIGGER trg_sync_category_name
+       AFTER UPDATE OF name ON categories
+       FOR EACH ROW
+       EXECUTE FUNCTION sync_category_name();
+   ```
+
+### 3. Denormalized E-Commerce Schema
+
+   ```sql
+   CREATE TABLE orders (
+       id BIGSERIAL PRIMARY KEY,
+       user_id BIGINT NOT NULL,
+       user_name VARCHAR(100),        -- DN: copied from users
+       user_email VARCHAR(255),       -- DN: copied from users
+       billing_city VARCHAR(100),     -- DN: copied from addresses
+       shipping_city VARCHAR(100),    -- DN: copied from addresses
+       order_item_count INT DEFAULT 0, -- DN: maintained by trigger
+       total DECIMAL(10,2) NOT NULL,
+       status VARCHAR(20) DEFAULT 'PENDING',
+       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+   );
+
+   CREATE TABLE products (
+       id BIGSERIAL PRIMARY KEY,
+       category_id BIGINT NOT NULL,
+       category_name VARCHAR(100),    -- DN: copied from categories
+       name VARCHAR(255) NOT NULL,
+       price DECIMAL(10,2) NOT NULL,
+       review_count INT DEFAULT 0,    -- DN: maintained by trigger
+       avg_rating DECIMAL(3,2) DEFAULT 0.00, -- DN: maintained by trigger
+       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+   );
+   ```
+
+### 4. JPA Entity with Denormalized Fields
+
+   ```java
+   @Entity
+   @Table(name = "products")
+   public class Product {
+       @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+       private Long id;
+
+       @ManyToOne(fetch = FetchType.LAZY)
+       @JoinColumn(name = "category_id", nullable = false)
+       private Category category;
+
+       @Column(name = "category_name")  // Denormalized field
+       private String categoryName;
+
+       @Column(nullable = false)
+       private String name;
+
+       @Column(name = "review_count")
+       private Integer reviewCount;  // Denormalized aggregate
+
+       @Column(name = "avg_rating")
+       private BigDecimal avgRating;  // Denormalized aggregate
+
+       @PostLoad
+       public void syncCategoryName() {
+           if (category != null) {
+               this.categoryName = category.getName();
+           }
+       }
+   }
+   ```
+
+### 5. Maintaining Denormalized Data (Application Level)
+
+   ```java
+   @Service
+   @Transactional
+   public class OrderService {
+       public Order createOrder(OrderRequest request) {
+           User user = userRepository.findById(request.getUserId()).orElseThrow();
+
+           Order order = new Order();
+           order.setUserId(user.getId());
+           order.setUserName(user.getUsername());  // Denormalized
+           order.setUserEmail(user.getEmail());    // Denormalized
+
+           List<OrderItem> items = request.getItems().stream()
+               .map(this::toOrderItem).toList();
+           order.setItems(items);
+           order.setTotal(items.stream()
+               .map(OrderItem::getTotal)
+               .reduce(BigDecimal.ZERO, BigDecimal::add));
+
+           return orderRepository.save(order);
+       }
+
+       // Sync denormalized data on user update
+       @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+       public void onUserUpdated(UserUpdatedEvent event) {
+           orderRepository.bulkUpdateUserNameAndEmail(
+               event.getUserId(), event.getNewUsername(), event.getNewEmail());
+       }
+   }
+   ```
+
+### 6. Materialized View with Spring Boot
+
+   ```java
+   @Entity
+   @Immutable  // Read-only for Hibernate
+   @Table(name = "order_summary")
+   public class OrderSummary {
+       @Id @Column(name = "order_id")
+       private Long orderId;
+       private LocalDateTime createdAt;
+       private String username;
+       private Integer itemCount;
+       private BigDecimal totalAmount;
+       // getters only
+   }
+
+   @Repository
+   public interface OrderSummaryRepository extends JpaRepository<OrderSummary, Long> {
+       List<OrderSummary> findByCreatedAtAfter(LocalDateTime since);
+   }
+
+   @Service
+   public class OrderSummaryService {
+       @Scheduled(cron = "0 0/5 * * * ?")  // Every 5 minutes
+       public void refreshMaterializedView() {
+           entityManager.createNativeQuery(
+               "REFRESH MATERIALIZED VIEW CONCURRENTLY order_summary"
+           ).executeUpdate();
+       }
+   }
+   ```
+
+### 7. Reporting Schema (Star Schema)
+
+   ```sql
+   -- Fact table (highly denormalized for analytics)
+   CREATE TABLE sales_facts (
+       transaction_id BIGINT,
+       product_name VARCHAR(255),        -- DN from products
+       product_category VARCHAR(100),    -- DN from categories
+       store_name VARCHAR(255),          -- DN from stores
+       store_region VARCHAR(100),        -- DN from regions
+       customer_tier VARCHAR(20),        -- DN from customers
+       quantity INT,
+       total DECIMAL(10,2),
+       transaction_date DATE
+   );
+
+   -- No joins needed for most BI queries
+   SELECT store_region, product_category, SUM(total) AS revenue
+   FROM sales_facts
+   WHERE transaction_date BETWEEN '2024-01-01' AND '2024-12-31'
+   GROUP BY store_region, product_category;
+   ```
+
+---
+
+## Common Mistakes
+
+1. **Premature denormalization** — optimizing before measuring the actual bottleneck.
+2. **Denormalizing without documentation** — future engineers won't know why data is duplicated.
+3. **Inconsistent copies** — missing trigger/application logic to keep copies in sync.
+4. **Too many denormalized columns** — creating wide tables with 200+ columns.
+5. **Copying large objects** — storing TEXT/JSON blobs in multiple places.
+6. **Over-aggregation** — pre-computing aggregates that could be computed in sub-millisecond queries.
+7. **Ignoring write performance** — denormalizing without measuring write throughput impact.
+8. **No reconciliation process** — failing to detect and fix inconsistencies.
+9. **Using triggers for heavy consistency** — triggers add latency to every write.
+10. **Not considering materialized views** — reinventing what the database already provides.
+
+---
+
+## Real-World Scenarios
+
+### 1. E-Commerce Product Page with Denormalized Aggregates
+
+A product page displays `review_count` and `avg_rating`. Computing these from the `reviews` table on every page load requires an aggregation JOIN. Denormalizing onto `products` eliminates the JOIN:
 
 ```sql
--- Auto-maintained denormalized structure
-CREATE MATERIALIZED VIEW order_summary AS
-SELECT o.id AS order_id,
-       o.created_at,
-       u.username,
-       u.email,
-       COUNT(oi.id) AS item_count,
-       SUM(oi.total) AS total_amount,
-       MAX(p.name) AS most_expensive_product
-FROM orders o
-JOIN users u ON u.id = o.user_id
-JOIN order_items oi ON oi.order_id = o.id
-JOIN products p ON p.id = oi.product_id
-GROUP BY o.id, u.username, u.email;
-
--- Refresh:
-REFRESH MATERIALIZED VIEW CONCURRENTLY order_summary;
-```
-
-### 3.4 Trigger-Based Consistency
-
-```sql
-CREATE OR REPLACE FUNCTION sync_category_name()
-RETURNS trigger
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    -- When category name changes, update all products with denormalized name
-    UPDATE products SET category_name = NEW.name WHERE category_id = NEW.id;
-    RETURN NEW;
-END;
-$$;
-
-CREATE TRIGGER trg_sync_category_name
-    AFTER UPDATE OF name ON categories
-    FOR EACH ROW
-    EXECUTE FUNCTION sync_category_name();
-```
-
-## 4. Production Code Examples
-
-### 4.1 Denormalized E-Commerce Schema
-
-```sql
--- Normalized baseline
--- Denormalized additions (columns with _dn suffix denote denormalized data)
-CREATE TABLE orders (
-    id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT NOT NULL,
-    user_name VARCHAR(100),  -- DN: copied from users table
-    user_email VARCHAR(255),  -- DN: copied from users table
-    billing_city VARCHAR(100), -- DN: copied from addresses
-    shipping_city VARCHAR(100), -- DN: copied from addresses
-    order_item_count INT DEFAULT 0, -- DN: maintained by trigger
-    total DECIMAL(10,2) NOT NULL,
-    status VARCHAR(20) DEFAULT 'PENDING',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
 CREATE TABLE products (
     id BIGSERIAL PRIMARY KEY,
-    category_id BIGINT NOT NULL,
-    category_name VARCHAR(100),  -- DN: copied from categories table
     name VARCHAR(255) NOT NULL,
     price DECIMAL(10,2) NOT NULL,
-    review_count INT DEFAULT 0,  -- DN: maintained by trigger
-    avg_rating DECIMAL(3,2) DEFAULT 0.00,  -- DN: maintained by trigger
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-### 4.2 JPA Entity with Denormalized Fields
-
-```java
-@Entity
-@Table(name = "products")
-public class Product {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "category_id", nullable = false)
-    private Category category;
-
-    @Column(name = "category_name")  // Denormalized field
-    private String categoryName;
-
-    @Column(nullable = false)
-    private String name;
-
-    @Column(nullable = false)
-    private BigDecimal price;
-
-    @Column(name = "review_count")
-    private Integer reviewCount;  // Denormalized aggregate
-
-    @Column(name = "avg_rating")
-    private BigDecimal avgRating;  // Denormalized aggregate
-
-    @PostLoad
-    public void syncCategoryName() {
-        // Ensure denormalized field is in sync with relationship
-        if (category != null) {
-            this.categoryName = category.getName();
-        }
-    }
-}
-```
-
-### 4.3 Maintaining Denormalized Data (Application Level)
-
-```java
-@Service
-@Transactional
-public class OrderService {
-    private final OrderRepository orderRepository;
-    private final UserRepository userRepository;
-
-    public Order createOrder(OrderRequest request) {
-        User user = userRepository.findById(request.getUserId())
-            .orElseThrow(() -> new EntityNotFoundException("User not found"));
-
-        Order order = new Order();
-        order.setUserId(user.getId());
-        // Denormalized fields
-        order.setUserName(user.getUsername());
-        order.setUserEmail(user.getEmail());
-
-        List<OrderItem> items = request.getItems().stream()
-            .map(this::toOrderItem)
-            .toList();
-
-        order.setItems(items);
-        order.setTotal(items.stream()
-            .map(OrderItem::getTotal)
-            .reduce(BigDecimal.ZERO, BigDecimal::add));
-
-        return orderRepository.save(order);
-    }
-
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    public void onUserUpdated(UserUpdatedEvent event) {
-        // Async update of denormalized user data in orders
-        orderRepository.bulkUpdateUserNameAndEmail(
-            event.getUserId(), event.getNewUsername(), event.getNewEmail());
-    }
-}
-```
-
-### 4.4 Materialized View with Spring Boot
-
-```java
-// Flyway migration V5__create_order_summary_mv.sql
-// CREATE MATERIALIZED VIEW order_summary AS ...
-// CREATE UNIQUE INDEX ON order_summary(order_id);
-
-@Entity
-@Immutable  // Hibernate: this is read-only
-@Table(name = "order_summary")
-public class OrderSummary {
-    @Id
-    @Column(name = "order_id")
-    private Long orderId;
-
-    private LocalDateTime createdAt;
-    private String username;
-    private String email;
-    private Integer itemCount;
-    private BigDecimal totalAmount;
-
-    // getters only (no setters since it's read-only)
-}
-
-@Repository
-public interface OrderSummaryRepository extends JpaRepository<OrderSummary, Long> {
-    List<OrderSummary> findByCreatedAtAfter(LocalDateTime since);
-}
-
-@Service
-public class OrderSummaryService {
-
-    @Scheduled(cron = "0 0/5 * * * ?")  // Every 5 minutes
-    @Transactional
-    public void refreshMaterializedView() {
-        entityManager.createNativeQuery(
-            "REFRESH MATERIALIZED VIEW CONCURRENTLY order_summary"
-        ).executeUpdate();
-    }
-}
-```
-
-## 5. Real-World Scenarios
-
-### 5.1 Activity Feed / Timeline
-
-```sql
--- Denormalized feed items (avoids joins for every feed read)
-CREATE TABLE feed_items (
-    id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT NOT NULL,
-    actor_id BIGINT NOT NULL,
-    actor_name VARCHAR(100),      -- DN: copied from users
-    actor_avatar_url TEXT,        -- DN: copied from users
-    action_type VARCHAR(50),      -- 'POST', 'LIKE', 'COMMENT'
-    target_type VARCHAR(50),
-    target_id BIGINT,
-    target_title VARCHAR(255),    -- DN: copied from post title
-    content_preview TEXT,         -- DN: truncated content
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    review_count INT DEFAULT 0,
+    avg_rating DECIMAL(3,2) DEFAULT 0.00
 );
 
--- Index for feed queries (no joins needed)
-CREATE INDEX idx_feed_user_time ON feed_items(user_id, created_at DESC);
+CREATE OR REPLACE FUNCTION update_product_rating()
+RETURNS trigger AS $$
+BEGIN
+    UPDATE products SET
+        review_count = (SELECT COUNT(*) FROM reviews WHERE product_id = NEW.product_id),
+        avg_rating = (SELECT ROUND(AVG(rating), 2) FROM reviews WHERE product_id = NEW.product_id)
+    WHERE id = NEW.product_id;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
 ```
 
-### 5.2 Reporting Schema (Star Schema)
+### 2. Materialized View for Daily Sales Dashboard
+
+A sales dashboard aggregates daily revenue by region and category. A materialized view pre-computes the result and refreshes hourly:
 
 ```sql
--- Fact table (highly denormalized for analytics)
-CREATE TABLE sales_facts (
-    transaction_id BIGINT,
-    date_id INT,
-    product_id INT,
-    store_id INT,
-    customer_id INT,
-    product_name VARCHAR(255),        -- DN from products
-    product_category VARCHAR(100),    -- DN from categories
-    store_name VARCHAR(255),          -- DN from stores
-    store_region VARCHAR(100),        -- DN from regions
-    customer_tier VARCHAR(20),        -- DN from customers
-    quantity INT,
-    unit_price DECIMAL(10,2),
-    discount DECIMAL(10,2),
-    total DECIMAL(10,2),
-    transaction_date DATE
-);
-
--- No joins needed for most BI queries
-SELECT store_region, product_category, SUM(total) AS revenue
-FROM sales_facts
-WHERE transaction_date BETWEEN '2024-01-01' AND '2024-12-31'
-GROUP BY store_region, product_category;
-```
-
-### 5.3 Cache-Aside Pattern with Denormalized Data
-
-```java
-@Service
-public class ProductCacheService {
-    private final RedisTemplate<String, ProductView> redisTemplate;
-    private final ProductRepository productRepository;
-
-    public ProductView getProductView(Long productId) {
-        // Try cache first
-        ProductView cached = redisTemplate.opsForValue()
-            .get("product:view:" + productId);
-        if (cached != null) {
-            return cached;
-        }
-
-        // Cache miss: load denormalized view
-        ProductView view = productRepository.findProductViewById(productId);
-        redisTemplate.opsForValue().set(
-            "product:view:" + productId, view, 1, TimeUnit.HOURS);
-        return view;
-    }
-}
-```
-
-## 6. Performance
-
-### 6.1 When Denormalization Helps Most
-
-| Scenario | Read Improvement | Write Degradation |
-|----------|-----------------|-------------------|
-| High-read, low-write tables | Significant | Minimal |
-| Reporting/analytics | Major (no joins) | N/A (batch loaded) |
-| Aggregation-heavy queries | Major (pre-computed) | Moderate |
-| OLTP with lookup-heavy patterns | Significant | Moderate |
-| Low-write OLTP | Significant | Minimal |
-
-### 6.2 When Denormalization Hurts
-
-- **Write-heavy tables**: Every write updates multiple columns/rows
-- **Highly normalized baseline**: More copies to maintain
-- **Large composite values**: Copying large text/BLOB columns
-- **Frequent schema changes**: Changing structure requires updating multiple copies
-
-### 6.3 Materialized View Performance
-
-```sql
--- Refresh strategies
-REFRESH MATERIALIZED VIEW my_view;            -- Locks, blocks readers
-REFRESH MATERIALIZED VIEW CONCURRENTLY my_view; -- No lock, needs unique index
-```
-
-CONCURRENTLY refresh creates a temporary updated copy and atomically swaps. Requires a unique index but allows reads during refresh.
-
-## 7. Security
-
-### 7.1 Denormalized Data Exposure
-
-Denormalization can expose sensitive data in unexpected places:
-- A `feed_items` table may expose user emails in the denormalized `actor_name` column
-- A `sales_facts` table may contain customer PII that's not needed for analytics
-
-Mitigations:
-- Audit denormalized columns for sensitive data
-- Apply column-level security or redaction
-- Use views instead of physical copies for sensitive fields
-
-### 7.2 Audit Trail Challenges
-
-With denormalized copies, tracking data lineage becomes harder. An audit log must track changes to the authoritative source and verify propagation to denormalized copies.
-
-## 8. Common Mistakes
-
-1. **Premature denormalization** — optimizing before measuring the actual bottleneck
-2. **Denormalizing without documentation** — future engineers won't know why data is duplicated
-3. **Inconsistent copies** — missing trigger/application logic to keep copies in sync
-4. **Too many denormalized columns** — creating wide tables with 200+ columns
-5. **Copying large objects** — storing TEXT/JSON blobs in multiple places
-6. **Over-aggregation** — pre-computing aggregates that could be computed in sub-millisecond queries
-7. **Ignoring write performance** — denormalizing without measuring write throughput impact
-8. **No reconciliation process** — failing to detect and fix inconsistencies
-9. **Using triggers for heavy consistency** — triggers add latency to every write
-10. **Not considering materialized views** — reinventing what the database already provides
-
-## 9. Senior Engineer Perspective
-
-### Denormalization Decision Framework
-
-1. **Identify read bottleneck**: Profiling shows JOIN as top cost
-2. **Measure read frequency**: Is this query path executed 1000/sec or 1/hour?
-3. **Quantify write frequency**: How often does the source data change?
-4. **Assess consistency requirements**: Real-time sync or eventual consistency OK?
-5. **Evaluate alternatives**: Could a covering index, better query, or caching solve it?
-6. **Design consistency mechanism**: Trigger, application logic, batch sync, materialized view?
-7. **Document decision**: Why denormalized, what was the measured improvement
-
-### Consistency Strategy Selection
-
-| Requirement | Strategy | Example |
-|-------------|----------|---------|
-| Strong consistency (same transaction) | Trigger or application-level same-transaction update | Category name on products |
-| Immediate consistency (seconds) | Async event-driven update | Order count on user dashboard |
-| Near-real-time (minutes) | Scheduled batch sync or materialized view | Daily revenue rollups |
-| Eventual (hours/days) | ETL pipeline | Data warehouse dimension copies |
-
-## 10. Interview Questions (20)
-
-### Easy (10)
-
-1. What is denormalization?
-2. Why would you denormalize a database?
-3. What is the main trade-off of denormalization?
-4. What is a materialized view?
-5. How does denormalization differ from normalization?
-6. What is a pre-computed aggregate?
-7. Can a table be both normalized and denormalized?
-8. What is a fact table in a star schema?
-9. What is a trigger used for in denormalization?
-10. What is data redundancy?
-
-### Medium (10)
-
-11. Explain the consistency challenges with denormalized data.
-12. How would you keep denormalized data in sync with source data?
-13. Compare trigger-based sync vs application-level sync for denormalized data.
-14. What is a materialized view and how is it different from a regular view?
-15. How do you decide when denormalization is appropriate?
-16. Explain the star schema and how it relates to denormalization.
-17. How would you handle denormalization across microservices?
-18. What is the difference between logical and physical denormalization?
-19. How does denormalization affect indexing strategy?
-20. What is a summary table and when would you use one?
-
-## 11. Advanced Interview Questions (20)
-
-### Hard (10)
-
-1. Design a trigger-based consistency system that maintains denormalized data without deadlocking.
-2. How would you detect and reconcile inconsistencies between normalized and denormalized data at scale?
-3. Explain the trade-offs between synchronous and asynchronous denormalization.
-4. How would you implement a denormalized column that is auto-maintained using a database function?
-5. What is the impact of denormalization on database backup and recovery strategies?
-6. How would you handle denormalization in a multi-master replication setup?
-7. Design a system that automatically recommends denormalization candidates based on query patterns.
-8. How does denormalization interact with partitioning and sharding?
-9. Explain the use of denormalization in CQRS (Command Query Responsibility Segregation).
-10. How would you migrate from a normalized schema to a denormalized schema without downtime?
-
-### System Design (11-20)
-
-11. Design an e-commerce read model that is denormalized for product listing pages.
-12. How would you design a denormalized reporting database fed from normalized OLTP sources?
-13. Design a real-time dashboard system using denormalized aggregates.
-14. How would you build a social media feed using denormalized storage?
-15. Design a multi-tenant analytics system where each tenant can choose denormalization level.
-16. How would you architect a data pipeline that maintains denormalized copies across microservices?
-17. Design a system that provides both normalized (write) and denormalized (read) access to the same data.
-18. How would you design a denormalized inventory system that spans multiple warehouses?
-19. Design a leaderboard system using denormalized pre-computed scores.
-20. How would you design a content recommendation engine using denormalized user-item matrices?
-
-## 12. Expert-Level Interview Questions (10)
-
-1. Design a system that automatically detects data inconsistency between normalized and denormalized stores and self-heals.
-2. How would you implement a multi-version denormalization system where different consumers see different denormalized views?
-3. Design a denormalization framework that uses change-data-capture (CDC) to propagate changes in near-real-time.
-4. How would you design a system that dynamically chooses between normalized query (join) and denormalized query (single table) based on query parameters?
-5. Explain how to implement a denormalization strategy for a globally distributed database with active-active replication.
-6. Design a cost model that quantifies the dollar cost of denormalization (storage + write overhead) vs the benefit (read speedup).
-7. How would you implement a trigger-free denormalization system using logical replication and a materialization service?
-8. Design a denormalized time-series database optimized for range queries across multiple dimensions.
-9. How would you design a system that automatically normalizes an overly denormalized schema as part of a database refactoring?
-10. Design a hybrid schema that stores data in normalized form for transactional operations but provides denormalized projections for analytical queries without data duplication.
-
-## 13. Debugging & Troubleshooting
-
-### Finding Inconsistencies
-
-```sql
--- Find denormalized data inconsistencies
-SELECT o.id AS order_id, o.user_name, u.username
+CREATE MATERIALIZED VIEW daily_sales_summary AS
+SELECT o.created_at::date AS sale_date, p.category_id, c.name AS category_name,
+       s.region, SUM(oi.total) AS revenue
 FROM orders o
-JOIN users u ON u.id = o.user_id
-WHERE o.user_name != u.username;
+JOIN order_items oi ON oi.order_id = o.id
+JOIN products p ON p.id = oi.product_id
+JOIN categories c ON c.id = p.category_id
+JOIN stores s ON s.id = o.store_id
+GROUP BY o.created_at::date, p.category_id, c.name, s.region;
 
--- Find products where denormalized aggregate doesn't match actual
-SELECT p.id AS product_id,
-       p.review_count AS dn_count,
-       actual.review_count AS actual_count,
-       p.avg_rating AS dn_avg,
-       actual.avg_rating AS actual_avg
-FROM products p
-JOIN (
-    SELECT product_id,
-           COUNT(*) AS review_count,
-           AVG(rating) AS avg_rating
-    FROM reviews
-    GROUP BY product_id
-) actual ON actual.product_id = p.id
-WHERE p.review_count != actual.review_count
-   OR ABS(p.avg_rating - actual.avg_rating) > 0.01;
+REFRESH MATERIALIZED VIEW CONCURRENTLY daily_sales_summary;
 ```
 
-### Monitoring Denormalization Impact
+### 3. Social Media Feed with Pre-Joined Data
 
-```sql
--- Monitor trigger execution time (PostgreSQL)
-SELECT tgname, n_tup_upd, n_tup_del,
-       (total_time / calls)::numeric(10,3) AS avg_ms
-FROM pg_trigger t
-JOIN pg_stat_user_tables ut ON ut.relid = t.tgrelid;
+A social media feed shows 20 posts with author name, avatar, and like count. Joining for each feed load creates 40+ JOINs. Storing denormalized data makes reads instant:
 
--- Check materialized view refresh performance
-SELECT relid::regclass AS mv_name,
-       last_autovacuum, last_autoanalyze
-FROM pg_stat_user_tables
-WHERE relid IN (
-    SELECT objid FROM pg_depend
-    WHERE classid = 'pg_class'::regclass
-      AND objsubid = 0
-      AND refclassid = 'pg_class'::regclass
-      AND deptype = 'i'
-);
+```java
+@Entity
+@Table(name = "feed_items")
+public class FeedItem {
+    @Id private Long id;
+    private Long authorId;
+    private String authorName;      // Denormalized from users
+    private String authorAvatarUrl; // Denormalized from users
+    private String content;
+    private int likeCount;           // Denormalized count
+    private LocalDateTime createdAt;
+}
 ```
 
-## 14. Comparison Section
+## Scenario-Based Questions
 
-| Aspect | Normalization | Denormalization |
-|--------|--------------|-----------------|
-| Goal | Eliminate redundancy | Improve read performance |
-| Storage | Minimal | More (duplicate data) |
-| Writes | Fast (one place) | Slower (multiple updates) |
-| Reads | Slower (joins) | Faster (one table) |
-| Integrity | High (constraints) | Risk of inconsistency |
-| Schema | Many small tables | Fewer, wider tables |
-| Maintenance | Simpler | More complex (sync logic) |
-| Use case | OLTP (write-heavy) | OLAP, reporting, read-heavy |
+1. **Q: You are building a product listing page that shows product name, category name, and review count. The normalized query joins 4 tables and takes 200ms at 1000 QPS. How do you decide which columns to denormalize?**
+   A: Measure the actual bottleneck first. If the JOIN is fast (<5ms), caching (Redis) may be cheaper than denormalization. Denormalize the most-read, least-changed columns: category name (changes rarely, trigger-synced) and review count (updated frequently but read far more, event-driven update).
 
-| Denormalization Method | Consistency Level | Implementation Complexity |
-|------------------------|------------------|--------------------------|
-| Computed column | Strong (database) | Low |
-| Trigger-updated column | Strong (database) | Medium |
-| Application-updated column | Application-defined | Medium |
-| Materialized view | Depends on refresh | Low (database) |
-| Batch sync | Eventual | Medium |
-| Event-driven sync | Eventual | High |
+2. **Q: You denormalized `user_name` and `user_email` onto `orders`. A user changes their email and the reconciliation script finds 5000 orders with the old email. What's the fix?**
+   A: The sync mechanism failed. Fix: add a trigger on `users` updating all related orders on email change. For the inconsistency, run one-time: `UPDATE orders SET user_email = u.email FROM users u WHERE orders.user_id = u.id AND orders.user_email != u.email`. Implement proper sync via trigger (real-time) or event-driven job (eventual consistency).
 
-## 15. Revision Notes
+3. **Q: A materialized view aggregating 50M sales records takes 10 minutes to refresh. Queries time out during refresh. How do you fix this?**
+   A: Switch to `REFRESH MATERIALIZED VIEW CONCURRENTLY` which creates a new version and swaps atomically — readers never block. This requires a UNIQUE index on the MV. For faster refresh, incrementally update via summary tables with triggers applying deltas.
 
-- Denormalization is intentional redundancy for read performance
-- Always measure first: is the JOIN actually the bottleneck?
-- Key decision factors: read/write ratio, consistency requirements, query patterns
-- Materialized views are the safest denormalization (database-managed)
-- Triggers provide strong consistency but add write latency
-- Application-level sync gives flexibility but risks inconsistency
-- Document every denormalization decision with rationale
-- Star schemas are intentionally denormalized for analytics
-- Monitor for data inconsistencies regularly
-- Denormalize data, not schema — use computed/derived columns where possible
+4. **Q: Your team wants to denormalize customer addresses into every order "for convenience". Orders are read-heavy (1M reads/day) but customers change addresses rarely. What do you recommend?**
+   A: This is reasonable if the order must show the address at time of order (point-in-time snapshot). Store the address at order creation. This is historical accuracy, not just denormalization. Document that orders show shipping address at time of order, not current address.
 
-## 16. Cheat Sheet
+5. **Q: A trigger on `categories` updates `category_name` on 50,000 products. The trigger on rename takes 30 seconds and blocks the UI. How do you decouple this?**
+   A: Remove the synchronous trigger. Publish a `CategoryRenamed` event. A background processor updates products in batches of 1000 with `pg_sleep(0.05)` between batches. Category edits become instant while propagation happens async. Accept eventual consistency (seconds).
 
-```
-+-------------------------------------------------------------------+
-|                  DENORMALIZATION CHEAT SHEET                      |
-+-------------------------------------------------------------------+
-|                                                                   |
-|  WHEN TO DENORMALIZE:                                             |
-|                                                                   |
-|  Read-heavy workload (90%+ reads)                                 |
-|  Reporting / analytics queries                                    |
-|  High-frequency queries with 3+ table joins                      |
-|  Aggregate-heavy queries (SUM, COUNT, AVG)                        |
-|  Materialized view is insufficient (need real-time)               |
-|  Caching layer doesn't solve the problem                          |
-|                                                                   |
-+-------------------------------------------------------------------+
-|  CONSISTENCY MAINTENANCE OPTIONS:                                 |
-|                                                                   |
-|  +--------------------+-----------+----------+------------------+ |
-|  | Method             | Consistency| Write    | Complexity        | |
-|  |                    | Level      | Overhead |                   | |
-|  +--------------------+-----------+----------+------------------+ |
-|  | Same Transaction   | Strong    | High     | Low               | |
-|  | Database Trigger   | Strong    | Medium   | Low               | |
-|  | Eventual (async)   | Weak      | Low      | Medium-High       | |
-|  | Scheduled Batch    | Weak      | None     | Low               | |
-|  | Materialized View  | Depends   | Varies   | Low (database)    | |
-|  | Application-level  | Varies    | Varies   | Medium-High       | |
-|  +--------------------+-----------+----------+------------------+ |
-|                                                                   |
-+-------------------------------------------------------------------+
-|  COMMON DENORMALIZATION PATTERNS:                                 |
-|                                                                   |
-|  Pattern                    | Description                         |
-|  ---------------------------+----------------------------------- |
-|  Pre-joined columns         | Copy column from joined table       |
-|  Pre-computed aggregate     | Store COUNT/SUM/AVG results         |
-|  Summary/rollup table       | Pre-aggregated reporting rows       |
-|  Materialized view          | Database-managed denormalization    |
-|  JSON/array aggregation     | Store related data inline           |
-|  EAV (Entity-Attribute-Value)| Dynamic attributes in one table    |
-|  Star schema fact table     | Denormalized for BI queries         |
-|                                                                   |
-+-------------------------------------------------------------------+
-|  ANTI-PATTERNS:                                                   |
-|                                                                   |
-|  [ ] Premature denormalization (without measurement)              |
-|  [ ] Copying BLOB/TEXT columns unnecessarily                      |
-|  [ ] No mechanism for consistency maintenance                     |
-|  [ ] Undocumented duplicate columns                              |
-|  [ ] Overly wide tables (200+ columns)                            |
-|  [ ] Denormalized fields in write-heavy OLTP tables               |
-|  [ ] Nesting JSON deeper than necessary in relational columns     |
-|  [ ] Not accounting for denormalization in backup/restore plan    |
-|                                                                   |
-+-------------------------------------------------------------------+
-|  SPRING BOOT / JPA DENORMALIZATION TIPS:                          |
-|                                                                   |
-|  - Use @Immutable for read-only materialized views                |
-|  - Use @PostLoad to sync denormalized fields from entities        |
-|  - Use @TransactionalEventListener for async consistency updates  |
-|  - Use @Scheduled for periodic materialized view refresh          |
-|  - Use @Formula for lightweight computed columns                  |
-|  - Use Hibernate @Generated for database-computed columns         |
-|                                                                   |
-+-------------------------------------------------------------------+
+6. **Q: Your analytics team wants a star schema with a 500GB fact table containing 30 dimension attributes. Queries over the last 7 days are fast, but full-year queries are slow. What's the next optimization?**
+   A: Partition the fact table by month. Each monthly partition is ~40GB. Full-year queries scan only relevant partitions via partition pruning. Consider columnar storage (Parquet, ClickHouse) for analytical workloads — reads only needed columns.
+
+7. **Q: A denormalized `order_summary` has inconsistent data: some rows have correct `item_count`, some have stale values. The table is maintained by application code. What went wrong?**
+   A: Application-level consistency is fragile — any code path modifying orders without updating the summary causes inconsistency. Move consistency to the database with triggers, or enforce a single code path. Add a reconciliation job to validate and fix inconsistencies nightly.
+
+8. **Q: Your app reads product data 10x more than it writes. The normalized schema requires 5 JOINs for a product page. You're considering denormalization. What metrics guide your decision?**
+   A: Measure: current query latency at P50/P95/P99, database CPU/I/O during peak, write throughput impact, how frequently denormalized columns change, and storage cost. Denormalize only if P99 latency exceeds SLA and optimization doesn't suffice.
+
+9. **Q: A trigger updates `review_count` on `products` whenever a review is inserted. What happens with a bulk INSERT of 10,000 reviews?**
+   A: Each review INSERT fires the trigger, updating the product row 10,000 times — massive overhead. Fix: use a statement-level trigger instead of row-level. Better: use a materialized view refreshed periodically, or update via batch job after bulk insert.
+
+10. **Q: A CQRS system writes to normalized tables and projects to denormalized read models. The read model is 5 minutes stale. The product owner demands real-time consistency. How do you bridge the gap?**
+    A: For the critical path, use CDC with sub-second latency. Debezium streams WAL changes from PostgreSQL to Kafka, and a stream processor updates the read model with millisecond latency. Layer a cache in front of the real-time projection for the hottest data.
+
+## Interview Questions
+
+1. **What is denormalization and why would you use it?**
+   A: Intentional introduction of redundancy to improve read performance. Reduces JOINs, eliminates expensive aggregations, and optimizes for specific query patterns.
+
+2. **What are the main denormalization techniques?**
+   A: Pre-joined tables, computed columns (store aggregates), summary tables (pre-aggregated rollups), JSON/array columns, duplicate columns, and materialized views.
+
+3. **What are the consistency challenges with denormalization?**
+   A: Denormalized copies must be kept in sync. Sync methods: application-managed, trigger-managed, materialized views, and eventual consistency (batch jobs).
+
+4. **What is a materialized view?**
+   A: A materialized view stores the query result as a physical table, refreshed periodically. A regular view runs the query every time. MVs trade staleness for performance.
+
+5. **When would you use a trigger for denormalization vs application code?**
+   A: Triggers provide immediate, database-enforced consistency. Application code is more testable but can miss edge cases. Use triggers for critical paths; application code for eventual consistency.
+
+6. **What is the read vs write trade-off in denormalization?**
+   A: Normalized: fast writes (one table), slow reads (joins). Denormalized: fast reads (one table), slow writes (multiple copies). The right choice depends on workload ratio.
+
+7. **How does denormalization affect storage?**
+   A: Increases storage due to data duplication. Trade-off: storage cost vs query performance. For most apps, the storage cost is negligible compared to the performance gain.
+
+8. **What is a star schema?**
+   A: A central fact table (denormalized transactional data) surrounded by dimension tables. Heavily denormalized for analytics — most BI queries need few or no JOINs.
+
+9. **How do you reconcile inconsistent denormalized data?**
+   A: Schedule a reconciliation job that validates denormalized data against the source of truth, logs discrepancies, and fixes them. Without reconciliation, inconsistencies compound.
+
+10. **What's the difference between denormalization and caching?**
+    A: Denormalization stores redundant data in the database schema. Caching stores data in a separate layer (Redis, CDN). Caching can be added/removed without schema changes.
+
+## Developer Recommendations
+
+- **Denormalize only after measuring the actual bottleneck** — Premature denormalization adds complexity. Profile with `EXPLAIN ANALYZE`, measure P99 latency, identify whether JOINs or data volume is the problem.
+
+- **Use materialized views as managed denormalization** — Database-managed, reducing inconsistency risk. Support concurrent refresh without blocking reads. Prefer MVs over triggers for reporting/analytics.
+
+- **Document every denormalized column with rationale** — Add inline comments explaining why each denormalized column exists, what trade-off it makes, and how consistency is maintained.
+
+- **Keep denormalized data consistent with triggers for critical paths** — For data that must always be consistent (invoice totals), use triggers. For non-critical data (trending counts), accept eventual consistency.
+
+- **Limit the number of denormalized columns per table** — A table with 200+ columns causes wide-row performance issues. Denormalize only columns actually needed for query performance.
+
+- **Use CQRS as a formal denormalization pattern** — Write to normalized tables (command model) and project to denormalized tables (query model). Provides clear separation of concerns.
+
+- **Run periodic reconciliation checks** — Schedule a job validating denormalized data against the source of truth. Alert on discrepancies to identify systemic issues before they compound.

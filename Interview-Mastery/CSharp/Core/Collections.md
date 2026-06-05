@@ -1,531 +1,314 @@
 # Collections
 
-## 1. Executive Summary
+---
 
-Collections in C# provide type-safe, resizable data structures for storing and manipulating groups of objects. The `System.Collections.Generic` namespace houses List<T>, Dictionary<TKey,TValue>, HashSet<T>, Queue<T>, Stack<T>, LinkedList<T>, and more. Understanding their internal mechanics, algorithmic complexity, and memory layout is essential for writing performant and scalable applications.
+## Overview
 
-## 2. Core Theory
+- **Definition:** Type-safe, resizable data structures in `System.Collections.Generic` for storing and manipulating groups of objects.
+- **Why It Exists:** Provides standardized, tested implementations of fundamental data structures (dynamic arrays, hash tables, queues, stacks, linked lists) with consistent APIs and well-understood performance characteristics.
+- **Key Concepts:** **`List<T>`** (dynamic array), **`Dictionary<TKey,TValue>`** (hash table), **`HashSet<T>`** (unique elements), **`Queue<T>`** (FIFO), **`Stack<T>`** (LIFO), **`LinkedList<T>`** (doubly linked), **`PriorityQueue<TElement,TPriority>`** (binary heap), **concurrent collections** (`ConcurrentDictionary`, `ConcurrentQueue`, `BlockingCollection`, `Channel<T>`), and **immutable collections**.
 
-Collections are broadly classified into:
-- **Lists**: `List<T>`, `ArrayList` (non-generic) — ordered, indexable, dynamically resizable arrays.
-- **Dictionaries**: `Dictionary<TKey,TValue>`, `SortedDictionary<TKey,TValue>`, `SortedList<TKey,TValue>` — key-value storage with fast lookup.
-- **Sets**: `HashSet<T>`, `SortedSet<T>` — unique element storage.
-- **Queues**: `Queue<T>`, `PriorityQueue<TElement,TPriority>` (.NET 6+) — FIFO and priority-based.
-- **Stacks**: `Stack<T>` — LIFO access.
-- **Linked Lists**: `LinkedList<T>` — doubly linked list.
-- **Concurrent Collections**: `ConcurrentDictionary<TKey,TValue>`, `ConcurrentQueue<T>`, `ConcurrentStack<T>`, `BlockingCollection<T>`, `Channel<T>` — thread-safe variants.
+---
 
-Key interface hierarchy: `IEnumerable<T>` -> `ICollection<T>` -> `IList<T>`, `IDictionary<TKey,TValue>`, `ISet<T>`, `IReadOnlyCollection<T>`, `IReadOnlyList<T>`.
+## Core Concepts
 
-## 3. Under-the-Hood Deep Dive
-
-### List<T> Internals
+- **List\<T\> Internals:** Wraps a `T[]` internal array with default capacity 4. Grows by 2x when full (amortized O(1) per Add). `Insert` at index 0 causes O(n) shift. `_version` field incremented on every mutation to detect modification during enumeration.
 
 ```csharp
-// Conceptual internal layout of List<T>
-internal struct List<T>
+public void Add(T item)
 {
-    private T[] _items;        // Internal array, allocated with default capacity (4)
-    private int _size;         // Number of elements logically in the list
-    private int _version;      // Incremented on every mutation (enumeration version check)
-
-    public void Add(T item)
+    if (_size == _items.Length)
     {
-        if (_size == _items.Length)
-        {
-            // Grow: 2x if < 64 items, then ~1.5x (internal logic varies by runtime)
-            int newCapacity = _items.Length == 0 ? 4 : _items.Length * 2;
-            T[] newItems = new T[newCapacity];
-            Array.Copy(_items, newItems, _size);
-            _items = newItems;
-        }
-        _items[_size++] = item;
-        _version++;
+        int newCapacity = _items.Length == 0 ? 4 : _items.Length * 2;
+        T[] newItems = new T[newCapacity];
+        Array.Copy(_items, newItems, _size);
+        _items = newItems;
     }
+    _items[_size++] = item;
+    _version++;
 }
 ```
 
-- Capacity doubling causes O(n) copy; amortized O(1) per Add.
-- Avoid `Insert` at index 0 — causes O(n) shift.
-- `TrimExcess()` reduces capacity to match size.
+- **Dictionary\<TKey,TValue\> Internals:** Uses separate chaining with a single contiguous `Entry[]` array. Hash buckets index into the entry array. Collisions resolved via linked list within the entries. Resizes when load factor exceeds ~0.75. Uses `EqualityComparer<T>.Default` for hash/equality — specialized for value types to avoid boxing.
 
-### Dictionary<TKey,TValue> Internals
+- **HashSet\<T\> Internals:** Identical internal structure to `Dictionary<TKey,TValue>` but stores only keys (no values). Same bucket/entry array pattern with separate chaining.
+
+- **Queue\<T\> Internals:** Circular buffer with `_head` and `_tail` indices that wrap around using modulo arithmetic. Enqueue writes at `_tail`, Dequeue reads from `_head`. Amortized O(1) for both operations.
 
 ```csharp
-// Simplified internal layout
-internal struct Dictionary<TKey, TValue>
+public void Enqueue(T item)
 {
-    private struct Entry
-    {
-        public int hashCode;    // Lower 31 bits of hash code (or -1 for free slot)
-        public int next;        // Index of next entry in chain (-1 for end)
-        public TKey key;
-        public TValue value;
-    }
-
-    private int[] _buckets;     // Hash buckets (index into _entries)
-    private Entry[] _entries;   // Entry array
-    private int _count;         // Number of entries used
-    private int _freeList;      // Index of first free slot
-    private int _freeCount;     // Number of free slots
-
-    // Collision resolution: separate chaining via _buckets -> linked list in _entries
-    // Resize when load factor exceeds ~0.75
+    _array[_tail] = item;
+    _tail = (_tail + 1) % _array.Length;
+    _size++;
 }
 ```
 
-- Open addressing is NOT used; it uses separate chaining with a single contiguous array.
-- `EqualityComparer<T>.Default` uses `GetHashCode()` and `Equals()`.
-- For value type keys, avoid boxing by using `EqualityComparer<T>.Default` which specializes for value types.
+- **LinkedList\<T\> Internals:** Circular doubly linked list — `_head._prev` points to the last node. O(1) insert/remove at known nodes, O(n) lookup. Each node carries forward and backward pointers, resulting in high memory overhead (3 pointers per element).
 
-### HashSet<T> Internals
+- **PriorityQueue\<TElement,TPriority\> (.NET 6+):** Binary heap (min-heap by default). `Enqueue` is O(log n), `Dequeue` is O(log n), `Peek` is O(1). Lower priority value = higher priority.
 
-- Identical internal structure to `Dictionary<TKey,TValue>` but stores only keys (no values).
-- Uses the same bucket/entry array pattern.
+---
 
-### Queue<T> Internals
+## Common Mistakes
+
+- **Modifying collection during enumeration** — `foreach` over a `List<T>` while calling `Remove` throws `InvalidOperationException`. Use `RemoveAll(predicate)` or iterate backwards.
+- **Ignoring default comparer for custom types** — `HashSet<Person>` uses reference equality unless `Equals`/`GetHashCode` are overridden or `IEqualityComparer<T>` is provided.
+- **Capacity fragmentation** — Growing `List<T>` from default 0 to 100,000 causes ~17 resizes. Pre-allocate with `new List<T>(capacity: 100_000)`.
+- **Returning internal array reference** — Exposing `_items` directly lets callers mutate internal state. Return `_items.ToArray()` (defensive copy) or `AsReadOnly()`.
+- **LINQ over LinkedList\<T\>** — `linkedList.Skip(count/2).First()` is O(n) traversal. Use `Find(node)` if you have a node reference.
+- **Concurrent write without synchronization** — Using `if (!dict.ContainsKey(key)) dict.Add(key, value)` has a race condition. Use `dict.GetOrAdd(key, _ => value)`.
+- **Dictionary hash-collision DoS** — Using culture-sensitive string comparers can make dictionaries vulnerable to hash-collision attacks. Use `StringComparer.Ordinal`.
 
 ```csharp
-internal struct Queue<T>
-{
-    private T[] _array;
-    private int _head;          // Index of first element
-    private int _tail;          // Index of next free slot
-    private int _size;          // Number of elements
-
-    public void Enqueue(T item)
-    {
-        _array[_tail] = item;
-        _tail = (_tail + 1) % _array.Length;  // Circular wrap
-        _size++;
-    }
-
-    public T Dequeue()
-    {
-        T item = _array[_head];
-        _array[_head] = default;
-        _head = (_head + 1) % _array.Length;
-        _size--;
-        return item;
-    }
-}
+// Safe: defensive copy for public API
+public IReadOnlyList<User> Users => _users.AsReadOnly();
 ```
 
-### Stack<T> Internals
+---
 
-- Simple single-direction array growth; `Push` writes at `_size`, `Pop` reads at `_size - 1`.
+## Key Design Considerations
 
-### LinkedList<T> Internals
-
-```csharp
-internal sealed class LinkedListNode<T>
-{
-    internal T _value;
-    internal LinkedListNode<T> _next;  // Forward
-    internal LinkedListNode<T> _prev;  // Backward
-}
-
-internal sealed class LinkedList<T>
-{
-    internal LinkedListNode<T> _head;   // Head node (circular: head.prev == last, last.next == head)
-    internal int _count;
-}
-```
-
-- Circular doubly linked list: `_head._prev` points to the last node.
-- O(1) insert/remove at known nodes, O(n) lookup.
-
-## 4. Production Code Examples
-
-```csharp
-// Thread-safe caching with ConcurrentDictionary
-public class ProductCache
-{
-    private readonly ConcurrentDictionary<int, Product> _cache = new();
-    private readonly TimeSpan _ttl = TimeSpan.FromMinutes(5);
-    private readonly ConcurrentDictionary<int, DateTime> _timestamps = new();
-
-    public async Task<Product> GetOrFetchAsync(int productId, Func<int, Task<Product>> factory)
-    {
-        if (_cache.TryGetValue(productId, out var cached) &&
-            _timestamps.TryGetValue(productId, out var ts) &&
-            DateTime.UtcNow - ts < _ttl)
-        {
-            return cached;
-        }
-
-        Product product = await factory(productId);
-        _cache[productId] = product;
-        _timestamps[productId] = DateTime.UtcNow;
-        return product;
-    }
-}
-```
-
-```csharp
-// High-performance list pooling to reduce GC pressure
-public class ListPool<T>
-{
-    private readonly ConcurrentBag<List<T>> _pool = new();
-
-    public List<T> Rent(int minCapacity = 0)
-    {
-        if (_pool.TryTake(out var list))
-        {
-            if (list.Capacity < minCapacity)
-                list.Capacity = minCapacity;
-            return list;
-        }
-        return new List<T>(minCapacity);
-    }
-
-    public void Return(List<T> list)
-    {
-        list.Clear();
-        if (list.Capacity <= 1024)
-            _pool.Add(list);
-    }
-}
-```
-
-```csharp
-// PriorityQueue for job scheduling
-public class JobScheduler
-{
-    private readonly PriorityQueue<Job, int> _queue = new();
-
-    public void Enqueue(Job job, int priority) =>
-        _queue.Enqueue(job, priority);
-
-    public Job DequeueHighestPriority() =>
-        _queue.Dequeue();  // Lowest int = highest priority
-
-    public bool TryDequeue(out Job job, out int priority) =>
-        _queue.TryDequeue(out job, out priority);
-}
-```
-
-```csharp
-// Using SortedSet for order maintenance (e.g., leaderboard)
-public class Leaderboard
-{
-    private readonly SortedSet<PlayerScore> _scores = new(PlayerScoreComparer.Instance);
-
-    public void AddOrUpdate(PlayerScore ps)
-    {
-        _scores.Remove(ps);
-        _scores.Add(ps);
-    }
-
-    public IEnumerable<PlayerScore> GetTop(int n) =>
-        _scores.Take(n);
-}
-```
-
-## 5. Real-World Scenarios
-
-**Scenario 1: Order Book for Trading System**
-- Use `SortedDictionary<decimal, OrderBookLevel>` for price-level lookups.
-- Use `ConcurrentDictionary<long, Order>` for order-by-ID lookups.
-- Use `ConcurrentQueue<Order>` for FIFO order matching.
-
-**Scenario 2: Web Request Rate Limiter**
-- Use `ConcurrentDictionary<string, FixedSizeQueue<DateTime>>` per API key.
-- `Queue<T>` for sliding window timestamps.
-
-**Scenario 3: Event Sourcing Aggregate**
-- Use `LinkedList<Event>` for append-heavy event streams with occasional replay.
-
-**Scenario 4: Object Pool for Database Connections**
-- Use `ConcurrentBag<DbConnection>` since order doesn't matter and each thread works on its own.
-
-## 6. Performance
-
-| Collection           | Access        | Search        | Insert/Add    | Delete        | Memory         |
-|----------------------|---------------|---------------|---------------|---------------|----------------|
-| T[]                  | O(1)          | O(n)          | O(n) (resize) | O(n)          | Lowest         |
-| List<T>              | O(1)          | O(n)          | O(1)*         | O(n)          | Low + slack    |
-| Dictionary<K,V>      | O(1)*         | O(1)*         | O(1)*         | O(1)*         | High (bucket)  |
-| HashSet<T>           | -             | O(1)*         | O(1)*         | O(1)*         | High (bucket)  |
-| SortedDictionary<K,V>| O(log n)      | O(log n)      | O(log n)      | O(log n)      | Medium (tree)  |
-| SortedSet<T>         | -             | O(log n)      | O(log n)      | O(log n)      | Medium (tree)  |
-| Stack<T>             | O(1) peak     | O(n)          | O(1)*         | O(1)*         | Low            |
-| Queue<T>             | O(1) peek     | O(n)          | O(1)*         | O(1)*         | Low            |
-| LinkedList<T>        | O(n)          | O(n)          | O(1)**        | O(1)**        | High (node)    |
-| PriorityQueue<T,P>   | O(1) peek     | O(n)          | O(log n)      | O(log n)      | Medium         |
-
-*Amortized; **At known node; ~Hash collisions degrade to O(n)
-
-### Memory Layout Best Practices
-
-```csharp
-// Pre-allocate to avoid resizing
-List<int> nums = new(capacity: 100_000);
-
-// Use ArrayPool for large temporary buffers
-byte[] buffer = ArrayPool<byte>.Shared.Rent(4096);
-try { /* use buffer */ }
-finally { ArrayPool<byte>.Shared.Return(buffer); }
-
-// For struct enumerators, avoid boxing (List<T> already returns struct)
-// But ArrayList (non-generic) boxes every element.
-```
-
-## 7. Security
-
-```csharp
-// Avoid exposing internal collections as mutable references
-public class InsecureRepository
-{
-    public List<User> Users { get; } = new();  // Callers can add/remove!
-}
-
-public class SecureRepository
-{
-    private readonly List<User> _users = new();
-    public IReadOnlyList<User> Users => _users.AsReadOnly();  // Defensive copy or wrapper
-}
-
-// Guard against hash-collision DoS attacks
-var dict = new Dictionary<string, string>(
-    StringComparer.Ordinal);  // Use ordinal, not invariant culture
-
-// Always validate keys/indices
-if (!_dict.TryGetValue(userInputKey, out var value))
-    throw new KeyNotFoundException("Invalid key");
-```
-
-## 8. Common Mistakes
-
-```csharp
-// MISTAKE 1: Modifying collection during enumeration
-foreach (var item in list)
-{
-    if (ShouldRemove(item))
-        list.Remove(item);  // InvalidOperationException!
-}
-// FIX: Iterate backwards or use RemoveAll
-list.RemoveAll(ShouldRemove);
-
-// MISTAKE 2: Ignoring default comparer for custom types
-class Person { public string Name; }
-var set = new HashSet<Person>();  // Uses reference equality!
-// FIX: Override Equals/GetHashCode or pass IEqualityComparer<Person>
-
-// MISTAKE 3: Capacity fragmentation with List<T>
-var list = new List<int>();
-for (int i = 0; i < 100_000; i++) list.Add(i);  // ~17 resizes!
-// FIX: new List<int>(capacity: 100_000);
-
-// MISTAKE 4: Returning internal array reference
-public int[] GetItems() => _items;  // Caller can mutate!
-// FIX: return _items.ToArray();  // defensive copy
-
-// MISTAKE 5: LINQ over LinkedList<T>
-var middle = linkedList.Skip(count / 2).First();  // O(n) traversal
-// FIX: Use Find(node) if you have a reference.
-
-// MISTAKE 6: Concurrent write without synchronization
-if (!_dict.ContainsKey(key)) _dict.Add(key, value);  // Race condition!
-// FIX: _dict.GetOrAdd(key, _ => value);
-```
-
-## 9. Senior Engineer Perspective
-
-**Design Principles for Collection Choice:**
-
-1. **Measure, don't guess.** The "theoretically better" collection may be slower due to memory locality or GC pressure. Profile with BenchmarkDotNet.
-
-2. **Immutable collections for safety in concurrent read scenarios.** `ImmutableArray<T>`, `ImmutableDictionary<K,V>` from `System.Collections.Immutable` use persistent data structures (trees with sharing) for O(1) snapshot.
-
-3. **Memory pooling reduces GC stalls.** ArrayPool<T>, ListPool<T> for hot paths in servers.
-
-4. **Consider `Span<T>` and `Memory<T>` for slice operations** without allocation. These are not collections but views over contiguous memory, usable with `CollectionsMarshal` for direct access.
+- **Measure, don't guess** — Theoretical complexity often loses to memory locality and GC pressure. Profile with BenchmarkDotNet. A `List<T>` of structs can outperform a `Dictionary` for small lookup sets due to cache locality.
+- **Prefer immutable collections for concurrent read scenarios** — `ImmutableArray<T>`, `ImmutableDictionary<K,V>` use persistent data structures with O(1) snapshots and structural sharing. Zero contention for readers.
+- **Memory pooling reduces GC stalls** — Use `ArrayPool<T>.Shared.Rent(n)` for large temporary buffers and consider `ListPool<T>` for hot paths in servers.
+- **`Span<T>` and `CollectionsMarshal`** — `CollectionsMarshal.AsSpan(list)` provides direct access to a `List<T>`'s internal array without allocation. Dangerous if the list resizes after obtaining the span.
+- **Struct-based collections** — `List<MyStruct>` stores structs inline (dense memory, no GC references per element). Better cache locality and less GC pressure.
+- **Frozen collections (.NET 8+)** — `FrozenSet<T>` and `FrozenDictionary<K,V>` optimize read-only lookups after construction using minimal perfect hashing. Ideal for configuration data and lookup tables.
 
 ```csharp
 // Low-allocation iteration using CollectionsMarshal
-public static Span<T> AsSpan<T>(this List<T> list) =>
-    CollectionsMarshal.AsSpan(list);
-
-// Direct mutation without bounds checks
 var span = CollectionsMarshal.AsSpan(myList);
-span[0] = default;  // Mutates internal array, avoid resizing after
+for (int i = 0; i < span.Length; i++) span[i] = default;
 ```
 
-5. **For high-throughput scenarios, prefer struct-based collections.** `List<MyStruct>` stores structs inline in the array (dense memory, no GC references).
+---
 
-6. **Frozen collections** (.NET 8+): `FrozenSet<T>`, `FrozenDictionary<K,V>` for read-only lookups after construction — optimized down to minimal perfect hashing.
+## Real-World Scenarios
 
-## 10. Interview Questions (Easy)
-
-1. What is the difference between `List<T>` and `T[]`?
-2. How does `Dictionary<TKey,TValue>` handle hash collisions?
-3. What is the default capacity of `List<T>`?
-4. What is the difference between `ICollection<T>` and `IEnumerable<T>`?
-5. How do you remove elements from a collection during iteration?
-6. What is `IReadOnlyList<T>` and when would you use it?
-7. Explain the difference between `Stack<T>` and `Queue<T>`.
-8. What is `HashSet<T>` used for?
-9. How does `LinkedList<T>` differ from `List<T>` in lookup performance?
-10. What does `TrimExcess()` do on `List<T>`?
-
-## 11. Interview Questions (Medium)
-
-1. Explain the amortized O(1) cost of `List<T>.Add()`. When does it degrade?
-2. How does `Dictionary<TKey,TValue>` use `GetHashCode` and `Equals` internally?
-3. Compare `SortedDictionary<TKey,TValue>` and `SortedList<TKey,TValue>` in terms of memory and performance.
-4. When would you choose `ConcurrentDictionary<TKey,TValue>` over a regular `Dictionary<TKey,TValue>` with locking?
-5. Explain how `PriorityQueue<TElement, TPriority>` works internally (binary heap).
-6. What is the `_version` field in `List<T>` used for?
-7. How does `Enumerable.Cast<T>` and `Enumerable.OfType<T>` differ in behavior with non-generic collections?
-8. Explain the circular buffer pattern used in `Queue<T>`.
-9. What is the difference between `ICollection<T>.IsReadOnly` and `IReadOnlyCollection<T>`?
-10. How do you implement `IEquatable<T>` for optimal dictionary performance with value types?
-
-## 12. Advanced Interview Questions (Hard)
-
-1. Describe the internal resize strategy of `Dictionary<TKey,TValue>`. How does it rehash entries when growing?
-2. Implement a thread-safe enumerator for a lock-free collection. What guarantees can you provide?
-3. Design a memory-efficient `HashSet<T>` for 10 million struct keys.
-4. Explain how `CollectionsMarshal.AsSpan()` works and why it's dangerous.
-5. Implement an LRU cache using `LinkedList<T>` and `Dictionary<TKey, LinkedListNode<T>>`.
-6. How would you design a concurrent `ObservableCollection<T>` that batches change notifications?
-7. Explain `ImmutableArray<T>`'s internal structure and compare its performance to `List<T>`.
-8. Design a collection that stores elements in sorted order with O(1) contains check.
-9. How does .NET runtime specialize `EqualityComparer<T>.Default` for different types?
-10. Write a lock-free `ConcurrentQueue<T>`-like structure from scratch.
-
-## 13. Interview Questions (System Design)
-
-1. Design a multi-tenant cache with per-tenant eviction policies using concurrent collections.
-2. Design a distributed rate limiter with consistent hashing and rolling window counters.
-3. Design a real-time leaderboard system with 10M users using sorted sets.
-4. Design an event sourcing store using append-only linked lists and snapshots.
-5. Design an in-memory full-text search index using inverted indexes with `Dictionary<string, HashSet<int>>`.
-6. Design a task scheduler with dependency graph using `ConcurrentDictionary` and `ConcurrentQueue`.
-7. Design an object pool for a high-throughput game server.
-8. Design a batch message processor that groups messages by key using `Channel<T>`.
-9. Design a streaming windowed aggregation engine (sliding window of 60s).
-10. Design a service mesh sidecar connection pool that reuses gRPC channels.
-
-## 14. Expert-Level Interview Questions (Architect)
-
-1. Design a distributed, consistent, in-memory data grid with partitioning and replication, using immutable collections for snapshot isolation.
-2. Implement a garbage-collection-friendly ring buffer for a financial exchange with zero allocations on the hot path.
-3. Design a collection library for real-time systems (no heap allocations after initialization) using `Span<T>` and stack-only structs.
-4. Architect a versioned collection store that supports time-travel queries (efficient rollback/rollforward) using persistent data structures.
-5. Design a hybrid dictionary that switches from hash-based to tree-based storage when hash collisions become pathological (like Java's HashMap).
-6. Architect a concurrent b-tree for a database storage engine, with lock-free reads and fine-grained locking on writes.
-7. Design a high-performance serialization framework that bypasses allocation by writing directly into a collection's internal buffer.
-8. Design a collection-based event store that can replay 1M events/second with snapshotting and indexing.
-9. Architect a zero-allocation log-structured merge-tree (LSM-tree) using sorted collections and tiered compaction.
-10. Design an actor framework mailbox that uses a multi-producer, single-consumer concurrent queue with work stealing.
-
-## 15. Debugging & Troubleshooting
+### Scenario 1: High-Performance Session Store
+**Context:** A web server manages 500K concurrent sessions with O(1) lookups, periodic cleanup of expired sessions, and thread-safe access.
 
 ```csharp
-// Use DebuggerDisplay for collection inspection
-[DebuggerDisplay("Count = {Count}")]
-[DebuggerTypeProxy(typeof(ListDebugView<>))]
-public class MyCollection<T> { /* ... */ }
+public class SessionStore
+{
+    private readonly ConcurrentDictionary<string, Session> _sessions = new();
+    private readonly ConcurrentDictionary<string, DateTime> _expiryTracker = new();
+    private readonly PriorityQueue<string, DateTime> _expiryHeap = new();
 
-// Watch for:
-// - ConcurrentModificationException: use foreach on concurrent collection or capture snapshot
-// - High GC allocations: profile List<T> resizes, use capacity hints
-// - Dictionary key not found: always use TryGetValue
+    public void AddSession(string id, Session session, TimeSpan ttl)
+    {
+        var expiry = DateTime.UtcNow.Add(ttl);
+        _sessions[id] = session;
+        _expiryTracker[id] = expiry;
+        lock (_expiryHeap) _expiryHeap.Enqueue(id, expiry);
+    }
 
-// SOS/WinDbg commands for dump analysis
-// !dumpheap -type System.Collections.Generic.List`1
-// !do <address>
-// !dso
+    public bool TryGetSession(string id, out Session session)
+    {
+        if (_sessions.TryGetValue(id, out session) && _expiryTracker.TryGetValue(id, out var expiry) && expiry > DateTime.UtcNow)
+            return true;
+        
+        _sessions.TryRemove(id, out _); // Lazy cleanup on miss
+        return false;
+    }
+
+    public async Task CleanupExpiredAsync()
+    {
+        while (true)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(30));
+            lock (_expiryHeap)
+            {
+                while (_expiryHeap.Count > 0 && _expiryHeap.Peek().Peek() < DateTime.UtcNow)
+                {
+                    var (id, _) = _expiryHeap.Dequeue();
+                    _sessions.TryRemove(id, out _);
+                    _expiryTracker.TryRemove(id, out _);
+                }
+            }
+        }
+    }
+}
 ```
 
-## 16. Comparison Section
+### Scenario 2: In-Memory Search Index with Inverted Lookup
+**Context:** A document search feature needs indexed term lookup across 1M documents. Must handle concurrent indexing and searching.
 
+```csharp
+public class InMemorySearchIndex
+{
+    private readonly Dictionary<string, HashSet<int>> _invertedIndex = new();
+    private readonly ReaderWriterLockSlim _rwLock = new();
+
+    public void IndexDocument(int docId, string text)
+    {
+        var terms = text.Split(' ').Select(t => t.ToLowerInvariant()).Distinct();
+        _rwLock.EnterWriteLock();
+        try
+        {
+            foreach (var term in terms)
+            {
+                if (!_invertedIndex.TryGetValue(term, out var postings))
+                    _invertedIndex[term] = postings = new HashSet<int>();
+                postings.Add(docId);
+            }
+        }
+        finally { _rwLock.ExitWriteLock(); }
+    }
+
+    public IEnumerable<int> Search(string query)
+    {
+        var terms = query.Split(' ').Select(t => t.ToLowerInvariant());
+        _rwLock.EnterReadLock();
+        try
+        {
+            IEnumerable<int>? results = null;
+            foreach (var term in terms)
+            {
+                if (!_invertedIndex.TryGetValue(term, out var postings)) return Enumerable.Empty<int>();
+                results = results == null ? postings : results.Intersect(postings);
+            }
+            return results?.ToList() ?? Enumerable.Empty<int>();
+        }
+        finally { _rwLock.ExitReadLock(); }
+    }
+}
 ```
-+--------------------+------------+------------+-------------+-------------+
-| Feature            |  List<T>   |  T[]       | LinkedList  | HashSet<T>  |
-+--------------------+------------+------------+-------------+-------------+
-| Indexed access     |  O(1)      |  O(1)      |  O(n)       |  N/A        |
-| Add to end         |  O(1)*     |  N/A       |  O(1)       |  O(1)*      |
-| Insert at start    |  O(n)      |  N/A       |  O(1)       |  N/A        |
-| Remove by value    |  O(n)      |  O(n)      |  O(n)       |  O(1)*      |
-| Contains           |  O(n)      |  O(n)      |  O(n)       |  O(1)*      |
-| Memory overhead    |  Low+slack |  Minimal   |  High(3ptr) |  High(buck)  |
-| Cache locality     |  Excellent |  Excellent |  Poor       |  Good        |
-+--------------------+------------+------------+-------------+-------------+
-*Amortized / average case
 
-+---------------------------+---------------------+---------------------+
-| Feature                   | Dictionary<K,V>     | SortedDict<K,V>     |
-+---------------------------+---------------------+---------------------+
-| Underlying structure      | Hash table (bucket) | Red-black tree      |
-| Lookup                    | O(1)*               | O(log n)            |
-| Ordered iteration         | No (insertion-ish)  | Yes (sorted by key) |
-| Memory per entry          | ~12 bytes overhead  | ~40 bytes (node)    |
-| Best for                  | Fast key lookup     | Range queries       |
-+---------------------------+---------------------+---------------------+
+### Scenario 3: Real-Time Analytics Aggregator
+**Context:** A dashboard aggregates event counts per minute across 10K dimensions. Must support atomic updates from multiple threads and consistent snapshots.
+
+```csharp
+public class RollingMetricsAggregator
+{
+    private readonly Dictionary<string, long> _counters = new();
+    private readonly ImmutableArray<string> _dimensionKeys;
+    private readonly object _lock = new();
+
+    public void RecordEvent(string dimension, long value = 1)
+    {
+        Interlocked.Add(ref Unsafe.As<long>(_counters.GetOrAdd(dimension, _ => 0L)), value);
+    }
+
+    public IReadOnlyDictionary<string, long> GetSnapshot()
+    {
+        lock (_lock) // Snapshot consistency
+        {
+            return _counters.ToDictionary(kvp => kvp.Key, kvp => Volatile.Read(ref kvp.Value));
+        }
+    }
+
+    public void Reset()
+    {
+        lock (_lock) _counters.Clear();
+    }
+}
 ```
 
-## 17. Revision Notes
+---
 
-- List<T> uses an internal array that doubles; amortized O(1) Add.
-- Dictionary uses separate chaining with a single Entry[] array.
-- Queue is a circular buffer.
-- LinkedList is circular doubly linked.
-- ConcurrentDictionary uses striped locking (per-bucket).
-- Immutable collections use tree-based persistent structures.
-- FrozenDictionary (NET 8+) uses perfect hashing for O(1) read-only.
-- Always pre-allocate capacity when size is known.
-- Use `AsReadOnly()`, `ToArray()`, or `ImmutableArray<T>` to prevent mutation leaks.
-- `PriorityQueue` uses a binary heap (min-heap by default, max via custom comparer).
+## Scenario-Based Questions
 
-## 18. Cheat Sheet
+1. **Q: You are building an in-memory cache that stores 10M key-value pairs with automatic LRU eviction. How do you design it for O(1) operations?**
+   A: Combine `Dictionary<TKey, LinkedListNode<(TKey Key, TValue Value)>>` for O(1) lookups with a `LinkedList<(TKey, TValue)>` for LRU ordering. On access, move the node to the head of the list (remove + add first). On eviction, remove the tail node and its dictionary entry. For thread safety, use `ConcurrentDictionary` + `lock` on the linked list operations, or implement a striped approach. Trade-off: memory overhead from LinkedListNode (3 pointers per entry) vs. predictable eviction behavior.
 
-```
-+------------------------------------------------------------------+
-|                     C# COLLECTIONS CHEAT SHEET                    |
-+------------------------------------------------------------------+
-| GENERAL PURPOSE                                                    |
-|  List<T>       = dynamic array, O(1) index, O(1)* add             |
-|  Dictionary<K,V> = hash table, O(1)* key lookup                   |
-|  HashSet<T>    = unique elements, O(1)* add/remove/contains       |
-|  Queue<T>      = FIFO, circular buffer                            |
-|  Stack<T>      = LIFO, single-direction array                     |
-|  LinkedList<T> = doubly linked, O(1) insert at node, O(n) lookup  |
-|  PriorityQueue<T,P> = binary heap, O(log n) enqueue/dequeue       |
-+------------------------------------------------------------------+
-| ORDERED                                                           |
-|  SortedDictionary<K,V> = red-black tree, O(log n)                 |
-|  SortedList<K,V>       = sorted array, O(log n) search, O(n) ins  |
-|  SortedSet<T>         = red-black tree, O(log n)                  |
-+------------------------------------------------------------------+
-| CONCURRENT                                                        |
-|  ConcurrentDictionary<K,V> = striped locking, fine-grained         |
-|  ConcurrentQueue<T>       = lock-free (CAS), multi-producer       |
-|  ConcurrentStack<T>       = lock-free (CAS), multi-producer       |
-|  ConcurrentBag<T>         = thread-local storage, no ordering     |
-|  BlockingCollection<T>    = bounded producer-consumer             |
-|  Channel<T>               = async-first producer-consumer         |
-+------------------------------------------------------------------+
-| IMMUTABLE                                                        |
-|  ImmutableArray<T>      = struct, O(1) snapshot                  |
-|  ImmutableDictionary<K,V> = hash-based AVL tree                   |
-|  ImmutableHashSet<T>    = hash-based AVL tree                    |
-|  ImmutableList<T>       = AVL tree                               |
-|  FrozenDictionary<K,V>  = perfect hash, O(1) read-only           |
-+------------------------------------------------------------------+
-| MEMORY TIPS                                                       |
-|  Pre-allocate: new List<T>(n) avoids resizes                      |
-|  ArrayPool<T>.Shared.Rent(n) for temp buffers                     |
-|  Use structs in List<T> for inline storage                        |
-|  TrimExcess() after bulk insert if reads >> writes                |
-|  IReadOnlyList<T> > List<T> for public API surfaces               |
-+------------------------------------------------------------------+
-| COMMON PATTERNS                                                   |
-|  RemoveAll(pred)  -> in-place removal                             |
-|  ForEach(Action)  -> side-effect iteration (avoid in LINQ)        |
-|  GetOrAdd(key, fn) -> concurrent dict lazy init                    |
-|  AddOrUpdate(key, add, upd) -> upsert                             |
-|  TryGetValue(key, out val) -> safe dict lookup                    |
-+------------------------------------------------------------------+
+2. **Q: You have a high-throughput telemetry processing pipeline that receives 1M events/sec. Each event must be routed to one of 100 subscribers based on a key. What collection do you use?**
+   A: Use a `ConcurrentDictionary<TKey, Channel<TEvent>>` where each subscriber has a dedicated channel. For the routing table itself, use `FrozenDictionary<TKey, int>` (.NET 8+) — it uses minimal perfect hashing for O(1) lookups with zero allocation once built. For dynamic routing changes, maintain a `ConcurrentDictionary` for the active mapping and periodically rebuild the `FrozenDictionary`. Avoid `List<Channel>[]` as it requires complex resizing logic.
+
+3. **Q: You need to store a sorted list of 100K stock quotes that update frequently. `SortedSet` inserts are O(log n), but you need O(1) by ID lookup too. How do you design this?**
+   A: Maintain two structures in sync: a `Dictionary<int, StockQuote>` for O(1) ID lookup and a `SortedSet<StockQuote>` (with custom `IComparer<StockQuote>` by price) for sorted iteration. On update, remove the old entry from the `SortedSet`, update the `Dictionary`, and re-insert. For thread safety, wrap all mutations in a single `lock` or use `ReaderWriterLockSlim` for read-heavy workloads. Trade-off: O(1) lookups + O(log n) sorted access at the cost of double storage.
+
+4. **Q: You are processing a stream where you need to track the top 100 most frequent items seen so far (streaming Top-K). How do you implement this efficiently?**
+   A: Use a `PriorityQueue<string, int>` (min-heap) to maintain the top K. Also maintain a `Dictionary<string, int>` for frequencies. For each item: increment its frequency, if it's in the heap, update (re-insert); if not and heap size < K, add it; if heap size == K and frequency > heap min frequency, dequeue min and enqueue the new item. Use `MinHeap` behavior (lower priority = higher priority). Memory is O(K + distinct items in the heap). This is the "lossy count" variation.
+
+5. **Q: You are building a collection that needs to support undo/redo operations. What collection pattern do you use?**
+   A: Use two `Stack<T>` (stacks) — one for undo, one for redo. Each stack stores a `Memento` (snapshot or command). On each mutation, push the previous state onto the undo stack and clear the redo stack. On undo, pop from undo and push current state onto redo. For memory efficiency, store commands (inverse operations) instead of full snapshots. Use `ImmutableStack<T>` for snapshot isolation. Trade-off: full snapshots are O(n) memory per undo but simpler; command-based is O(1) but complex.
+
+6. **Q: You need to implement a custom collection that is structurally identical to `List<T>` but with O(1) removal of arbitrary elements. How?**
+   A: Use a dynamic array but with a "hole" approach: maintain a `FreeList` of removed indices. When removing an element at index `i`, push `i` onto a stack of free slots. When adding, reuse a free slot if available; otherwise append. Track count with `_size`. Add a `_version` field for enumeration safety. For O(1) removal by value, combine with a `Dictionary<T, List<int>>` mapping values to their indices. Trade-off: slightly slower iteration (skipping holes) vs. O(1) remove.
+
+7. **Q: You are designing a configuration system where settings are read 1000x/sec and updated once/hour. What collection do you use?**
+   A: Use `ImmutableDictionary<string, object>` for lock-free reads. On update, create a new `ImmutableDictionary` via `AddRange` and atomically swap the reference with `Interlocked.Exchange`. Readers always see a consistent snapshot without any blocking. Alternatively, use `FrozenDictionary` (.NET 8+) rebuilt on each update — it trades build cost for faster reads. Trade-off: immutable collections allocate on every write, but writes are rare so this is acceptable.
+
+8. **Q: You need to process items from a queue with priority — higher priority items should be processed first, but items of the same priority should be FIFO. What do you use?**
+   A: Use `PriorityQueue<QueueItem, (int Priority, long Sequence)>` with a custom comparer that sorts by `Priority` descending, then `Sequence` ascending. Maintain a `long _sequenceCounter` (use `Interlocked.Increment`) to assign sequence numbers on enqueue. This naturally gives priority-based ordering with FIFO within the same priority level. For thread safety, wrap operations in a lock or use a channel-based approach with separate queues per priority level.
+
+9. **Q: You are processing a graph with 1M nodes. You need to perform BFS, traversing neighbors. What collection gives the best performance?**
+   A: Use a `Queue<int>` for the frontier and a `HashSet<int>` (or `BitArray` for dense IDs) for visited tracking. The adjacency list should be stored as `List<int>[]` (array of lists) for cache-friendly iteration — arrays of `List<T>` have excellent locality. For the visited set, `HashSet<int>` is O(1) but has overhead; `BitArray` uses 1 bit per node (125KB for 1M nodes) and is extremely fast. Memory: `BitArray` wins for dense graphs; `HashSet` wins for sparse ones.
+
+10. **Q: You have a `List<T>` that 50 threads read concurrently and one thread writes. How do you make this safe without using `ConcurrentCollection`?**
+    A: Use `ImmutableArray<T>` with `Volatile.Read`/`Interlocked.Exchange` for lock-free snapshots. Readers capture a reference to the current `ImmutableArray<T>` (atomic on x64), then iterate safely — the array is immutable. The writer builds a new `ImmutableArray<T>` from the current one (e.g., `current.Add(item)`), then `Interlocked.Exchange(ref _items, newArray)`. This is the copy-on-write pattern. Trade-off: writes allocate a new array, but for read-heavy workloads this is ideal.
+
+---
+
+## Interview Questions
+
+1. **What is the difference between `List<T>` and `ArrayList`?**
+   A: `List<T>` is a generic, type-safe collection that avoids boxing and unboxing. `ArrayList` is non-generic (stores `object`), causing boxing for value types and requiring casting. `List<T>` has value type-specific optimizations in the JIT.
+
+2. **What is `HashSet<T>` used for?**
+   A: A collection that contains unique elements with O(1) add, remove, and lookup. It uses the same internal structure as `Dictionary<TKey,TValue>` but stores only keys. Unlike `List<T>`, it does not preserve insertion order.
+
+3. **Explain the difference between `SortedSet<T>` and `SortedList<TKey,TValue>`.**
+   A: `SortedSet<T>` is a red-black tree (O(log n) for all operations). `SortedList<TKey,TValue>` is a sorted array (O(log n) search via binary search, O(n) insert/delete due to shifting). `SortedSet` has better insert/delete for large collections; `SortedList` has better cache locality and lower memory per entry.
+
+4. **What is `FrozenDictionary<TKey,TValue>` and when should you use it?**
+   A: Added in .NET 8, it's an immutable dictionary optimized for read-only lookups using minimal perfect hashing. Build once, use forever. Ideal for configuration data, lookup tables, and static mappings that are defined at startup and never change.
+
+5. **How does `PriorityQueue<TElement, TPriority>` work internally?**
+   A: It uses a binary min-heap stored as an array. The heap property ensures each parent has higher priority (lower numeric value) than its children. `Enqueue` is O(log n), `Dequeue` is O(log n), `Peek` is O(1).
+
+6. **What is the difference between `IReadOnlyList<T>` and `ReadOnlyCollection<T>`?**
+   A: `IReadOnlyList<T>` is an interface that guarantees no mutation methods — a contract. `ReadOnlyCollection<T>` is a wrapper class that implements `IReadOnlyList<T>` by wrapping an `IList<T>` and throwing on mutation attempts. The interface avoids allocation; the wrapper adds a small overhead.
+
+7. **Explain the `_version` field in `List<T>`.**
+   A: It's an `int` field incremented on every mutation (Add, Insert, Remove, Clear). The `List<T>.Enumerator` checks it on each `MoveNext()` call. If it changed during enumeration, `InvalidOperationException` is thrown, preventing undetected concurrent modification.
+
+8. **What is the difference between `Dictionary` and `ConcurrentDictionary`?**
+   A: `Dictionary<TKey,TValue>` is not thread-safe — concurrent reads are OK only if no writes occur. `ConcurrentDictionary<TKey,TValue>` uses striped locking for thread-safe reads and writes, and provides atomic operations like `GetOrAdd` and `AddOrUpdate`.
+
+9. **How does `Queue<T>` implement its circular buffer?**
+   A: It uses a circular array with `_head` and `_tail` indices that wrap via modulo: `_tail = (_tail + 1) % _array.Length`. `Enqueue` writes at `_tail`, `Dequeue` reads from `_head`. Both operations are O(1). When capacity is reached, the array grows (typically 2x) and elements are copied to the new array with `_head` reset to 0.
+
+10. **What is the difference between `Cast<T>` and `OfType<T>` in LINQ?**
+    A: `Cast<T>` attempts to cast every element to `T` and throws `InvalidCastException` on mismatch. `OfType<T>` filters to only elements of type `T`, silently skipping incompatible elements. Use `Cast` when all elements are guaranteed to be of type `T`; use `OfType` when some elements may be of a different type.
+
+---
+
+## Developer Recommendations
+
+- **Prefer `IReadOnlyList<T>` over `List<T>` for public APIs** — Exposing `List<T>` allows callers to modify the collection, breaking encapsulation. `IReadOnlyList<T>` signals intent and prevents mutation. Internally you can still use `List<T>` for performance. Use `AsReadOnly()` to create a wrapper without copying.
+
+- **Use `ConcurrentDictionary.GetOrAdd` instead of check-then-add pattern** — The naive `if (!dict.ContainsKey(key)) dict.Add(key, value)` has a race condition in multithreaded code. `GetOrAdd(key, _ => value)` atomically adds only if the key doesn't exist, returning the existing or newly added value.
+
+- **Pre-size collections when capacity is known** — `new List<T>(100_000)` pre-allocates the internal array, avoiding ~17 resizes when growing from the default capacity of 4. Each resize copies all elements. Pre-allocating reduces GC pressure and improves throughput for large collections.
+
+- **Use `CollectionsMarshal.AsSpan` for performance-critical `List<T>` access** — In hot paths, `CollectionsMarshal.AsSpan(list)` returns a `Span<T>` over the list's internal array, avoiding bounds checking and enabling zero-allocation iteration. Dangerous: the span becomes invalid if the list resizes. Only use in controlled, non-mutating scopes.
+
+- **Prefer `ImmutableArray<T>` over `List<T>` for lock-free read concurrency** — `ImmutableArray<T>` is a struct wrapping a `T[]` with copy-on-write semantics. Multiple threads can read concurrently without any synchronization. Writes create a new array. Ideal for configuration data, cached lookups, and snapshot patterns.
+
+- **Return `IEnumerable<T>` with caution for API contracts** — Callers may enumerate multiple times, causing repeated execution. Use `IReadOnlyCollection<T>` or `IReadOnlyList<T>` to signal materialized data. If returning a LINQ query, document that it's lazily evaluated.
+
+- **Prefer `ArrayPool<T>` over allocating temporary arrays** — `ArrayPool<T>.Shared.Rent(n)` reuses arrays from a pool, reducing GC allocations. Return with `Return(array, clearArray: true)` if the array contains sensitive data. Ideal for `byte[]` buffers in high-throughput scenarios.
+
+- **Use `FrozenSet<T>` / `FrozenDictionary<TKey,TValue>` for static lookup tables (.NET 8+)** — These use minimal perfect hashing for the fastest possible read performance at the cost of expensive construction. Build once during startup, use for the application's lifetime.
+
+---
+
+## Performance by Collection
+
+| Collection | Access | Search | Insert | Delete |
+|---|---|---|---|---|
+| `T[]` | O(1) | O(n) | O(n) | O(n) |
+| `List<T>` | O(1) | O(n) | O(1)* | O(n) |
+| `Dictionary<K,V>` | O(1)* | O(1)* | O(1)* | O(1)* |
+| `HashSet<T>` | — | O(1)* | O(1)* | O(1)* |
+| `SortedDictionary<K,V>` | O(log n) | O(log n) | O(log n) | O(log n) |
+| `SortedSet<T>` | — | O(log n) | O(log n) | O(log n) |
+| `Stack<T>` | O(1) peak | O(n) | O(1)* | O(1)* |
+| `Queue<T>` | O(1) peek | O(n) | O(1)* | O(1)* |
+| `LinkedList<T>` | O(n) | O(n) | O(1)** | O(1)** |
+| `PriorityQueue<T,P>` | O(1) peek | O(n) | O(log n) | O(log n) |
+
+\*Amortized; \*\*At known node; ~Hash collisions degrade to O(n)

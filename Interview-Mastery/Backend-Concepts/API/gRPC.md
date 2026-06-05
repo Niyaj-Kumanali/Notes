@@ -1,142 +1,56 @@
 # gRPC
 
-## 1. Executive Summary
+---
 
-gRPC is a high-performance, open-source RPC (Remote Procedure Call) framework developed by Google. It uses HTTP/2 for transport, Protocol Buffers for serialization, and generates client/server code from .proto files. gRPC supports four communication patterns: unary, server streaming, client streaming, and bidirectional streaming. It is widely used in microservices architectures, real-time systems, and polyglot environments due to its performance, type safety, and cross-language support.
+## Overview
 
-## 2. Core Theory
+- **Definition:** gRPC is a high-performance, open-source RPC (Remote Procedure Call) framework developed by Google. It uses HTTP/2 for transport, Protocol Buffers for serialization, and generates client/server code from `.proto` files. It supports four communication patterns: unary, server streaming, client streaming, and bidirectional streaming.
 
-### How gRPC Works
+- **Why It Exists:** Traditional REST/JSON APIs are text-based, slow to serialize, and lack native streaming. gRPC provides binary serialization (Protobuf), HTTP/2 multiplexing, built-in code generation, and native streaming — making it ideal for microservices communication, real-time systems, and polyglot environments.
 
-1. Define a service in a `.proto` file (service contract).
-2. Generate client and server code using `protoc`.
-3. Server implements the service interface.
-4. Client uses a stub to call server methods.
-5. Data is serialized as Protocol Buffers (binary format).
-6. Transport is over HTTP/2 with multiplexed streams.
+- **Communication Patterns:**
+  - **Unary** — client sends one request, server sends one response
+  - **Server Streaming** — client sends one request, server streams responses
+  - **Client Streaming** — client streams requests, server sends one response
+  - **Bidirectional Streaming** — both sides stream simultaneously
 
-### Protocol Buffers
+---
 
-```protobuf
-syntax = "proto3";
+## How gRPC Works
 
-package com.example.user;
+1. Define a service in a `.proto` file (service contract)
+2. Generate client and server code using `protoc`
+3. Server implements the generated service interface
+4. Client uses a stub to call server methods
+5. Data is serialized as Protocol Buffers (binary format)
+6. Transport is over HTTP/2 with multiplexed streams
 
-option java_multiple_files = true;
-option java_package = "com.example.user.proto";
+- **HTTP/2 Features Used by gRPC:**
+  - **Multiplexing** — multiple streams over a single TCP connection
+  - **Header Compression** — HPACK compression reduces overhead
+  - **Binary Frames** — more efficient than HTTP/1.1 text frames
+  - **Flow Control** — prevents fast senders from overwhelming slow receivers
+  - **Stream Prioritization** — critical streams get priority
 
-message User {
-    string id = 1;
-    string name = 2;
-    string email = 3;
-    int32 age = 4;
-    repeated string roles = 5;
-    Address address = 6;
-    google.protobuf.Timestamp created_at = 7;
-}
+---
 
-message Address {
-    string street = 1;
-    string city = 2;
-    string country = 3;
-    string zip_code = 4;
-}
-
-message GetUserRequest {
-    string id = 1;
-}
-
-message ListUsersRequest {
-    int32 page = 1;
-    int32 size = 2;
-}
-
-message ListUsersResponse {
-    repeated User users = 1;
-    int32 total_count = 2;
-    bool has_more = 3;
-}
-
-message CreateUserRequest {
-    string name = 1;
-    string email = 2;
-    int32 age = 3;
-}
-
-message DeleteUserRequest {
-    string id = 1;
-}
-
-message DeleteUserResponse {
-    bool success = 1;
-}
-```
-
-### gRPC Communication Patterns
-
-```protobuf
-service UserService {
-    // Unary: Client sends one request, server sends one response
-    rpc GetUser (GetUserRequest) returns (User);
-
-    // Server streaming: Client sends one request, server streams responses
-    rpc ListUsers (ListUsersRequest) returns (stream User);
-
-    // Client streaming: Client streams requests, server sends one response
-    rpc CreateUsers (stream CreateUserRequest) returns (CreateUsersResponse);
-
-    // Bidirectional streaming: Both sides stream
-    rpc Chat (stream ChatMessage) returns (stream ChatMessage);
-}
-```
-
-## 3. Under-the-Hood Deep Dive
-
-### HTTP/2 Features Used by gRPC
-
-- **Multiplexing**: Multiple streams over a single TCP connection.
-- **Server Push**: Proactive resource delivery.
-- **Header Compression**: HPACK compression reduces overhead.
-- **Binary Frames**: More efficient than HTTP/1.1 text frames.
-- **Stream Prioritization**: Critical streams get priority.
-- **Flow Control**: Prevents fast sender from overwhelming slow receiver.
-
-### gRPC Wire Protocol
-
-```
-gRPC Frame:
-| Length (4 bytes) | Flags (1 byte) | Stream ID (7 bytes) | Data |
-
-Proto3 Encoding:
-- Varint: Variable-length integer encoding
-- ZigZag: Efficient signed integer encoding
-- Packed repeated fields: Length-delimited list
-```
-
-### gRPC Lifecycle
-
-1. Client creates a channel (connection to server).
-2. Client creates a stub from the channel.
-3. Client calls the RPC method on the stub.
-4. HTTP/2 stream is created.
-5. Protobuf messages are serialized and sent as frames.
-6. Server deserializes, processes, and sends response.
-7. Stream is closed.
-
-## 4. Production Code Examples
+## Production Code Examples
 
 ### Protobuf Service Definition
 
 ```protobuf
 syntax = "proto3";
-
 package com.example.orders;
-
-import "google/protobuf/empty.proto";
-import "google/protobuf/timestamp.proto";
-
 option java_package = "com.example.orders.proto";
 option java_multiple_files = true;
+
+message Order {
+    string id = 1;
+    string user_id = 2;
+    repeated OrderItem items = 3;
+    double total_amount = 4;
+    OrderStatus status = 5;
+}
 
 enum OrderStatus {
     ORDER_STATUS_UNSPECIFIED = 0;
@@ -147,60 +61,15 @@ enum OrderStatus {
     ORDER_STATUS_CANCELLED = 5;
 }
 
-message OrderItem {
-    string product_id = 1;
-    string product_name = 2;
-    int32 quantity = 3;
-    double unit_price = 4;
-}
-
-message Order {
-    string id = 1;
-    string user_id = 2;
-    repeated OrderItem items = 3;
-    double total_amount = 4;
-    OrderStatus status = 5;
-    string shipping_address = 6;
-    google.protobuf.Timestamp created_at = 7;
-    google.protobuf.Timestamp updated_at = 8;
-}
-
-message CreateOrderRequest {
-    string user_id = 1;
-    repeated OrderItem items = 2;
-    string shipping_address = 3;
-}
-
-message GetOrderRequest {
-    string id = 1;
-}
-
-message ListOrdersRequest {
-    string user_id = 1;
-    int32 page = 2;
-    int32 size = 3;
-}
-
-message ListOrdersResponse {
-    repeated Order orders = 1;
-    int32 total_count = 2;
-    bool has_more = 3;
-}
-
-message UpdateOrderStatusRequest {
-    string id = 1;
-    OrderStatus status = 2;
-}
-
-message OrderStreamRequest {
-    string user_id = 1;
-}
+message CreateOrderRequest { string user_id = 1; repeated OrderItem items = 2; string shipping_address = 3; }
+message GetOrderRequest { string id = 1; }
+message ListOrdersRequest { string user_id = 1; int32 page = 2; int32 size = 3; }
+message ListOrdersResponse { repeated Order orders = 1; int32 total_count = 2; bool has_more = 3; }
 
 service OrderService {
     rpc CreateOrder (CreateOrderRequest) returns (Order);
     rpc GetOrder (GetOrderRequest) returns (Order);
     rpc ListOrders (ListOrdersRequest) returns (ListOrdersResponse);
-    rpc UpdateOrderStatus (UpdateOrderStatusRequest) returns (Order);
     rpc StreamOrders (OrderStreamRequest) returns (stream Order);
     rpc BulkCreateOrders (stream CreateOrderRequest) returns (ListOrdersResponse);
     rpc OrderChat (stream OrderNote) returns (stream OrderNote);
@@ -212,93 +81,37 @@ service OrderService {
 ```java
 @GrpcService
 public class OrderGrpcService extends OrderServiceGrpc.OrderServiceImplBase {
-
     private final OrderService orderService;
     private final OrderProtoMapper protoMapper;
 
-    public OrderGrpcService(OrderService orderService,
-                           OrderProtoMapper protoMapper) {
+    public OrderGrpcService(OrderService orderService, OrderProtoMapper protoMapper) {
         this.orderService = orderService;
         this.protoMapper = protoMapper;
     }
 
     @Override
-    public void createOrder(CreateOrderRequest request,
-                           StreamObserver<Order> responseObserver) {
+    public void createOrder(CreateOrderRequest request, StreamObserver<Order> responseObserver) {
         try {
-            OrderEntity entity = protoMapper.toEntity(request);
-            OrderEntity created = orderService.create(entity);
-            Order proto = protoMapper.toProto(created);
-            responseObserver.onNext(proto);
+            OrderEntity created = orderService.create(protoMapper.toEntity(request));
+            responseObserver.onNext(protoMapper.toProto(created));
             responseObserver.onCompleted();
         } catch (Exception e) {
-            responseObserver.onError(
-                Status.INTERNAL.withDescription(e.getMessage())
-                    .asRuntimeException());
+            responseObserver.onError(Status.INTERNAL.withDescription(e.getMessage()).asRuntimeException());
         }
     }
 
     @Override
-    public void getOrder(GetOrderRequest request,
-                        StreamObserver<Order> responseObserver) {
+    public void getOrder(GetOrderRequest request, StreamObserver<Order> responseObserver) {
         try {
             OrderEntity entity = orderService.findById(request.getId());
             if (entity == null) {
-                responseObserver.onError(
-                    Status.NOT_FOUND.withDescription("Order not found")
-                        .asRuntimeException());
+                responseObserver.onError(Status.NOT_FOUND.withDescription("Order not found").asRuntimeException());
                 return;
             }
             responseObserver.onNext(protoMapper.toProto(entity));
             responseObserver.onCompleted();
         } catch (Exception e) {
-            responseObserver.onError(
-                Status.INTERNAL.withDescription(e.getMessage())
-                    .asRuntimeException());
-        }
-    }
-
-    @Override
-    public void listOrders(ListOrdersRequest request,
-                          StreamObserver<ListOrdersResponse> responseObserver) {
-        try {
-            Page<OrderEntity> page = orderService.findByUserId(
-                request.getUserId(),
-                PageRequest.of(request.getPage(), request.getSize()));
-
-            ListOrdersResponse.Builder response = ListOrdersResponse.newBuilder()
-                .setTotalCount((int) page.getTotalElements())
-                .setHasMore(page.hasNext());
-
-            page.getContent().stream()
-                .map(protoMapper::toProto)
-                .forEach(response::addOrders);
-
-            responseObserver.onNext(response.build());
-            responseObserver.onCompleted();
-        } catch (Exception e) {
-            responseObserver.onError(
-                Status.INTERNAL.withDescription(e.getMessage())
-                    .asRuntimeException());
-        }
-    }
-
-    @Override
-    public void streamOrders(OrderStreamRequest request,
-                            StreamObserver<Order> responseObserver) {
-        try {
-            orderService.streamByUserId(request.getUserId())
-                .map(protoMapper::toProto)
-                .forEach(order -> {
-                    responseObserver.onNext(order);
-                    // Simulate delay
-                    Thread.sleep(100);
-                });
-            responseObserver.onCompleted();
-        } catch (Exception e) {
-            responseObserver.onError(
-                Status.INTERNAL.withDescription(e.getMessage())
-                    .asRuntimeException());
+            responseObserver.onError(Status.INTERNAL.withDescription(e.getMessage()).asRuntimeException());
         }
     }
 
@@ -314,19 +127,13 @@ public class OrderGrpcService extends OrderServiceGrpc.OrderServiceImplBase {
             }
 
             @Override
-            public void onError(Throwable t) {
-                responseObserver.onError(t);
-            }
+            public void onError(Throwable t) { responseObserver.onError(t); }
 
             @Override
             public void onCompleted() {
                 ListOrdersResponse.Builder response = ListOrdersResponse.newBuilder()
                     .setTotalCount(orders.size());
-
-                orders.stream()
-                    .map(protoMapper::toProto)
-                    .forEach(response::addOrders);
-
+                orders.stream().map(protoMapper::toProto).forEach(response::addOrders);
                 responseObserver.onNext(response.build());
                 responseObserver.onCompleted();
             }
@@ -340,7 +147,6 @@ public class OrderGrpcService extends OrderServiceGrpc.OrderServiceImplBase {
 ```java
 @Service
 public class OrderGrpcClient {
-
     private final OrderServiceGrpc.OrderServiceBlockingStub blockingStub;
     private final OrderServiceGrpc.OrderServiceStub asyncStub;
 
@@ -349,398 +155,61 @@ public class OrderGrpcClient {
         this.asyncStub = OrderServiceGrpc.newStub(channel);
     }
 
-    // Unary call
-    public OrderProto.Order createOrder(CreateOrderRequest request) {
-        return blockingStub.createOrder(request);
-    }
+    public Order createOrder(CreateOrderRequest request) { return blockingStub.createOrder(request); }
 
-    // Unary call with error handling
-    public OrderProto.Order getOrder(String id) {
+    public Order getOrder(String id) {
         try {
-            GetOrderRequest request = GetOrderRequest.newBuilder()
-                .setId(id).build();
-            return blockingStub.getOrder(request);
+            return blockingStub.getOrder(GetOrderRequest.newBuilder().setId(id).build());
         } catch (StatusRuntimeException e) {
-            if (e.getStatus().getCode() == Status.Code.NOT_FOUND) {
+            if (e.getStatus().getCode() == Status.Code.NOT_FOUND)
                 throw new ResourceNotFoundException("Order not found: " + id);
-            }
             throw new GrpcClientException("gRPC call failed", e);
         }
     }
 
-    // Server streaming
-    public void streamOrders(String userId, Consumer<OrderProto.Order> consumer) {
-        OrderStreamRequest request = OrderStreamRequest.newBuilder()
-            .setUserId(userId).build();
-
-        Iterator<OrderProto.Order> orders = blockingStub.streamOrders(request);
+    public void streamOrders(String userId, Consumer<Order> consumer) {
+        Iterator<Order> orders = blockingStub.streamOrders(
+            OrderStreamRequest.newBuilder().setUserId(userId).build());
         orders.forEachRemaining(consumer);
-    }
-
-    // Client streaming
-    public List<OrderProto.Order> bulkCreateOrders(List<CreateOrderRequest> requests) {
-        CompletableFuture<List<OrderProto.Order>> future = new CompletableFuture<>();
-        List<OrderProto.Order> results = new ArrayList<>();
-
-        StreamObserver<OrderProto.ListOrdersResponse> responseObserver =
-            new StreamObserver<>() {
-                @Override
-                public void onNext(ListOrdersResponse response) {
-                    results.addAll(response.getOrdersList());
-                }
-
-                @Override
-                public void onError(Throwable t) {
-                    future.completeExceptionally(t);
-                }
-
-                @Override
-                public void onCompleted() {
-                    future.complete(results);
-                }
-            };
-
-        StreamObserver<CreateOrderRequest> requestObserver =
-            asyncStub.bulkCreateOrders(responseObserver);
-
-        requests.forEach(requestObserver::onNext);
-        requestObserver.onCompleted();
-
-        return future.join();
     }
 }
 ```
 
-### gRPC Channel Configuration
+### Channel Configuration
 
 ```java
 @Configuration
 public class GrpcClientConfig {
-
     @Bean
     public ManagedChannel orderServiceChannel() {
         return ManagedChannelBuilder.forAddress("localhost", 9090)
-            .usePlaintext()  // For development only; use TLS in production
+            .usePlaintext()  // For dev only; use TLS in production
             .keepAliveTime(30, TimeUnit.SECONDS)
             .keepAliveTimeout(10, TimeUnit.SECONDS)
-            .keepAliveWithoutCalls(true)
             .maxInboundMessageSize(4 * 1024 * 1024)  // 4MB
             .enableRetry()
             .build();
     }
-
-    @PreDestroy
-    public void shutdown() {
-        orderServiceChannel().shutdown();
-    }
 }
 ```
-
-### Interceptor for Logging
-
-```java
-@Component
-public class LoggingInterceptor implements ServerInterceptor {
-
-    @Override
-    public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(
-            ServerCall<ReqT, RespT> call,
-            Metadata headers,
-            ServerCallHandler<ReqT, RespT> next) {
-
-        String methodName = call.getMethodDescriptor().getFullMethodName();
-        log.info("gRPC call started: {}", methodName);
-
-        ServerCall<ReqT, RespT> wrappedCall = new ForwardingServerCall.SimpleForwardingServerCall<>(call) {
-            @Override
-            public void sendMessage(RespT message) {
-                log.debug("Response for {}: {}", methodName, message);
-                super.sendMessage(message);
-            }
-
-            @Override
-            public void close(Status status, Metadata trailers) {
-                log.info("gRPC call {} completed with status: {}",
-                    methodName, status.getCode());
-                super.close(status, trailers);
-            }
-        };
-
-        return new ForwardingServerCallListener.SimpleForwardingServerCallListener<>(
-            next.startCall(wrappedCall, headers)) {
-
-            @Override
-            public void onMessage(ReqT message) {
-                log.debug("Request for {}: {}", methodName, message);
-                super.onMessage(message);
-            }
-
-            @Override
-            public void onCancel() {
-                log.warn("gRPC call {} cancelled", methodName);
-                super.onCancel();
-            }
-        };
-    }
-}
-```
-
-### Error Handling Interceptor
-
-```java
-@Component
-public class ErrorHandlingInterceptor implements ServerInterceptor {
-
-    @Override
-    public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(
-            ServerCall<ReqT, RespT> call,
-            Metadata headers,
-            ServerCallHandler<ReqT, RespT> next) {
-
-        ServerCall<ReqT, RespT> wrappedCall = new ForwardingServerCall.SimpleForwardingServerCall<>(call) {
-            @Override
-            public void close(Status status, Metadata trailers) {
-                if (status.isOk()) {
-                    super.close(status, trailers);
-                } else {
-                    // Log the error with stack trace
-                    log.error("gRPC error: {} - {}", status.getCode(),
-                        status.getDescription());
-
-                    // Return a sanitized error to client
-                    Metadata sanitizedTrailers = new Metadata();
-                    sanitizedTrailers.put(
-                        Metadata.Key.of("error-code",
-                            Metadata.ASCII_STRING_MARSHALLER),
-                        status.getCode().toString());
-
-                    super.close(status, sanitizedTrailers);
-                }
-            }
-        };
-
-        return next.startCall(wrappedCall, headers);
-    }
-}
-```
-
-### Protobuf to Entity Mapping
-
-```java
-@Component
-public class OrderProtoMapper {
-
-    public OrderEntity toEntity(CreateOrderRequest proto) {
-        OrderEntity entity = new OrderEntity();
-        entity.setUserId(proto.getUserId());
-        entity.setShippingAddress(proto.getShippingAddress());
-        entity.setItems(proto.getItemsList().stream()
-            .map(this::toEntity)
-            .collect(Collectors.toList()));
-        return entity;
-    }
-
-    public OrderItemEntity toEntity(OrderItem proto) {
-        OrderItemEntity entity = new OrderItemEntity();
-        entity.setProductId(proto.getProductId());
-        entity.setProductName(proto.getProductName());
-        entity.setQuantity(proto.getQuantity());
-        entity.setUnitPrice(proto.getUnitPrice());
-        return entity;
-    }
-
-    public Order toProto(OrderEntity entity) {
-        Order.Builder builder = Order.newBuilder()
-            .setId(entity.getId())
-            .setUserId(entity.getUserId())
-            .setTotalAmount(entity.getTotalAmount())
-            .setStatus(OrderStatus.valueOf(entity.getStatus().name()))
-            .setShippingAddress(entity.getShippingAddress())
-            .setCreatedAt(Timestamps.fromMillis(
-                entity.getCreatedAt().toEpochMilli()))
-            .setUpdatedAt(Timestamps.fromMillis(
-                entity.getUpdatedAt().toEpochMilli()));
-
-        entity.getItems().stream()
-            .map(this::toProto)
-            .forEach(builder::addItems);
-
-        return builder.build();
-    }
-
-    public OrderItem toProto(OrderItemEntity entity) {
-        return OrderItem.newBuilder()
-            .setProductId(entity.getProductId())
-            .setProductName(entity.getProductName())
-            .setQuantity(entity.getQuantity())
-            .setUnitPrice(entity.getUnitPrice())
-            .build();
-    }
-}
-```
-
-### TLS Configuration
-
-```java
-@Configuration
-public class GrpcTlsConfig {
-
-    @Bean
-    public ManagedChannel secureChannel() {
-        try {
-            SslContext sslContext = GrpcSslContexts.forClient()
-                .trustManager(new File("path/to/ca.crt"))
-                .build();
-
-            return Grpc.newChannelBuilderForAddress(
-                    "api.example.com", 443,
-                    TlsChannelCredentials.newBuilder()
-                        .sslContext(sslContext)
-                        .build())
-                .build();
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to configure TLS", e);
-        }
-    }
-}
-```
-
-## 5. Real-World Scenarios
-
-### Scenario 1: Real-Time Order Tracking
-
-```protobuf
-service OrderTrackingService {
-    rpc TrackOrder (TrackOrderRequest) returns (stream OrderLocation);
-    rpc SubscribeToUpdates (SubscriptionRequest) returns (stream OrderStatusUpdate);
-}
-
-message OrderLocation {
-    string order_id = 1;
-    double latitude = 2;
-    double longitude = 3;
-    string location_name = 4;
-    google.protobuf.Timestamp timestamp = 5;
-}
-```
-
-### Scenario 2: Multi-Service Communication
-
-```
-API Gateway (REST/GraphQL)
-    |
-    |--- gRPC ---> User Service
-    |--- gRPC ---> Order Service
-    |--- gRPC ---> Payment Service
-    |--- gRPC ---> Notification Service
-    |--- gRPC ---> Inventory Service
-```
-
-### Scenario 3: File Upload Service
-
-```protobuf
-service FileService {
-    rpc UploadFile (stream FileChunk) returns (UploadResponse);
-    rpc DownloadFile (DownloadRequest) returns (stream FileChunk);
-    rpc ListFiles (ListFilesRequest) returns (ListFilesResponse);
-}
-
-message FileChunk {
-    bytes data = 1;
-    string filename = 2;
-    int32 chunk_number = 3;
-    int32 total_chunks = 4;
-}
-
-message UploadResponse {
-    string file_id = 1;
-    int64 size_bytes = 2;
-}
-
-message DownloadRequest {
-    string file_id = 1;
-}
-```
-
-## 6. Performance
-
-### Performance Benchmarks
-
-gRPC is significantly faster than REST/JSON:
-- **2-5x faster** than REST for simple requests.
-- **10x faster** for streaming use cases.
-- **70-80% smaller payloads** due to Protobuf binary encoding.
-
-### Optimization Techniques
-
-- **Connection Pooling**: Reuse gRPC channels across requests.
-- **Keepalive Pings**: Maintain persistent connections.
-- **Message Size Limits**: Balance throughput and memory.
-- **Streaming**: Use server streaming for large datasets.
-- **Compression**: Enable gzip compression for large messages.
-- **Flow Control**: Configure HTTP/2 flow control windows.
-
-### Performance Configuration
-
-```java
-@Configuration
-public class GrpcPerformanceConfig {
-
-    @Bean
-    public ManagedChannel performanceChannel() {
-        return ManagedChannelBuilder.forAddress("localhost", 9090)
-            .usePlaintext()
-            .maxInboundMessageSize(16 * 1024 * 1024)  // 16MB
-            .flowControlWindow(128 * 1024)  // 128KB flow control window
-            .keepAliveTime(30, TimeUnit.SECONDS)
-            .keepAliveTimeout(5, TimeUnit.SECONDS)
-            .idleTimeout(60, TimeUnit.MINUTES)
-            .enableRetry()
-            .retryBufferSize(16 * 1024 * 1024)  // 16MB retry buffer
-            .build();
-    }
-}
-```
-
-## 7. Security
-
-### gRPC Security Considerations
-
-- **TLS**: Always use TLS in production (never usePlaintext).
-- **mTLS**: Mutual TLS for service-to-service authentication.
-- **Authentication**: Use interceptors for JWT/OAuth2 validation.
-- **Authorization**: Implement interceptors for role-based access.
-- **Input Validation**: Validate all protobuf messages on server side.
-- **Rate Limiting**: Limit requests per client.
 
 ### JWT Authentication Interceptor
 
 ```java
 @Component
 public class JwtAuthInterceptor implements ClientInterceptor {
-
     private final JwtTokenProvider tokenProvider;
 
-    public JwtAuthInterceptor(JwtTokenProvider tokenProvider) {
-        this.tokenProvider = tokenProvider;
-    }
+    public JwtAuthInterceptor(JwtTokenProvider tokenProvider) { this.tokenProvider = tokenProvider; }
 
     @Override
     public <ReqT, RespT> ClientCall<ReqT, RespT> interceptCall(
-            MethodDescriptor<ReqT, RespT> method,
-            CallOptions callOptions,
-            Channel next) {
-
-        return new ForwardingClientCall.SimpleForwardingClientCall<ReqT, RespT>(
-                next.newCall(method, callOptions)) {
-
+            MethodDescriptor<ReqT, RespT> method, CallOptions callOptions, Channel next) {
+        return new ForwardingClientCall.SimpleForwardingClientCall<ReqT, RespT>(next.newCall(method, callOptions)) {
             @Override
             public void start(Listener<RespT> responseListener, Metadata headers) {
-                String token = tokenProvider.getAccessToken();
-                headers.put(
-                    Metadata.Key.of("authorization",
-                        Metadata.ASCII_STRING_MARSHALLER),
-                    "Bearer " + token);
+                headers.put(Metadata.Key.of("authorization", Metadata.ASCII_STRING_MARSHALLER),
+                    "Bearer " + tokenProvider.getAccessToken());
                 super.start(responseListener, headers);
             }
         };
@@ -748,299 +217,178 @@ public class JwtAuthInterceptor implements ClientInterceptor {
 }
 ```
 
-### Server-Side Auth Interceptor
+---
 
-```java
-@Component
-public class ServerAuthInterceptor implements ServerInterceptor {
+## Common Mistakes
 
-    private final JwtTokenProvider tokenProvider;
+- **Using plaintext in production** — always use TLS
+- **Ignoring connection management** — failing to reuse channels and shut down properly
+- **Large protobuf messages** — keep under 4MB; use streaming for large data
+- **Breaking proto field numbering** — never reuse field numbers when removing fields
+- **No error handling on client** — always handle `StatusRuntimeException`
+- **Blocking on streaming** — use async stubs for streaming calls
+- **Not setting deadlines** — always set timeouts on gRPC calls
+- **Missing Proto backward compatibility** — follow proto evolution best practices
 
-    public ServerAuthInterceptor(JwtTokenProvider tokenProvider) {
-        this.tokenProvider = tokenProvider;
-    }
+---
 
-    @Override
-    public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(
-            ServerCall<ReqT, RespT> call,
-            Metadata headers,
-            ServerCallHandler<ReqT, RespT> next) {
+## Key Design Considerations
 
-        String authHeader = headers.get(
-            Metadata.Key.of("authorization",
-                Metadata.ASCII_STRING_MARSHALLER));
+- **When to Use gRPC:**
+  - Internal microservices communication
+  - Real-time streaming systems
+  - Polyglot environments (multiple languages)
+  - Low-latency, high-throughput systems
+  - Mobile applications (reduced payload size)
 
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            call.close(Status.UNAUTHENTICATED
-                .withDescription("Missing or invalid token"), headers);
-            return new ServerCall.Listener<>() {};
-        }
+- **When to Avoid:**
+  - Public REST APIs (browser clients)
+  - Simple CRUD applications
+  - Serverless functions
 
-        String token = authHeader.substring(7);
-        if (!tokenProvider.validateToken(token)) {
-            call.close(Status.UNAUTHENTICATED
-                .withDescription("Invalid or expired token"), headers);
-            return new ServerCall.Listener<>() {};
-        }
+- **Proto Evolution Best Practices:**
+  - Never change field numbers
+  - Add new fields with new numbers only
+  - Use `reserved` for removed fields
+  - Set sensible defaults for new fields
+  - Use `optional` for fields that may be absent
+  - Version your packages in proto files
 
-        return next.startCall(call, headers);
-    }
-}
-```
+- **Performance:**
+  - 2-5x faster than REST for simple requests
+  - 10x faster for streaming use cases
+  - 70-80% smaller payloads (Protobuf binary)
+  - Connection pooling and keepalive pings
 
-## 8. Common Mistakes
+---
 
-- **Using plaintext in production**: Always use TLS in production.
-- **Ignoring connection management**: Failing to reuse channels and shut down properly.
-- **Large protobuf messages**: Keep messages under 4MB; use streaming for large data.
-- **Breaking proto field numbering**: Never reuse field numbers when removing fields.
-- **No error handling on client**: Always handle `StatusRuntimeException`.
-- **Blocking on streaming**: Use async stubs for streaming calls.
-- **Not setting deadlines**: Always set timeouts on gRPC calls.
-- **Over-fetching data**: Request only the fields needed.
-- **Missing Proto backward compatibility**: Follow proto evolution best practices.
+## Real-World Scenarios
 
-## 9. Senior Engineer Perspective
+### Scenario 1: gRPC Streaming for Real-Time Order Tracking
+**Context:** A food delivery app needs to show real-time driver location on a map. The mobile client polls `GET /api/v1/orders/{id}/location` every 2 seconds. This creates 30 requests per minute per user. With 10,000 active users, the REST endpoint handles 300,000 polling requests per minute — most returning the same data. Server CPU is at 90% from request overhead alone.
 
-### When to Use gRPC
-
-**Ideal for:**
-- Internal microservices communication.
-- Real-time streaming systems.
-- Polyglot environments (multiple languages).
-- Low-latency, high-throughput systems.
-- Mobile applications (reduced payload size).
-
-**Less ideal for:**
-- Public REST APIs (browser clients).
-- Simple CRUD applications.
-- Serverless functions.
-
-### Proto Evolution Best Practices
-
-1. Never change field numbers.
-2. Add new fields with new numbers only.
-3. Use `reserved` for removed fields.
-4. Set sensible defaults for new fields.
-5. Use `optional` for fields that may be absent.
-6. Avoid `oneof` in shared messages.
-7. Version your packages in proto files.
-
-### gRPC in Microservices Architecture
-
-- **Service Mesh**: gRPC works well with Istio/Linkerd.
-- **API Gateway**: gRPC-web for browser exposure.
-- **Load Balancing**: Client-side load balancing or proxy-based.
-- **Observability**: OpenTelemetry integration for tracing.
-
-## 10. Interview Questions (Easy)
-
-1. What is gRPC and who developed it?
-2. What serialization format does gRPC use?
-3. What transport protocol does gRPC use?
-4. What is a .proto file?
-5. Name the four gRPC communication patterns.
-6. What is a protobuf message?
-7. What is a gRPC stub?
-8. What is the difference between gRPC and REST?
-9. What is HTTP/2 multiplexing?
-10. What is the default port for gRPC?
-
-## Medium
-
-1. How does gRPC handle streaming differently from REST?
-2. What is Protocol Buffer field numbering and why does it matter?
-3. How do you handle errors in gRPC?
-4. What are gRPC interceptors and how are they used?
-5. How do you implement authentication in gRPC?
-6. What is the difference between blocking and async stubs?
-7. How do you configure deadlines/timeouts in gRPC?
-8. How does gRPC load balancing work?
-9. What are the Proto3 scalar types?
-10. How do you enable TLS in gRPC?
-
-## 11. Advanced Interview Questions (Hard)
-
-1. How would you implement bidirectional streaming for a real-time chat application?
-2. Design a gRPC API for a distributed database query engine.
-3. How do you handle protobuf schema evolution across many microservices?
-4. Implement a gRPC retry mechanism with exponential backoff.
-5. How would you migrate a REST API to gRPC incrementally?
-6. Design a gRPC gateway that also serves REST clients.
-7. How do you implement transactions across multiple gRPC services?
-8. Design a gRPC-based event sourcing system.
-9. How do you handle large file transfers in gRPC?
-10. Implement custom protobuf serialization for performance-critical paths.
-
-## System Design
-
-1. Design a real-time stock trading system using gRPC streaming.
-2. Design a gRPC-based microservices architecture for an e-commerce platform.
-3. Design a distributed logging system using gRPC bidirectional streaming.
-4. Design a gRPC API for a real-time multiplayer game server.
-5. Design a gRPC-based notification delivery system.
-6. Design a gRPC API gateway with protocol translation.
-7. Design a distributed file system using gRPC streaming.
-8. Design a gRPC-based CI/CD pipeline coordinator.
-9. Design a real-time data replication system using gRPC.
-10. Design a multi-language SDK generation system from protobuf definitions.
-
-## 12. Expert-Level Interview Questions (Architect-Level)
-
-1. Design a global-scale microservices mesh where gRPC is the primary communication protocol, with automatic failover, circuit breaking, and distributed tracing across 200+ services.
-2. How would you design a gRPC-based event-driven architecture where services communicate asynchronously while maintaining exactly-once delivery semantics?
-3. Design a schema registry for protobuf schemas across multiple teams, with compatibility checking, automatic code generation, and version management.
-4. How would you implement a zero-downtime protobuf schema migration across hundreds of services without coordinated deployments?
-5. Design a gRPC load balancing strategy for a multi-region deployment with traffic prioritization, locality-based routing, and failover.
-6. How would you build a gRPC-based BFF (Backend for Frontend) that supports web, mobile, and IoT clients with different communication patterns?
-7. Design a system that allows gRPC services to be consumed by REST clients through automatic protocol translation without performance degradation.
-8. How would you implement flow control and backpressure across a chain of gRPC services to prevent cascading failures?
-9. Design a gRPC API versioning strategy that supports both backward-compatible and breaking changes across a federation of services.
-10. How would you build a chaos engineering system specifically for gRPC microservices that can inject latency, errors, and network partitions?
-
-## 13. Debugging & Troubleshooting
-
-### Common Issues
-
-- **Deadline exceeded**: Check network latency, server load, timeout configuration.
-- **Unavailable**: Service may be down or not registered in service discovery.
-- **Internal errors**: Check server logs for exceptions.
-- **Message too large**: Increase max inbound message size or use streaming.
-- **TLS handshake failure**: Verify certificate chains and mutual TLS configuration.
-- **Connection reset**: Check keepalive settings and proxy configurations.
-
-### gRPC Health Check
+**Resolution:** Switch to gRPC server streaming. The mobile client establishes a gRPC connection and calls a server-streaming RPC. The server pushes location updates only when the driver's position changes (every 3-5 seconds instead of every 2 seconds of polling). This eliminates polling overhead, reduces server load by 80%, and provides near-real-time updates.
 
 ```protobuf
-service Health {
-    rpc Check (HealthCheckRequest) returns (HealthCheckResponse);
-    rpc Watch (HealthCheckRequest) returns (stream HealthCheckResponse);
+service OrderTrackingService {
+    rpc TrackOrder(TrackOrderRequest) returns (stream OrderLocationUpdate);
 }
 
-message HealthCheckRequest {
-    string service = 1;
-}
-
-message HealthCheckResponse {
-    enum ServingStatus {
-        UNKNOWN = 0;
-        SERVING = 1;
-        NOT_SERVING = 2;
-    }
-    ServingStatus status = 1;
+message OrderLocationUpdate {
+    double latitude = 1;
+    double longitude = 2;
+    int64 timestamp = 3;
+    DeliveryStatus status = 4;
 }
 ```
 
-### Debugging with gRPC Reflection
+The client receives push updates over a single persistent HTTP/2 connection — no polling, no repeated TLS handshakes, no HTTP request/response overhead.
 
-```java
-// Enable reflection in server
-import io.grpc.protobuf.services.ProtoReflectionService;
+### Scenario 2: gRPC Deadline Exceeded Cascading Failures
+**Context:** Service A calls Service B with a 5-second deadline. Service B calls Service C with a 4-second deadline. Service C has a temporary slowdown (3-second response time instead of the usual 100ms). Service B's deadline expires before Service C responds. Service A retries, sending more traffic to B. B accumulates requests, its deadline expires, and the failure cascades. All downstream services are overwhelmed by retries.
 
-@GrpcService
-public class ReflectionService extends ProtoReflectionService {
-    // Automatically enables grpcurl debugging
+**Resolution:** (1) Increase the deadline at the outermost service (Service A: 10s, Service B: 8s, Service C: 5s) — cascading deadlines must be decreasing. (2) Implement retry with exponential backoff and jitter — don't retry immediately. (3) Configure per-method deadlines: fast operations (100ms) get 1s deadlines; slow operations (2s) get 5s deadlines. (4) Use a circuit breaker: if Service C's error rate exceeds 50%, Service B fails fast without calling C. (5) Track deadline propagation: gRPC propagates deadlines across services — ensure each hop has enough remaining time.
+
+### Scenario 3: Protobuf Backward Compatibility Failure
+**Context:** A team adds a `discount` field to the `Order` protobuf message with field number 10. A month later, another team removes the `discount` field (no longer needed) and adds a `notes` field using field number 10 (reusing the freed number). Services that still have the old proto definition receive an `Order` message where field number 10 contains `notes` — they interpret it as `discount`. Users see order notes displayed as discount values. Financial reports are corrupted.
+
+**Resolution:** Never reuse field numbers. Use `reserved` for removed fields.
+
+```protobuf
+message Order {
+    // Removed fields
+    reserved 10;                    // Was discount, removed in v2.1
+    reserved "discount";            // Also reserve the name to prevent reuse
+
+    string id = 1;
+    string user_id = 2;
+    // ...
+    string notes = 11;              // New field with new number
 }
 ```
 
-```bash
-# Use grpcurl to debug
-grpcurl -plaintext localhost:9090 list
-grpcurl -plaintext localhost:9090 describe com.example.orders.Order
-grpcurl -plaintext -d '{"id": "123"}' localhost:9090 com.example.orders.OrderService/GetOrder
-```
+The `reserved` keyword prevents field numbers and names from being reused, catching the error at compile time.
 
-## 14. Comparison Section
+---
 
-### gRPC vs REST
+## Scenario-Based Questions
 
-| Aspect | gRPC | REST |
-|--------|------|------|
-| Protocol | HTTP/2 | HTTP/1.1 (HTTP/2 optional) |
-| Serialization | Protobuf (binary) | JSON/XML (text) |
-| Performance | 2-10x faster | Slower |
-| Payload Size | ~80% smaller | Larger |
-| Schema | Required (.proto) | Optional (OpenAPI) |
-| Streaming | Native support | WebSocket add-on |
-| Code Generation | Built-in | OpenAPI generators |
-| Human Readability | Low (binary) | High (JSON) |
-| Browser Support | Via gRPC-web | Native |
-| Caching | Not built-in | Native HTTP caching |
+1. **Q: You need real-time driver location updates for a food delivery app with 50,000 concurrent users. REST polling is too expensive. Which gRPC pattern do you use and how do you handle 50,000 concurrent connections?**
+   - A: Use server streaming — the client calls `TrackOrder(TrackOrderRequest)` and the server streams `OrderLocationUpdate` messages. Each connection stays open and receives push updates. For 50K concurrent connections: (1) gRPC over HTTP/2 multiplexes streams over fewer TCP connections. (2) Use an async server with a non-blocking I/O model (Netty, not Tomcat). (3) Set `keepAliveTime` (30s) and `keepAliveTimeout` (10s) to detect dead connections. (4) Use a connection pool on the server side. (5) Consider using a dedicated push service or a service mesh that handles connection management.
 
-### gRPC vs Message Queues
+2. **Q: Your gRPC service returns `DEADLINE_EXCEEDED` errors during peak traffic. The service's P50 latency is 50ms, but deadlined requests have a 500ms deadline. What's causing this, and how do you fix it?**
+   - A: The server is likely experiencing head-of-line blocking or connection pool exhaustion. Causes: (1) Server thread pool is saturated — requests are queued before processing. Fix: increase worker threads or switch to async processing. (2) gRPC channel is shared — a slow streaming call blocks other requests on the same channel. Fix: use separate channels for streaming and unary calls. (3) Database connection pool exhaustion — requests wait for DB connections. Fix: increase pool size or optimize queries. (4) The deadline is too tight: with P50 at 50ms, a 500ms deadline should be fine at low utilization, but at high utilization, queueing adds latency. Use Little's Law to calculate appropriate deadlines: `deadline = p99_latency × 2`.
 
-| Aspect | gRPC | Message Queues |
-|--------|------|----------------|
-| Communication | Synchronous/Async streaming | Asynchronous |
-| Coupling | Tight (RPC) | Loose (events) |
-| Ordering | In-stream ordering | Queue ordering |
-| Persistence | No built-in | Durable messages |
-| Use Case | Service-to-service calls | Event-driven, decoupling |
+3. **Q: You need to add a `shippingAddress` field to an `Order` protobuf message consumed by 50 services. How do you ensure zero downtime during deployment?**
+   - A: (1) Add the new field with a new field number: `string shipping_address = 11;`. (2) Compile and deploy all 50 services with the updated proto definition. (3) The old services ignore unknown fields — `shippingAddress` won't be present in their messages. (4) New services can write the new field; old services preserve it when re-serializing (protobuf's unknown field preservation). (5) First deploy services that write the new field, then services that read it (or all at once). (6) Never make a new field required — always keep it optional with a sensible default.
 
-## 15. Revision Notes
+4. **Q: Your system uses gRPC for internal microservices communication but also needs to expose some services to external REST clients. How do you support both protocols without maintaining two implementations?**
+   - A: Use gRPC Gateway (grpc-gateway): annotate your proto file with `google.api.http` options that define REST endpoints and JSON mapping. The gateway generates a reverse proxy that translates REST/JSON to gRPC/Protobuf. Run the gateway alongside your gRPC server. External clients use REST; internal services use gRPC. The business logic exists only in the gRPC server. Added benefit: the gateway also generates OpenAPI specs for REST clients.
 
-- gRPC: Google RPC, uses HTTP/2 + Protobuf
-- 4 patterns: Unary, Server Streaming, Client Streaming, Bidirectional
-- .proto file defines service contract
-- Protobuf: binary, efficient, strongly typed, backward-compatible
-- Spring Boot: `@GrpcService`, generated stubs
-- Always use TLS in production
-- Interceptors for cross-cutting concerns (auth, logging, metrics)
-- Deadlines prevent resource leaks
-- Proto evolution: never change field numbers, use reserved
+5. **Q: Your gRPC bidirectional streaming chat application loses messages under load. Users report that messages sent are not received by the other party. What's the root cause and fix?**
+   - A: Likely flow control or backpressure issues. Causes: (1) The sender's `onNext` calls are failing silently — gRPC's flow control blocks the sender if the receiver is slow, and `onNext` throws `StatusRuntimeException` if the stream is cancelled. Fix: wrap `onNext` in try-catch and implement backpressure handling. (2) The server's `StreamObserver` is not thread-safe — concurrent calls from multiple threads cause data races and lost messages. Fix: synchronize `onNext` calls or use a dedicated executor. (3) Message acknowledgment: add a simple ACK pattern where the receiver sends an acknowledgment message for each received message. If the sender doesn't receive an ACK within a timeout, retry.
 
-## 16. Cheat Sheet
+6. **Q: How do you implement authentication in gRPC between microservices in a service mesh?**
+   - A: (1) mTLS for service-to-service authentication: each service has a client certificate signed by the mesh CA. The server validates the client certificate on every connection. Istio/Linkerd can enforce this at the proxy level. (2) For user-level auth: pass JWT/OAuth2 tokens in gRPC metadata headers (`authorization: Bearer <token>`). Implement client and server interceptors that extract/validate tokens. (3) In the interceptor: extract token from metadata → validate signature and claims → set the authenticated principal in the gRPC Context. (4) Use SPIRE for workload identity: each service gets a unique SPIFFE ID that can be used for authentication.
 
-```
-+------------------------------------------------------------------+
-| GRPC CHEAT SHEET                                                 |
-+------------------------------------------------------------------+
-| COMMUNICATION PATTERNS                                           |
-|   Unary:              client ---- req ----> server                |
-|                       client <--- resp ---- server               |
-|   Server Streaming:   client ---- req ----> server                |
-|                       client <--- stream -- server               |
-|   Client Streaming:   client ---- stream -> server                |
-|                       client <--- resp ---- server               |
-|   Bidirectional:      client <=== stream ===> server              |
-+------------------------------------------------------------------+
-| PROTOBUF FIELD RULES                                             |
-|   Field numbers: 1-15 (1 byte)  16-2047 (2 bytes)               |
-|   Use 1-15 for frequently occurring fields                       |
-|   Never reuse field numbers when deleting fields                 |
-|   Use "reserved" for removed fields                              |
-+------------------------------------------------------------------+
-| GRPC STATUS CODES                                                |
-|   OK(0)  CANCELLED(1)  UNKNOWN(2)  INVALID_ARGUMENT(3)          |
-|   DEADLINE_EXCEEDED(4)  NOT_FOUND(5)  ALREADY_EXISTS(6)         |
-|   PERMISSION_DENIED(7)  UNAUTHENTICATED(16)                     |
-|   UNIMPLEMENTED(12)  INTERNAL(13)  UNAVAILABLE(14)              |
-|   RESOURCE_EXHAUSTED(8)  FAILED_PRECONDITION(9)                 |
-+------------------------------------------------------------------+
-| SPRING BOOT / GRPC                                               |
-|   @GrpcService              -> gRPC service implementation        |
-|   @GrpcClient               -> Injected gRPC client stub          |
-|   ServerInterceptor         -> Server-side interceptor            |
-|   ClientInterceptor         -> Client-side interceptor            |
-+------------------------------------------------------------------+
-| PROTO FILE STRUCTURE                                             |
-|   syntax = "proto3";                                             |
-|   package com.example;                                           |
-|   option java_package = "...";                                    |
-|   option java_multiple_files = true;                             |
-|                                                                  |
-|   message Request {                                              |
-|       string id = 1;                                             |
-|   }                                                              |
-|                                                                  |
-|   service MyService {                                            |
-|       rpc DoSomething (Request) returns (Response);              |
-|   }                                                              |
-+------------------------------------------------------------------+
-| PERFORMANCE COMPARISON (vs REST/JSON)                            |
-|   Latency:     2-5x faster                                       |
-|   Throughput:  5-10x higher                                      |
-|   Payload Size: ~70-80% smaller                                  |
-|   CPU Usage:   Lower (binary parsing vs JSON)                    |
-+------------------------------------------------------------------+
-```
+7. **Q: A protobuf field numbered 5 was removed 6 months ago. A new developer adds a field with number 5. Old services still running from 6 months ago decode field 5 as the old field, interpreting the new data incorrectly. How do you prevent this?**
+   - A: Use `reserved 5;` in the proto file. The `reserved` keyword prevents any future use of field number 5 (or field name). The protobuf compiler will reject any attempt to reuse it. Best practice: whenever removing a field, immediately add it to `reserved`. Don't rely on team memory or documentation — enforce it in the proto definition. Also use `reserved` for removed field names to prevent accidental reuse of the same name with a different number.
+
+8. **Q: You need to transfer a 500MB video file from a mobile client to a server via gRPC. The default max message size is 4MB. How do you design this?**
+   - A: Use client streaming to chunk the file. Define a `FileChunk` message with `bytes data`, `chunk_index`, and `total_chunks`. The client streams chunks; the server reassembles. Set `maxInboundMessageSize` to 8MB (large enough for efficient chunks, small enough to avoid memory pressure). Use flow control to prevent the client from overwhelming the server. Consider compression (gzip) at the gRPC level. For very large files, generate a pre-signed S3 URL instead of transferring through gRPC.
+
+9. **Q: Your gRPC client calls a service that occasionally returns `UNAVAILABLE` (transient network error). How do you implement retry logic?**
+   - A: (1) Enable `enableRetry()` on the ManagedChannel. (2) Configure retry policy in the service config JSON: `{ "methodConfig": [{ "name": [{}], "retryPolicy": { "maxAttempts": 3, "initialBackoff": "0.1s", "maxBackoff": "1s", "backoffMultiplier": 2, "retryableStatusCodes": ["UNAVAILABLE"] } }] }`. (3) For custom logic, implement a client interceptor that catches `StatusRuntimeException` and retries with exponential backoff with jitter. (4) Only retry for idempotent operations (read methods). For mutations, use idempotency keys. (5) Set a maximum retry limit (3-5 attempts) to prevent retry storms during outages.
+
+10. **Q: Your gRPC services are experiencing cascading failures — one slow service causes all upstream services to exhaust their resources. How do you implement circuit breaking?**
+    - A: (1) Use a client interceptor that tracks the success/failure ratio per method over a sliding window (e.g., last 100 requests). (2) If the failure rate exceeds a threshold (e.g., 50%), open the circuit — fail fast with `Status.UNAVAILABLE` without calling the downstream service. (3) Periodically transition to half-open: allow a single probe request to check if the service recovered. (4) If the probe succeeds, close the circuit. If it fails, stay open. (5) Integrate with a service mesh (Istio's `DestinationRule` with circuit breaker) for proxy-level enforcement. (6) Use Resilience4j or Hystrix (legacy) for application-level circuit breaking.
+
+---
+
+## Interview Questions
+
+1. **What is gRPC and what are its key advantages over REST?**
+   - A: gRPC is a high-performance RPC framework using HTTP/2, Protocol Buffers, and code generation. Advantages: binary serialization (smaller, faster), HTTP/2 multiplexing (single connection), native streaming (server, client, bidirectional), strong typing via proto files, and multi-language code generation.
+
+2. **What are the four gRPC communication patterns?**
+   - A: Unary (one request, one response), Server streaming (one request, stream of responses), Client streaming (stream of requests, one response), Bidirectional streaming (both sides stream independently).
+
+3. **How does Protobuf ensure backward compatibility?**
+   - A: Fields are identified by number, not name. New fields can be added with new numbers. Old clients ignore unknown fields. Removed fields must use `reserved` to prevent number reuse. Never change field types or numbers.
+
+4. **What is the N+1 problem in gRPC?**
+   - A: When a gRPC response contains a list of entities, and the client makes individual RPCs for each entity's related data. Mitigation: design composite RPCs that return nested data, use batch endpoints, or implement a GraphQL layer on top.
+
+5. **How do you handle errors in gRPC?**
+   - A: Use gRPC status codes (OK, NOT_FOUND, INVALID_ARGUMENT, UNAVAILABLE, DEADLINE_EXCEEDED, etc.) with descriptive error messages and optional details. Never use HTTP status codes — gRPC has its own error model.
+
+6. **What is gRPC deadline propagation?**
+   - A: A deadline set on the client RPC is propagated to downstream services automatically. Each service checks the remaining time before processing. If the deadline expires, the request is cancelled. This prevents resource waste from already-timed-out requests.
+
+7. **How does gRPC handle authentication?**
+   - A: mTLS for service-to-service (certificate-based), JWT/OAuth2 tokens in metadata for user-level auth, interceptors for centralized token validation. gRPC supports SSL/TLS natively.
+
+8. **What is the difference between blocking and async stubs?**
+   - A: Blocking stubs block the calling thread until the response arrives (simple, but uses threads). Async stubs return immediately and call a callback when the response arrives (non-blocking, better for streaming and high concurrency).
+
+9. **How do you implement retry logic in gRPC?**
+   - A: Configure retry policy in the service config JSON with exponential backoff, max attempts (3-5), and retryable status codes (UNAVAILABLE, RESOURCE_EXHAUSTED). Only retry idempotent operations. Enable `enableRetry()` on the channel.
+
+10. **When should you use gRPC vs REST?**
+    - A: gRPC for internal microservices (high throughput, low latency, streaming, polyglot environments). REST for public APIs (browser clients, simple CRUD, caching-heavy use cases, diverse client ecosystem). Use gRPC Gateway to expose gRPC services as REST.
+
+---
+
+## Developer Recommendations
+
+- **Always set deadlines on gRPC calls** — Without deadlines, a gRPC client will wait forever for a response. Server crashes, network partitions, and slow deployments will make the client hang indefinitely, accumulating resources. Every RPC call must have a deadline: `stub.withDeadlineAfter(5, TimeUnit.SECONDS).call()`. Deadlines also propagate to downstream services, providing end-to-end timeout. Without deadlines, a single stuck service can cascade to all callers.
+
+- **Use the `reserved` keyword for removed protobuf fields** — Protobuf identifies fields by number, not name. Reusing a field number after removing a field causes silent data corruption — old binaries decode the new field as the old type. Always add `reserved <number>;` and `reserved "<name>";` when removing a field. The compiler will prevent reuse. This is a one-line change that prevents production data corruption. There is no good reason to skip it.
+
+- **Prefer server streaming over client polling for real-time data** — Polling (HTTP or gRPC unary) wastes server resources: each poll requires TLS handshake, request parsing, and response serialization — most returning the same data. gRPC server streaming maintains a single persistent connection and pushes updates only when data changes. This reduces server load by 60-90% for real-time features and provides lower latency updates. The trade-off: managing persistent connections (keep-alive, reconnection, flow control). Acceptable for the efficiency gain.
+
+- **Use async stubs for streaming and high-concurrency scenarios** — Blocking stubs tie up a thread per in-flight request. With 1000 concurrent requests, you need 1000 threads — leading to thread pool exhaustion and context switching overhead. Async stubs are non-blocking: one thread handles many concurrent requests via callbacks. For unary calls with low concurrency (<100 req/s), blocking stubs are simpler. For streaming or high concurrency, async stubs are essential.
+
+- **Implement circuit breakers for gRPC service-to-service calls** — A single slow downstream service can exhaust the thread pool and connection pool of all upstream services, causing cascading failures. Circuit breakers detect failure patterns and fail fast without calling the degraded service. Use a client interceptor that tracks failure rates over a sliding window. Open the circuit when errors exceed 50% in the last 100 requests. Periodically probe for recovery. This prevents cascading failures and allows services to recover under reduced load.
+
+- **Use gRPC Gateway for REST clients** — gRPC's binary protocol is not suitable for public REST APIs (browser clients, third-party integrations). gRPC Gateway generates a REST/JSON reverse proxy from proto annotations. This lets you maintain one service implementation that supports both gRPC (internal, efficient) and REST (external, universal). The gateway handles all protocol translation — no need to maintain parallel REST implementations.

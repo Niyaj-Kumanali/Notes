@@ -1,113 +1,28 @@
 # Multithreading
 
-## 1. Executive Summary
+---
 
-Multithreading in C# enables concurrent execution of code within a single process, leveraging multiple CPU cores for parallelism and maintaining responsiveness in UI applications. The `System.Threading` namespace provides `Thread`, `ThreadPool`, `Task` (via TPL), synchronization primitives (`Monitor`, `Mutex`, `Semaphore`, `ReaderWriterLockSlim`), and signaling constructs (`ManualResetEvent`, `AutoResetEvent`, `Barrier`, `CountdownEvent`). Since .NET 4.0, the Task Parallel Library (TPL) is the recommended approach over raw threads.
+## Overview
 
-## 2. Core Theory
+- **Definition:** Concurrent execution of code within a single process, leveraging multiple CPU cores for parallelism and maintaining UI responsiveness. The `System.Threading` namespace provides threads, the thread pool, and synchronization primitives.
+- **Why It Exists:** Enables CPU-bound parallelism (multi-core utilization), maintains UI thread responsiveness by offloading work, and allows overlapping I/O with computation.
+- **Key Concepts:** **`Thread`** (low-level OS thread, ~1MB stack), **`ThreadPool`** (reusable thread pool with hill-climbing), **`Task`** (TPL abstraction), **synchronization primitives** (`Monitor`, `Mutex`, `Semaphore`, `ReaderWriterLockSlim`), **signaling constructs** (`ManualResetEvent`, `AutoResetEvent`, `Barrier`, `CountdownEvent`), and **concurrent collections** (`ConcurrentDictionary`, `ConcurrentQueue`, `BlockingCollection`, `Channel<T>`).
 
-### Thread States
+---
 
-```
-Unstarted -> Running -> WaitSleepJoin -> (resume) -> Running -> Stopped
-                                     -> Suspended  -> (resume) -> Running
-```
+## Core Concepts
 
-### Key Abstractions
-
-- **Thread**: Low-level OS thread (1:1 with kernel thread). Expensive to create (~1MB stack).
-- **ThreadPool**: Pool of reusable threads. `QueueUserWorkItem` or `Task.Run`.
-- **Task**: Higher-level abstraction representing async work. Can use thread pool or custom scheduler.
-- **Parallel LINQ (PLINQ)**: Automatic parallelization of LINQ queries (`AsParallel()`).
-- **Parallel class**: `Parallel.For`, `Parallel.ForEach`, `Parallel.Invoke`.
-
-### Synchronization Primitives
-
-| Primitive              | Purpose                                |
-|------------------------|----------------------------------------|
-| `lock` (Monitor)       | Mutual exclusion (critical section)    |
-| `Mutex`                | Cross-process mutual exclusion         |
-| `Semaphore`/`Slim`     | Resource pool limiting                 |
-| `ReaderWriterLockSlim` | Multiple readers / single writer       |
-| `Barrier`              | Phase-based synchronization            |
-| `CountdownEvent`       | Signal when count reaches zero         |
-| `ManualResetEvent`     | Manual-reset signaling                 |
-| `AutoResetEvent`       | Auto-reset signaling (one waiter)      |
-| `SpinLock`             | Busy-wait lock (very short sections)   |
-| `SpinWait`             | Spin-then-wait strategy                |
-| `Interlocked`          | Atomic operations (CAS, increment)     |
-| `Volatile`             | Memory barrier/volatile read/write     |
-
-### Memory Model and Ordering
-
-- .NET guarantees: All data writes are visible after a lock release.
-- Without synchronization, CPU caches may not see other threads' writes.
-- `volatile` prevents compiler/CPU reordering of reads/writes on a field.
-- Full fences can be inserted via `Thread.MemoryBarrier()`.
-
-## 3. Under-the-Hood Deep Dive
-
-### Thread Creation Cost
-
-```csharp
-// Creating a thread costs:
-// - 1MB virtual memory for stack (configurable via constructor)
-// - Kernel object allocation (~KB)
-// - Initial thread context switch
-// - TLS (Thread Local Storage) initialization
-
-// Thread creation time: ~200 microseconds (varies by OS/load)
-// ThreadPool dispatch: ~1-3 microseconds
-```
-
-### Monitor (lock) Internals
-
-```csharp
-// Every object has a SyncBlock index in its header
-// Object header layout (32-bit):
-//   Bit 0:    lock status (0=free, 1=locked)
-//   Bits 1-23: recursion count
-//   Bits 24-30: waiters count
-//   Bit 31:   owned by this thread?
-
-// lock(obj) compiles to:
-//   Monitor.Enter(obj, ref lockTaken)
-//   try { body }
-//   finally { Monitor.Exit(obj); }
-
-// Contention: thread spins briefly (SpinWait), then blocks (WaitHandle)
-```
-
-### Thread Pool Internals
-
-```csharp
-// Thread pool maintains:
-// - Minimum threads (typically CPU count)
-// - Maximum threads (typically 32767)
-// - Thread injection/retirement heuristics
-// - Global work queue + local work-stealing queues per thread
-
-// Hill-climbing algorithm:
-// - Monitors throughput (completions/sec)
-// - Injects threads when throughput increases
-// - Retires threads when throughput decreases
-// - Adjusts every ~500ms
-```
-
-### ReaderWriterLockSlim Internals
-
-```csharp
-// Uses a spin lock for fast path (no kernel transition)
-// States:
-// - Unlocked (no readers, no writer)
-// - Read-locked (one or more readers)
-// - Write-locked (one writer, no readers)
-// - Upgradeable read (one upgradeable reader, no writer)
-
-// Fairness: prevents writer starvation by queuing waiters
-```
-
-## 4. Production Code Examples
+- **Thread States:** `Unstarted → Running → WaitSleepJoin → Running → Stopped`. A thread can also transition through `Suspended → Running`.
+- **Synchronization Primitives:**
+  - **`lock` (Monitor):** Mutual exclusion on a reference type. Compiles to `Monitor.Enter`/`Monitor.Exit`. Every object has a sync block index in its header for lightweight locking.
+  - **`Mutex`:** Cross-process mutual exclusion (kernel object). Heavier than `lock` (~5µs acquire).
+  - **`Semaphore`/`SemaphoreSlim`:** Resource pool limiting. `SemaphoreSlim` stays in user mode when uncontended.
+  - **`ReaderWriterLockSlim`:** Multiple concurrent readers or exclusive writer. Uses spin lock for fast path, prevents writer starvation.
+  - **`Barrier`:** Phase-based synchronization where all participants signal and wait.
+  - **`CountdownEvent`:** Signal when a count reaches zero (one-time use).
+  - **`SpinLock`/`SpinWait`:** Busy-wait for very short critical sections (< 10ns). Avoid in general code.
+  - **`Interlocked`:** Atomic operations (CAS, increment, exchange) without locking.
+  - **`volatile`:** Prevents compiler/CPU reordering of reads/writes on a field. Does NOT make operations atomic.
 
 ```csharp
 // Thread-safe singleton with lazy initialization
@@ -115,467 +30,304 @@ public class CacheService
 {
     private static readonly Lazy<CacheService> _instance =
         new(() => new CacheService(), LazyThreadSafetyMode.ExecutionAndPublication);
-
     public static CacheService Instance => _instance.Value;
-
-    private readonly ConcurrentDictionary<string, object> _cache = new();
-
-    public T GetOrAdd<T>(string key, Func<string, T> factory) =>
-        (T)_cache.GetOrAdd(key, k => factory(k)!);
 }
 ```
 
+- **Memory Model:** .NET guarantees all data writes are visible after a lock release. Without synchronization, CPU caches may not see other threads' writes. Full memory barriers can be inserted via `Thread.MemoryBarrier()`.
+- **Thread Pool Internals:** Maintains minimum threads (typically CPU count), maximum threads (default 32767), and uses hill-climbing algorithm that monitors throughput (completions/sec) to inject or retire threads every ~500ms. Thread injection is lazy — call `ThreadPool.SetMinThreads()` to avoid latency spikes under load.
+- **Thread Creation Cost:** ~200 microseconds, 1MB virtual memory for stack, kernel object allocation, TLS initialization. ThreadPool dispatch is ~1-3 microseconds.
+
 ```csharp
-// Producer-consumer with blocking collection
+// Producer-consumer with BlockingCollection
 public class BatchProcessor
 {
     private readonly BlockingCollection<WorkItem> _queue = new(
         new ConcurrentQueue<WorkItem>(), boundedCapacity: 1000);
-    private readonly CancellationTokenSource _cts = new();
 
     public void Start()
     {
         for (int i = 0; i < Environment.ProcessorCount; i++)
-        {
-            Task.Run(() => ConsumerLoop(_cts.Token));
-        }
+            Task.Run(() => ConsumerLoop());
     }
 
-    public void Enqueue(WorkItem item)
+    private void ConsumerLoop()
     {
-        if (!_queue.TryAdd(item, 100))
-            throw new TimeoutException("Queue full");
-    }
-
-    private void ConsumerLoop(CancellationToken ct)
-    {
-        foreach (var item in _queue.GetConsumingEnumerable(ct))
-        {
+        foreach (var item in _queue.GetConsumingEnumerable())
             ProcessItem(item);
-        }
-    }
-
-    public void Stop()
-    {
-        _queue.CompleteAdding();
-        _cts.Cancel();
     }
 }
 ```
 
-```csharp
-// Parallel.ForEach with throttling
-public void ProcessBatch(IEnumerable<string> files)
-{
-    var options = new ParallelOptions
-    {
-        MaxDegreeOfParallelism = Environment.ProcessorCount * 2,
-        CancellationToken = _cts.Token,
-        TaskScheduler = TaskScheduler.Default
-    };
+---
 
-    Parallel.ForEach(files, options, file =>
-    {
-        byte[] data = File.ReadAllBytes(file);
-        byte[] processed = Transform(data);
-        File.WriteAllBytes(file + ".out", processed);
-    });
-}
-```
+## Common Mistakes
+
+- **Locking on a public object or string** — Strings are interned (shared across the process), and public objects allow external code to participate in the lock, causing deadlocks. Always lock on a private `readonly object`.
+- **Nested locking causing deadlock** — Locking `a` then `b` in one thread and `b` then `a` in another guarantees deadlock. Fix by locking in a consistent order (by hash code or ID).
+- **Thread pool starvation from blocking tasks** — Calling `Thread.Sleep` or blocking on a thread pool thread prevents it from processing other work items. Use async `Task.Delay` instead.
+- **Not handling `AbandonedMutexException`** — A `Mutex` can be abandoned if the owner crashes, throwing this exception on the next waiter.
+- **`volatile` does NOT make operations atomic** — `counter++` is read-modify-write even on a `volatile` field. Use `Interlocked.Increment`.
+- **`async void` in non-UI contexts** — Exceptions crash the process. Use `async Task`.
+- **`Thread.Abort()` is dangerous and obsolete** — Use `CancellationToken` for cooperative cancellation.
 
 ```csharp
-// Fine-grained reader-writer lock for a cache
-public class ThreadSafeCache<TKey, TValue> where TKey : notnull
-{
-    private readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.NoRecursion);
-    private readonly Dictionary<TKey, TValue> _dict = new();
-
-    public TValue Read(TKey key)
-    {
-        _lock.EnterReadLock();
-        try { return _dict[key]; }
-        finally { _lock.ExitReadLock(); }
-    }
-
-    public void Write(TKey key, TValue value)
-    {
-        _lock.EnterWriteLock();
-        try { _dict[key] = value; }
-        finally { _lock.ExitWriteLock(); }
-    }
-
-    public TValue ReadOrWrite(TKey key, Func<TKey, TValue> factory)
-    {
-        _lock.EnterUpgradeableReadLock();
-        try
-        {
-            if (_dict.TryGetValue(key, out var existing))
-                return existing;
-
-            _lock.EnterWriteLock();
-            try
-            {
-                _dict[key] = factory(key);
-                return _dict[key];
-            }
-            finally { _lock.ExitWriteLock(); }
-        }
-        finally { _lock.ExitUpgradeableReadLock(); }
-    }
-}
-```
-
-```csharp
-// Barrier for phased parallel computation
-public class ParallelPipeline
-{
-    private readonly Barrier _barrier;
-    private double[] _data;
-
-    public ParallelPipeline(double[] data, int threads)
-    {
-        _data = data;
-        _barrier = new Barrier(threads, b =>
-            Console.WriteLine($"Phase {b.CurrentPhaseNumber} complete"));
-    }
-
-    public void Run()
-    {
-        var tasks = Enumerable.Range(0, _barrier.ParticipantCount)
-            .Select(i => Task.Run(() => Worker(i)))
-            .ToArray();
-        Task.WaitAll(tasks);
-    }
-
-    private void Worker(int threadIndex)
-    {
-        int chunkSize = _data.Length / _barrier.ParticipantCount;
-        int start = threadIndex * chunkSize;
-        int end = (threadIndex == _barrier.ParticipantCount - 1)
-            ? _data.Length : start + chunkSize;
-
-        for (int phase = 0; phase < 3; phase++)
-        {
-            for (int i = start; i < end; i++)
-                _data[i] = PhaseTransform(_data[i], phase);
-            _barrier.SignalAndWait();
-        }
-    }
-}
-```
-
-## 5. Real-World Scenarios
-
-**Scenario 1: High-Performance Web Server**
-- Use async I/O (not threads) for scalability.
-- Use `Channel<T>` for request queuing.
-- Use `Parallel.ForEach` for CPU-intensive batch processing.
-
-**Scenario 2: Real-Time Trading System**
-- Use `SpinLock` for nanosecond-scale critical sections.
-- Use lock-free data structures (`ConcurrentDictionary`, `Interlocked`).
-- Use `ManualResetEventSlim` for signaling between high-priority threads.
-
-**Scenario 3: Background Job Processor**
-- Use `Hangfire`/`Quartz.NET` or implement with `Channel<T>` + `Task.Run`.
-- Use `SemaphoreSlim` to limit concurrent job execution.
-
-**Scenario 4: Log Processing Pipeline**
-- Producer thread reads from file -> `BlockingCollection` -> consumer threads parse -> `ActionBlock` (from Dataflow) to write.
-- Use `CountdownEvent` to signal when batch is complete.
-
-## 6. Performance
-
-```csharp
-// Lock vs Interlocked vs SpinLock
-// Short critical sections (< 10ns): SpinLock or Interlocked
-// Medium sections (10-1000ns): lock (Monitor)
-// Long sections (> 1ms): SemaphoreSlim, ReaderWriterLockSlim
-// Cross-process: Mutex, Semaphore (kernel objects)
-
-// Thread count rule of thumb:
-// CPU-bound: threads <= Environment.ProcessorCount
-// IO-bound: threads > ProcessorCount (overlap I/O wait)
-
-// False sharing: avoid by padding frequently updated fields
-[StructLayout(LayoutKind.Explicit)]
-public struct PaddedCounter
-{
-    [FieldOffset(0)] public long Value;
-    [FieldOffset(64)] private long _pad1; // Prevent false sharing with adjacent data
-    [FieldOffset(128)] private long _pad2;
-}
-```
-
-### Synchronization Cost Comparison
-
-| Primitive              | Acquire (contended) | Acquire (uncontended) | Memory |
-|------------------------|---------------------|----------------------|--------|
-| `Interlocked.Increment`| ~5ns                | ~5ns                 | None   |
-| `SpinLock`             | ~20ns               | ~5ns                 | None   |
-| `lock` (Monitor)       | ~100ns              | ~15ns                | Header |
-| `ReaderWriterLockSlim` | ~200ns              | ~25ns                | Object |
-| `SemaphoreSlim`        | ~200ns              | ~30ns                | Object |
-| `AutoResetEvent`       | ~1us (kernel)       | ~100ns               | Kernel |
-| `Mutex`                | ~5us (kernel)       | ~1us                 | Kernel |
-
-## 7. Security
-
-```csharp
-// Avoid exposing synchronization objects
-public class SharedState
-{
-    private readonly object _lock = new();
-    private int _counter;
-
-    // BAD: callers can deadlock
-    public object LockObject => _lock;
-
-    // GOOD: encapsulate locking
-    public void Increment()
-    {
-        lock (_lock) _counter++;
-    }
-}
-
-// Thread impersonation: do not cache security context
-// Use SecurityContext.Run for async flow
-```
-
-## 8. Common Mistakes
-
-```csharp
-// MISTAKE 1: Locking on a public object or string
-public class BadLock
-{
-    private readonly string _lockName = "mylock"; // String interning causes sharing!
-    public void DoWork() { lock (_lockName) { } }
-}
-// FIX: lock on a private readonly object
-
-// MISTAKE 2: Nested locking causing deadlock
+// Deadlock example: inconsistent lock ordering
 void Transfer(Account a, Account b, decimal amount)
 {
-    lock (a) { lock (b) { /* transfer */ } } // Deadlock if Transfer(a,b) and Transfer(b,a)
+    lock (a) { lock (b) { /* transfer */ } }
 }
-// FIX: lock in consistent order (by hash code or ID)
-
-// MISTAKE 3: Thread pool starvation from blocking tasks
-Task.Run(() =>
-{
-    Thread.Sleep(1000); // Blocks a thread pool thread!
-});
-// FIX: use Task.Delay (async) or dedicated long-running task
-
-// MISTAKE 4: Not handling AbandonedMutexException
-// Mutex can be abandoned if owner crashes
-
-// MISTAKE 5: Volatile does NOT make operations atomic
-volatile int counter;
-counter++; // Still read-modify-write (not atomic)
-// FIX: Interlocked.Increment(ref counter)
-
-// MISTAKE 6: Double-checked locking without volatile (pre-.NET 2.0)
-// FIX: use Lazy<T> or volatile for the instance field
-
-// MISTAKE 7: async void (fire-and-forget) in non-UI contexts
-// FIX: async Task instead
-
-// MISTAKE 8: Thread.Abort() is dangerous and obsolete
-// FIX: use CancellationToken for cooperative cancellation
+// Fix: always lock in order of account ID
 ```
 
-## 9. Senior Engineer Perspective
+---
 
-**1. Prefer TPL over raw threads.** Tasks are lighter, more flexible, and integrate with async/await.
+## Key Design Considerations
 
-**2. Use `ConcurrentDictionary` instead of `Dictionary` + `lock`.** For most scenarios, it's optimized better.
-
-**3. Consider work-stealing vs dedicated threads.** Thread pool with work-stealing queues gives better load balancing.
-
-**4. Know Amdahl's Law:** `Speedup = 1 / ((1 - P) + P/N)`. Parallel speedup is limited by sequential portion.
-
-**5. Use `ValueTask` for synchronization-free hot paths** to avoid allocation.
-
-**6. For high-performance scenarios, consider Dataflow (ActionBlock, TransformBlock)** as a higher-level abstraction for pipelining.
-
-**7. Thread injection in thread pool is lazy.** Call `ThreadPool.SetMinThreads()` to avoid latency spikes under load:
+- **Prefer TPL over raw threads** — Tasks are lighter (~100 bytes vs ~1MB stack), more flexible, integrate with async/await, and use the thread pool with work-stealing for better load balancing.
+- **Use `ConcurrentDictionary` instead of `Dictionary` + `lock`** — Uses striped locking (per-bucket), optimized for concurrent access patterns.
+- **Know Amdahl's Law:** `Speedup = 1 / ((1-P) + P/N)` — Parallel speedup is fundamentally limited by the sequential portion of the workload.
+- **Work-stealing vs dedicated threads** — Thread pool uses local work-stealing queues per thread for better cache locality and load distribution.
+- **Consider Dataflow (`ActionBlock`, `TransformBlock`)** — Higher-level abstraction for pipelining and producer-consumer with parallelism control.
+- **Use `Channel<T>` over `BlockingCollection`** — Async-first, supports backpressure, and integrates with `IAsyncEnumerable<T>`.
+- **Minimum threads** — Call `ThreadPool.SetMinThreads(workerThreads: 16, completionPortThreads: 16)` to avoid latency spikes during load bursts.
 
 ```csharp
 ThreadPool.SetMinThreads(workerThreads: 16, completionPortThreads: 16);
 ```
 
-**8. Use `Channel<T>` for producer-consumer** (preferred over `BlockingCollection` in modern code).
+---
 
-## 10. Interview Questions (Easy)
+## Real-World Scenarios
 
-1. What is a thread? How does it differ from a process?
-2. How do you create a new thread in C#?
-3. What is the ThreadPool and why use it?
-4. What is a race condition?
-5. What does the `lock` statement do?
-6. What is a deadlock?
-7. How does `Monitor.Enter` / `Monitor.Exit` relate to `lock`?
-8. What is the difference between `Thread.Sleep` and `Task.Delay`?
-9. What is a `Mutex` and how does it differ from a `lock`?
-10. What is the purpose of `Interlocked` class?
-
-## 11. Interview Questions (Medium)
-
-1. Explain the difference between `Thread` and `Task`.
-2. What is the difference between `ConcurrentQueue<T>` and `Queue<T>` with `lock`?
-3. How does `ReaderWriterLockSlim` improve performance over `lock`?
-4. Explain the concept of thread safety and immutability.
-5. What is a `Barrier` and when would you use it?
-6. How does `SemaphoreSlim` differ from `Semaphore`?
-7. Explain the volatile keyword and memory barriers.
-8. What is thread-local storage (`ThreadLocal<T>`, `ThreadStaticAttribute`)?
-9. How does `SpinLock` work and when is it appropriate?
-10. What is the `CountdownEvent` and how does it differ from `ManualResetEvent`?
-
-## 12. Advanced Interview Questions (Hard)
-
-1. Implement a lock-free stack using `Interlocked.CompareExchange`.
-2. Explain the memory model guarantees in .NET: acquire/release semantics.
-3. Design a work-stealing queue (like .NET ThreadPool's local queues).
-4. Implement double-checked locking correctly in modern C#.
-5. Explain how `Lazy<T>` with `LazyThreadSafetyMode.ExecutionAndPublication` works internally.
-6. Design a scalable multi-producer, single-consumer queue.
-7. Explain false sharing and how to mitigate it in .NET.
-8. Implement a `ManualResetEventSlim` equivalent from scratch.
-9. Design a lock-free hash table with resize capability.
-10. Explain the thread pool hill-climbing algorithm in depth.
-
-## 13. Interview Questions (System Design)
-
-1. Design a high-throughput message queue using multithreading primitives.
-2. Design a web crawler that respects robots.txt using parallel processing.
-3. Design a job scheduler with dependencies and parallel execution.
-4. Design a distributed counter service with eventual consistency.
-5. Design a real-time monitoring dashboard with concurrent data ingestion.
-6. Design a parallel ETL pipeline with backpressure handling.
-7. Design a multi-threaded game server with lock-free state management.
-8. Design a distributed lock service using leases and fencing tokens.
-9. Design a thread-safe in-memory event store with optimistic concurrency.
-10. Design a parallel ray tracer using work-stealing.
-
-## 14. Expert-Level Interview Questions (Architect)
-
-1. Design a lock-free, wait-free, linearizable concurrent dictionary for a trading exchange with nanosecond latency requirements.
-2. Architect a user-mode scheduler (like Go's goroutine scheduler) on top of .NET threads, implementing M:N threading (M user tasks on N OS threads) with work-stealing and stack copying.
-3. Design a distributed consensus algorithm (Raft/Paxos) using .NET synchronization primitives with exactly-once semantics.
-4. Architect a real-time stream processing engine (like Flink) using channels, barriers for checkpointing, and exactly-once state snapshots.
-5. Design a lock-free memory allocator for a game engine that avoids GC pauses entirely.
-6. Architect a multi-version concurrency control (MVCC) engine for an in-memory database using .NET synchronization primitives.
-7. Design a distributed transaction coordinator using two-phase commit across process boundaries with failure recovery.
-8. Architect a thread-sanitizer-like tool for .NET that detects data races at runtime using happens-before tracking.
-9. Design a reactive programming framework that implements the Reactive Manifesto (responsive, resilient, elastic, message-driven) using actors and threads.
-10. Architect a real-time bidding exchange handling 1M+ bids/second using lock-free data structures and CPU pinning.
-
-## 15. Debugging & Troubleshooting
+### Scenario 1: High-Performance Order Matching Engine
+**Context:** A trading platform needs to match buy/sell orders across multiple instruments with microsecond-level latency. Must handle concurrent order submission and maintain thread safety.
 
 ```csharp
-// Detect deadlocks in dump:
-// - Use SOS: !locks, !syncblk, !dlk
-// - Look for threads in WaitSleepJoin state
-// - Check SyncBlock ownership
+public class OrderBook
+{
+    private readonly SortedSet<LimitOrder> _bids = new(OrderComparer.Descending); // Max heap by price
+    private readonly SortedSet<LimitOrder> _asks = new(OrderComparer.Ascending);  // Min heap by price
+    private readonly object _lock = new();
 
-// ETW traces for contention:
-// - Microsoft-Windows-DotNETRuntime (ContentionKeyword)
-// - PerfView: "Thread Time" with "Contention" stack
-
-// Common debugging tools:
-// - Visual Studio Parallel Stacks window
-// - WinDbg + SOS
-// - dotnet-dump analyze
-// - PerfView
-// - Concurrency Visualizer (VS extension)
-
-// Code patterns for debugging:
-Thread.CurrentThread.Name = "Worker-" + id; // Name threads for stack traces
+    public MatchResult SubmitOrder(LimitOrder order)
+    {
+        lock (_lock) // Short critical section — lock is appropriate
+        {
+            var oppositeBook = order.Side == Side.Buy ? _asks : _bids;
+            var matches = new List<Trade>();
+            
+            while (oppositeBook.Count > 0 && CanMatch(order, oppositeBook.Min))
+            {
+                var best = oppositeBook.Min;
+                int fillQuantity = Math.Min(order.RemainingQuantity, best.RemainingQuantity);
+                
+                matches.Add(new Trade(best.OrderId, order.OrderId, best.Price, fillQuantity));
+                order.Reduce(fillQuantity);
+                best.Reduce(fillQuantity);
+                
+                if (best.RemainingQuantity == 0) oppositeBook.Remove(best);
+                if (order.RemainingQuantity == 0) break;
+            }
+            
+            if (order.RemainingQuantity > 0)
+                (order.Side == Side.Buy ? _bids : _asks).Add(order);
+                
+            return new MatchResult(matches, order.RemainingQuantity == 0);
+        }
+    }
+}
 ```
 
-## 16. Comparison Section
+### Scenario 2: Parallel Image Processing Pipeline
+**Context:** A batch photo processing service needs to resize, watermark, and compress 10,000 images. Each operation is CPU-bound and independent.
 
+```csharp
+public class ImageBatchProcessor
+{
+    public async Task ProcessBatchAsync(string[] imagePaths, CancellationToken ct)
+    {
+        var options = new ParallelOptions
+        {
+            MaxDegreeOfParallelism = Environment.ProcessorCount,
+            CancellationToken = ct
+        };
+
+        await Parallel.ForEachAsync(imagePaths, options, async (path, token) =>
+        {
+            try
+            {
+                using var image = await Image.LoadAsync(path, token);
+                
+                // Each image processed independently on its own thread
+                var resized = image.Clone(ctx => ctx.Resize(800, 0));
+                ApplyWatermark(resized);
+                
+                var outputPath = Path.Combine(_outputDir, Path.GetFileName(path));
+                await resized.SaveAsJpegAsync(outputPath, token);
+                
+                Interlocked.Increment(ref _processedCount); // Thread-safe counter
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Interlocked.Increment(ref _failedCount);
+                _logger.LogError(ex, "Failed to process {Path}", path);
+            }
+        });
+    }
+}
 ```
-+---------------------+------------------+------------------+
-| Feature             | Thread           | Task             |
-+---------------------+------------------+------------------+
-| Abstraction level   | OS thread        | Promise/task     |
-| Creation cost       | ~1MB stack       | ~100 bytes       |
-| Scheduler           | OS kernel        | TaskScheduler    |
-| Return value        | No               | Yes (Task<T>)    |
-| Composition         | Manual (Join)    | ContinueWith     |
-| Cancellation        | Thread.Abort     | CancellationToken|
-| Async support       | No               | Yes (async/await)|
-| Pool integration    | No               | Yes (default)    |
-+---------------------+------------------+------------------+
 
-+--------------------+-------------------+-------------------+
-| Primitive          | User-mode         | Kernel-mode       |
-+--------------------+-------------------+-------------------+
-| SpinLock           | Yes (busy-wait)   | No                |
-| Interlocked        | Yes (CAS)         | No                |
-| Monitor (lock)     | Spin then kernel  | WaitHandle        |
-| ReaderWriterSlim   | Spin then kernel  | AutoResetEvent    |
-| SemaphoreSlim      | Spin then kernel  | Semaphore         |
-| ManualResetEvent   | No                | Yes               |
-| Mutex              | No                | Yes               |
-+--------------------+-------------------+-------------------+
+### Scenario 3: Distributed Task Queue with Work-Stealing
+**Context:** A compute cluster node processes tasks from a shared queue. Each node has multiple worker threads that should steal work from overloaded peers.
+
+```csharp
+public class WorkStealingScheduler
+{
+    private readonly ThreadLocal<ConcurrentQueue<Action>> _localQueues = new(true);
+    private readonly ConcurrentQueue<Action> _globalQueue = new();
+    private readonly CancellationTokenSource _cts = new();
+
+    public void Start(int workerCount)
+    {
+        for (int i = 0; i < workerCount; i++)
+        {
+            var thread = new Thread(WorkerLoop) { Name = $"Worker-{i}", IsBackground = true };
+            thread.Start();
+        }
+    }
+
+    private void WorkerLoop()
+    {
+        var localQueue = _localQueues.Value;
+        
+        while (!_cts.IsCancellationRequested)
+        {
+            // 1. Try local queue (LIFO — good cache locality)
+            if (localQueue.TryDequeue(out var task)) { task(); continue; }
+            
+            // 2. Try stealing from another worker's local queue
+            foreach (var otherQueue in _localQueues.Values)
+            {
+                if (otherQueue != localQueue && otherQueue.TryDequeue(out task))
+                { task(); goto next; }
+            }
+            
+            // 3. Fall back to global queue
+            if (_globalQueue.TryDequeue(out task)) { task(); continue; }
+            
+            Thread.SpinWait(100); // No work available, back off
+            next:;
+        }
+    }
+}
 ```
 
-## 17. Revision Notes
+---
 
-- Prefer `Task` over `Thread`, TPL over raw threading.
-- `lock` = `Monitor.Enter`/`Exit`. Use private `object` as lock target.
-- `async void` only for event handlers; use `async Task` otherwise.
-- `ConcurrentDictionary`, `ConcurrentQueue` for thread-safe collections.
-- `Interlocked` for atomic operations on primitives.
-- `CancellationToken` for cooperative cancellation (not `Thread.Abort`).
-- `ReaderWriterLockSlim` for read-heavy scenarios.
-- Thread pool minimum threads can be increased via `SetMinThreads`.
-- Avoid `lock(this)`, `lock(typeof(T))`, `lock(string)`.
-- Deadlock prevention: fixed lock ordering, timeout, lock hierarchy.
+## Scenario-Based Questions
 
-## 18. Cheat Sheet
+1. **Q: You are building a real-time chat server that handles 100K concurrent connections. How do you design the threading model?**
+   A: Use async I/O with `SocketAsyncEventArgs` or Kestrel's transport layer — never dedicate a thread per connection (10K threads would consume 10GB+ stack space). Use the thread pool for CPU-bound work (message serialization). For broadcasting to large groups, use `ConcurrentDictionary<Guid, Channel<Message>>` and write to each channel in a loop. Consider `Pipelines` for zero-copy network I/O. Use `ReaderWriterLockSlim` for infrequent connection list modifications.
 
-```
-+------------------------------------------------------------------+
-|                  MULTITHREADING CHEAT SHEET                       |
-+------------------------------------------------------------------+
-| CREATION                                                          |
-|  new Thread(Start).Start()         - raw thread                  |
-|  ThreadPool.QueueUserWorkItem(cb)  - pool thread                 |
-|  Task.Run(action)                  - TPL task                    |
-|  Parallel.For/ForEach/Invoke       - data parallelism            |
-+------------------------------------------------------------------+
-| SYNCHRONIZATION                                                    |
-|  lock (obj) { ... }                - mutual exclusion             |
-|  Monitor.Enter/Exit(obj)           - equivalent to lock           |
-|  Interlocked.Increment(ref x)      - atomic increment            |
-|  Interlocked.CompareExchange(ref x, val, cmp) - CAS               |
-|  volatile int _field;              - compiler reordering barrier  |
-+------------------------------------------------------------------+
-| SIGNALING                                                          |
-|  AutoResetEvent / ManualResetEvent - one/all waiters              |
-|  ManualResetEventSlim              - user-mode MRSE              |
-|  Barrier(n)                         - phased sync                |
-|  CountdownEvent(n)                 - count to zero               |
-|  SemaphoreSlim(n)                  - resource pool              |
-+------------------------------------------------------------------+
-| CONCURRENT COLLECTIONS                                             |
-|  ConcurrentDictionary<K,V>         - thread-safe dictionary       |
-|  ConcurrentQueue<T>               - lock-free FIFO               |
-|  ConcurrentStack<T>               - lock-free LIFO               |
-|  ConcurrentBag<T>                 - unordered, thread-local      |
-|  BlockingCollection<T>            - bounded producer-consumer    |
-+------------------------------------------------------------------+
-| BEST PRACTICES                                                     |
-|  Avoid shared state (prefer immutability)                        |
-|  Lock as little as possible (fine-grained locking)                |
-|  Always acquire locks in same order (deadlock prevention)         |
-|  Use CancellationToken for cancellation                          |
-|  Prefer async/await over blocking threads                         |
-|  Use ConcurrentDictionary instead of Dictionary + lock           |
-|  Set ThreadPool min threads to avoid latency spikes              |
-+------------------------------------------------------------------+
+2. **Q: You have a legacy WinForms app that freezes during a long computation. How do you make it responsive without a full rewrite?**
+   A: Use `Task.Run` to offload the computation to the thread pool. Use `IProgress<T>` (wraps `SynchronizationContext.Post`) to report progress back to the UI thread. Disable the "Start" button before the task and re-enable in the continuation. For cancellation, use `CancellationTokenSource` and pass the token to the task. If the computation supports chunked processing, yield periodically to check cancellation.
+
+3. **Q: You are optimizing a high-frequency trading system where lock contention is the bottleneck. How do you reduce it?**
+   A: Use lock-free data structures (`ConcurrentDictionary`, `Interlocked` operations, `SpinLock` for sub-microsecond sections). Partition data by symbol or instrument so that different threads rarely contend on the same lock (striped locking). Use `ReaderWriterLockSlim` for read-dominated data. Consider `MemoryBarrier`-based lock-free algorithms for simple state. Profile with `System.Threading.CountdownEvent` to measure contention via ETW events.
+
+4. **Q: You are debugging a production crash with `StackOverflowException` in a multithreaded service. What could cause it?**
+   A: Recursive lock-free pattern bugs (e.g., CAS loop that never succeeds because of contention). Deep call chains in thread pool threads due to aggressive inlining + deep async state machines. Unbounded recursion in a parallel algorithm. Deadlock recovery logic that retries infinitely. Fix: dump analysis with `!clrstack` to find the repeating call pattern, add recursion limits, and review lock-free algorithms for correctness.
+
+5. **Q: You are migrating from `lock` to `ReaderWriterLockSlim` for a configuration cache. What trade-offs should you consider?**
+   A: `ReaderWriterLockSlim` allows unlimited concurrent readers when no writer exists — great for config (read 1000x/sec, write 1x/hour). But it's ~2x slower than `lock` for the exclusive (write) case. It also has more overhead for very short critical sections. Only beneficial when reads significantly outnumber writes AND the read section is non-trivial (> 1µs). For a simple dictionary lookup, `lock` may be faster due to lower overhead.
+
+6. **Q: You are building a backtesting engine that processes years of tick data. How do you parallelize it correctly?**
+   A: Partition data by time window (e.g., one day per partition) — ensure no cross-partition dependencies. Use `Parallel.ForEach` on the partition list. Each partition runs sequentially (tick data is ordered). Aggregate results using `Interlocked` or a lock-protected list. Challenge: some strategies need look-back across partitions — implement a warm-up period or overlapping partitions. Use `ImmutableArray<T>` for strategy parameters to avoid synchronization.
+
+7. **Q: You need to implement a thread-safe lazy-initialized singleton. Why prefer `Lazy<T>` over double-checked locking?**
+   A: `Lazy<T>` with `LazyThreadSafetyMode.ExecutionAndPublication` guarantees single execution and publication of the result — the runtime handles all memory barriers correctly. Double-checked locking is error-prone (must `volatile` the field) and performance varies by .NET version. `Lazy<T>` also supports exception caching (if the factory throws, subsequent accesses re-throw the same exception). Only use manual double-checked locking if you need the singleton to be re-created after failure.
+
+8. **Q: You are designing a thread pool for a game engine where predictability matters more than throughput. How is it different from .NET's ThreadPool?**
+   A: .NET's ThreadPool optimizes for throughput via hill-climbing (varies thread count dynamically). A game engine needs fixed thread count (core count - 1) to prevent oversubscription. Use dedicated threads with known affinitized cores. Use spin-waiting for short tasks (avoids context switch latency, ~1-2µs). Use fiber-like cooperative scheduling within threads to avoid kernel transitions. No dynamic thread injection — it causes frame time spikes.
+
+9. **Q: You are implementing a rate limiter in a multithreaded server. How do you maintain accurate counts under high concurrency?**
+   A: Use `Interlocked.Increment` on a counter for each sliding window bucket. For a token bucket algorithm, use `Interlocked.CompareExchange` (CAS) in a `while` loop to atomically update remaining tokens. For a distributed rate limiter, use Redis `INCR` with `EXPIRE`. For high precision, use `long` ticks via `Stopwatch.GetTimestamp()`. Trade-off: `Interlocked` operations are ~5ns but lack waiting semantics — combine with `SemaphoreSlim` for blocking when rate is exceeded.
+
+10. **Q: You have a thread pool starvation issue — response times spike to 30s under load. How do you diagnose and fix it?**
+    A: Capture `ThreadPool` metrics: `ThreadPool.GetAvailableThreads` shows zero workers. Common causes: blocking calls on thread pool threads (`.Result`, `lock` held for long I/O), too many long-running tasks, or insufficient min threads. Fix: ensure no blocking calls in async code, increase `ThreadPool.SetMinThreads` to prevent latency spikes, and use `TaskCreationOptions.LongRunning` for truly long CPU-bound work. Monitor `clr!ThreadPoolWorkerThreadWait` in ETW traces.
+
+---
+
+## Interview Questions
+
+1. **What is the difference between `lock` and `Monitor`?**
+   A: `lock(obj) { body }` is syntactic sugar for `Monitor.Enter(obj, ref lockTaken)` in a `try` block with `Monitor.Exit(obj)` in `finally`. `Monitor` additionally provides `TryEnter` with timeout and `Pulse`/`Wait` for signaling between threads.
+
+2. **What does `volatile` do?**
+   A: It prevents compiler and CPU reordering of reads/writes on a field. Every volatile read has acquire semantics; every volatile write has release semantics. It does NOT make compound operations like `counter++` atomic.
+
+3. **Explain the thread pool hill-climbing algorithm.**
+   A: The thread pool monitors throughput (completions per second). It periodically adds a thread and measures throughput change. If throughput increases, it adds more; if it decreases, it removes threads. This converges to the optimal thread count dynamically. Adjustments happen approximately every 500ms.
+
+4. **How does `Interlocked.Increment` work at the CPU level?**
+   A: It uses a CPU-level atomic instruction (LOCK XADD on x86, LDXR/STXR on ARM) that reads, increments, and writes the value in a single uninterruptible operation. This avoids the cost of a full memory barrier and lock acquisition.
+
+5. **What is false sharing and how do you prevent it?**
+   A: False sharing occurs when threads on different cores modify variables that share a CPU cache line (typically 64 bytes). Each modification invalidates the cache line for other cores. Mitigate by padding fields with `[FieldOffset]` to ensure independent fields are on separate cache lines.
+
+6. **What is the difference between `AutoResetEvent` and `ManualResetEvent`?**
+   A: `AutoResetEvent` automatically resets to non-signaled after releasing a single waiting thread (like a turnstile). `ManualResetEvent` stays signaled until manually reset, releasing all waiting threads simultaneously. `AutoResetEvent` is for one-at-a-time signaling; `ManualResetEvent` is for broadcast-style signaling.
+
+7. **How does `ConcurrentDictionary` achieve thread safety?**
+   A: It uses striped locking — the internal bucket array is divided into regions, each protected by a separate lock. Read operations are mostly lock-free (volatile reads). Write operations lock only the relevant stripe, allowing concurrent access to different regions. Resizing acquires all locks.
+
+8. **What is a deadlock and how do you prevent it?**
+   A: A deadlock occurs when two or more threads each hold a lock the other needs. Prevention: always acquire locks in a consistent global order (by hash code or ID), use `Monitor.TryEnter` with timeout, and avoid nested locks when possible. Detection: ETW events via `Monitor.LockContention` or `!syncblk` in WinDbg.
+
+9. **Explain `TaskCreationOptions.LongRunning`.**
+   A: It tells the TPL to create a dedicated thread (not use the thread pool) for the task. Use for long-running CPU-bound operations that would otherwise monopolize a thread pool thread. Without it, the thread pool might add more threads to compensate, causing oversubscription.
+
+10. **How does `SpinLock` differ from `lock`?**
+    A: `SpinLock` busy-waits (spins in a loop) instead of context-switching. It's faster for very short critical sections (< 10ns) but wastes CPU cycles on contention. `lock` (Monitor) yields the thread on contention, which is better for longer sections. Use `SpinLock` only after profiling confirms `lock` is the bottleneck.
+
+---
+
+## Developer Recommendations
+
+- **Prefer `Task` over raw `Thread` for most scenarios** — A `Thread` has ~1MB stack and takes ~200µs to create. A `Task` uses the thread pool (~100 bytes, ~1µs dispatch). Tasks integrate with async/await, support cancellation, and enable composition (`WhenAll`, `WhenAny`). Reserve raw `Thread` for long-running CPU-bound operations that need a dedicated OS thread.
+
+- **Use `SemaphoreSlim` for async-compatible synchronization** — Unlike `Monitor` (which blocks the thread), `SemaphoreSlim.WaitAsync()` returns a task that completes when the semaphore is acquired. This frees the thread during the wait, preventing thread pool starvation. Use it for resource pooling and rate limiting in async code.
+
+- **Set `ThreadPool.SetMinThreads` at application startup** — The default minimum thread count equals CPU count, causing latency spikes when burst traffic arrives. Set to at least `Environment.ProcessorCount * 4` for I/O-bound services. This prevents the hill-climbing algorithm from injecting threads too slowly during load spikes.
+
+- **Avoid `lock(this)` or locking on public types** — Lock on a private `readonly object` field. Locking public objects allows external code to participate in the lock, potentially causing deadlocks. Locking on strings is especially dangerous due to string interning (two identical string literals share the same object).
+
+- **Use `ConcurrentDictionary` instead of `Dictionary` + manual locking** — `ConcurrentDictionary` uses striped locking for fine-grained concurrency. Its `GetOrAdd` and `AddOrUpdate` methods provide atomic read-modify-write that would require complex double-checked locking with `Dictionary`.
+
+- **Use `Channel<T>` for producer-consumer over `BlockingCollection<T>`** — `Channel<T>` is async-first, supports backpressure, and integrates with `IAsyncEnumerable<T>`. `BlockingCollection<T>` blocks consumer threads, making it unsuitable for async pipelines. `Channel<T>` also offers `BoundedChannelFullMode` for various backpressure strategies.
+
+- **Measure lock contention before optimizing** — Profile with `dotnet-trace` and look for `Monitor.Contention` events or use `PerfView`. Changing `lock` to `ReaderWriterLockSlim` or `Interlocked` adds complexity. Only optimize when contention is proven to be the bottleneck (> 5% of CPU time or high count of contention events).
+
+---
+
+## Lock Contention Costs
+
+| Primitive | Acquire (uncontended) | Acquire (contended) |
+|---|---|---|
+| `Interlocked.Increment` | ~5ns | ~5ns |
+| `SpinLock` | ~5ns | ~20ns |
+| `lock` (Monitor) | ~15ns | ~100ns |
+| `ReaderWriterLockSlim` | ~25ns | ~200ns |
+| `SemaphoreSlim` | ~30ns | ~200ns |
+| `AutoResetEvent` | ~100ns | ~1µs |
+| `Mutex` | ~1µs | ~5µs |
+
+## Synchronization Strategy
+
+- **Short critical sections (<10ns):** `Interlocked` or `SpinLock`
+- **Medium sections (10-1000ns):** `lock` (Monitor)
+- **Long sections (>1ms):** `SemaphoreSlim` or `ReaderWriterLockSlim`
+- **Cross-process:** `Mutex`, `Semaphore` (kernel objects)
+- **CPU-bound parallelism:** Threads ≤ `Environment.ProcessorCount`
+- **I/O-bound:** More threads than cores to overlap I/O wait

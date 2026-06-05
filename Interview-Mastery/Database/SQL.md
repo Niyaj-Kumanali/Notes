@@ -1,563 +1,249 @@
 # SQL
 
-## 1. Executive Summary
+---
 
-Structured Query Language (SQL) is the standard language for relational database management systems. It enables the creation, manipulation, querying, and administration of relational databases. SQL is declarative: you specify WHAT you want, not HOW to get it. The SQL engine determines the execution plan. Mastery of SQL is essential for any backend or full-stack engineer, particularly in Java/Spring Boot ecosystems where JPA/Hibernate generate SQL automatically.
+## What is SQL?
 
-## 2. Core Theory
+**Structured Query Language (SQL)** is the standard language for relational database management systems. It is **declarative** — you specify **what** you want, not **how** to get it. The database engine's optimizer determines the execution plan. SQL mastery is essential for any backend engineer, particularly when using ORMs like Hibernate that generate SQL automatically.
 
-### 2.1 Relational Model Foundation
+### Key Concepts:
 
-SQL is built on Codd's relational model:
-- **Relation** = table
-- **Tuple** = row
-- **Attribute** = column
-- **Domain** = allowed values for a column
-- **Key** = unique identifier for a tuple
-- **Foreign Key** = reference to another relation's key
+1. **SQL Sub-Languages**:
 
-### 2.2 SQL Sub-Languages
+   - **DDL (Data Definition Language)** — Schema definition: `CREATE`, `ALTER`, `DROP`, `TRUNCATE`.
+   - **DML (Data Manipulation Language)** — Data operations: `SELECT`, `INSERT`, `UPDATE`, `DELETE`.
+   - **DCL (Data Control Language)** — Access control: `GRANT`, `REVOKE`.
+   - **TCL (Transaction Control)** — Transaction management: `BEGIN`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`.
 
-| Sublanguage | Category | Commands |
-|-------------|----------|----------|
-| DDL | Schema Definition | CREATE, ALTER, DROP, TRUNCATE |
-| DML | Data Manipulation | SELECT, INSERT, UPDATE, DELETE |
-| DCL | Access Control | GRANT, REVOKE |
-| TCL | Transaction Control | BEGIN, COMMIT, ROLLBACK, SAVEPOINT |
+2. **SELECT Statement Logical Execution Order**:
 
-### 2.3 SELECT Statement Execution Order (Logical)
+   ```
+   FROM -> JOIN -> WHERE -> GROUP BY -> HAVING -> SELECT -> DISTINCT -> ORDER BY -> LIMIT/OFFSET
+   ```
 
-```
-FROM -> JOIN -> WHERE -> GROUP BY -> HAVING -> SELECT -> DISTINCT -> ORDER BY -> LIMIT/OFFSET
-```
+   This is the **logical** order. The optimizer may reorder operations for performance, but understanding this sequence helps you write correct queries.
 
-This is the LOGICAL order. The database engine may reorder operations for optimization.
+3. **Join Types**:
 
-### 2.4 Set Operations
+   - **INNER JOIN** — Returns only rows with matches in both tables.
+   - **LEFT JOIN** — All rows from the left table, plus matches from the right (NULLs for non-matches).
+   - **RIGHT JOIN** — All rows from the right table, plus matches from the left.
+   - **FULL JOIN** — All rows from both tables.
+   - **CROSS JOIN** — Cartesian product of both tables.
+   - **SELF JOIN** — Joining a table with itself (used for hierarchical data).
 
-- UNION (distinct union)
-- UNION ALL (duplicates retained)
-- INTERSECT (common rows)
-- EXCEPT / MINUS (rows in first not in second)
+4. **NULL Handling**:
 
-### 2.5 Predicate Types
+   NULL is not a value — it represents **unknown** or **missing**. Three-valued logic: `TRUE`, `FALSE`, `UNKNOWN`.
 
-- Comparison: =, <>, <, >, <=, >=
-- Range: BETWEEN x AND y
-- Set Membership: IN (subquery), NOT IN
-- Pattern: LIKE ('%' wildcard, '_' single char)
-- NULL Check: IS NULL, IS NOT NULL
-- Quantified: ALL, ANY, SOME
-- Existence: EXISTS, NOT EXISTS
+   - `NULL = NULL` yields `NULL` (not `TRUE`). Always use `IS NULL` / `IS NOT NULL`.
+   - `NULL IN (1, 2, 3)` yields `NULL`.
+   - Aggregate functions like `SUM`, `AVG`, `COUNT(col)` ignore NULLs. `COUNT(*)` counts all rows.
 
-### 2.6 Aggregate Functions
+5. **Window Functions**:
 
-COUNT, SUM, AVG, MIN, MAX, STRING_AGG, ARRAY_AGG
+   Powerful for analytics without grouping:
 
-## 3. Under-the-Hood Deep Dive
+   ```sql
+   SELECT name, department, salary,
+          ROW_NUMBER() OVER (PARTITION BY department ORDER BY salary DESC) AS rank,
+          AVG(salary) OVER (PARTITION BY department) AS dept_avg,
+          LAG(salary) OVER (ORDER BY hire_date) AS prev_salary
+   FROM employees;
+   ```
 
-### 3.1 Query Processing Pipeline
+---
 
-```
-SQL Text -> Parser -> Rewriter -> Planner/Optimizer -> Executor -> Result
-```
+## Core Concepts
 
-1. **Parser**: Tokenizes, validates syntax, builds parse tree
-2. **Rewriter**: Applies rules (view expansion, constant folding)
-3. **Planner/Optimizer**: Generates execution plans, chooses lowest-cost plan
-4. **Executor**: Executes plan operators (sequential scan, index scan, joins, etc.)
+### 1. Query Processing Pipeline
 
-### 3.2 NULL Handling
+   ```
+   SQL Text -> Parser -> Rewriter -> Planner/Optimizer -> Executor -> Result
+   ```
 
-NULL is not a value; it represents unknown/missing. NULL = NULL yields NULL (not TRUE). Use IS NULL. Three-valued logic: TRUE, FALSE, UNKNOWN.
+   - **Parser** — Tokenizes input, validates syntax, builds a parse tree.
+   - **Rewriter** — Applies rules like view expansion and constant folding.
+   - **Planner/Optimizer** — Generates candidate execution plans and chooses the lowest-cost one.
+   - **Executor** — Executes the plan using operators (sequential scan, index scan, joins, etc.).
 
-### 3.3 Join Internals
+### 2. Join Algorithms
 
-- **Nested Loop Join**: O(n*m) — good for small tables or index lookups
-- **Hash Join**: O(n+m) — builds hash table on one side, probes with the other — good for unsorted large datasets
-- **Merge Join**: O(n+m) — requires sorted inputs — good for pre-indexed columns
+   - **Nested Loop Join** — O(n × m). For each row in the outer table, scan the inner table. Good for small tables or when the inner table has an index.
+   - **Hash Join** — O(n + m). Build a hash table on one side, probe with the other. Good for large, unsorted datasets.
+   - **Merge Join** — O(n + m). Requires sorted inputs. Good for pre-indexed or pre-sorted columns.
 
-### 3.4 Subquery Execution
+### 3. Common Table Expressions (CTEs)
 
-- **Correlated subquery**: Executed once per outer row (expensive)
-- **Uncorrelated subquery**: Executed once, result cached
-- Database optimizers often rewrite subqueries as joins or semi-joins
+   CTEs improve query readability and can be recursive:
 
-### 3.5 Common Table Expression (CTE) Materialization
+   ```sql
+   WITH RECURSIVE org_chart AS (
+       SELECT id, name, manager_id, 1 AS level
+       FROM employees WHERE manager_id IS NULL
+       UNION ALL
+       SELECT e.id, e.name, e.manager_id, oc.level + 1
+       FROM employees e
+       JOIN org_chart oc ON e.manager_id = oc.id
+   )
+   SELECT * FROM org_chart;
+   ```
 
-- Non-recursive CTEs may or may not be materialized depending on the DBMS
-- Some databases materialize CTEs as temporary tables (acts as optimization fence)
-- PostgreSQL 12+ can inline simple CTEs
+### 4. Pagination
 
-## 4. Production Code Examples
+   - **OFFSET pagination** — Simple but slow for large offsets (the database still reads all skipped rows).
+   - **Keyset (cursor-based) pagination** — Uses `WHERE (created_at, id) < (?, ?)` for efficient, constant-time pagination.
 
-### 4.1 Basic CRUD with Spring Data JPA
+### 5. Batch Operations in Spring Boot
 
-```sql
--- Table creation
-CREATE TABLE users (
-    id BIGSERIAL PRIMARY KEY,
-    email VARCHAR(255) NOT NULL UNIQUE,
-    username VARCHAR(100) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+   ```java
+   @Transactional
+   public void batchInsertUsers(List<User> users) {
+       int batchSize = 50;
+       for (int i = 0; i < users.size(); i++) {
+           entityManager.persist(users.get(i));
+           if (i > 0 && i % batchSize == 0) {
+               entityManager.flush();
+               entityManager.clear();
+           }
+       }
+   }
+   ```
 
-CREATE INDEX idx_users_email ON users(email);
-```
+---
 
-```java
-// JPA Entity
-@Entity
-@Table(name = "users")
-public class User {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+## Common Mistakes
 
-    @Column(nullable = false, unique = true)
-    private String email;
+1. **Using `SELECT DISTINCT` to hide missing JOIN conditions** — Often indicates a Cartesian product. Always verify JOIN conditions are correct before using DISTINCT.
 
-    @Column(nullable = false)
-    private String username;
+2. **Forgetting NULL handling** — `WHERE col NOT IN (1, 2, 3)` excludes rows where `col IS NULL` because `NULL NOT IN (1, 2, 3)` yields `NULL`, not `TRUE`.
 
-    @Column(name = "created_at", updatable = false)
-    private LocalDateTime createdAt;
+3. **Missing indexes on foreign keys** — JOINs on foreign key columns without indexes cause sequential scans.
 
-    @Column(name = "updated_at")
-    private LocalDateTime updatedAt;
+4. **Using functions in WHERE clauses** — `WHERE YEAR(date) = 2024` prevents index usage. Use `WHERE date BETWEEN '2024-01-01' AND '2024-12-31'` instead.
 
-    @PrePersist
-    protected void onCreate() {
-        createdAt = LocalDateTime.now();
-        updatedAt = LocalDateTime.now();
-    }
+5. **Assuming implicit row ordering** — Without `ORDER BY`, the order of results is undefined and may vary between executions.
 
-    @PreUpdate
-    protected void onUpdate() {
-        updatedAt = LocalDateTime.now();
-    }
+6. **Using correlated subqueries when JOINs suffice** — Correlated subqueries execute once per outer row. A JOIN is almost always more efficient.
 
-    // getters, setters, constructors
-}
-```
+---
 
-```java
-// Spring Data Repository
-@Repository
-public interface UserRepository extends JpaRepository<User, Long> {
-    Optional<User> findByEmail(String email);
-    List<User> findByUsernameContainingIgnoreCase(String partial);
-    boolean existsByEmail(String email);
-}
-```
+## Real-World Scenarios
 
-### 4.2 Custom Queries with @Query
+### 1. Analytics Dashboard with Window Functions
 
-```java
-@Repository
-public interface UserRepository extends JpaRepository<User, Long> {
-
-    @Query("SELECT u FROM User u WHERE u.email = :email")
-    Optional<User> findByEmailCustom(@Param("email") String email);
-
-    @Query(value = "SELECT * FROM users WHERE username ILIKE %:partial%", nativeQuery = true)
-    List<User> searchByUsername(@Param("partial") String partial);
-
-    @Modifying
-    @Query("UPDATE User u SET u.username = :username WHERE u.id = :id")
-    int updateUsername(@Param("id") Long id, @Param("username") String username);
-
-    @Modifying
-    @Query(value = "DELETE FROM users WHERE created_at < :cutoff", nativeQuery = true)
-    int deleteOldUsers(@Param("cutoff") LocalDateTime cutoff);
-}
-```
-
-### 4.3 Batch Operations
-
-```java
-// Batch insert with JPA
-@Transactional
-public void batchInsertUsers(List<User> users) {
-    int batchSize = 50;
-    for (int i = 0; i < users.size(); i++) {
-        entityManager.persist(users.get(i));
-        if (i > 0 && i % batchSize == 0) {
-            entityManager.flush();
-            entityManager.clear();
-        }
-    }
-}
-```
+A SaaS platform needs a monthly report showing each employee's salary, department average, and rank. Without window functions, this requires multiple subqueries. A single query handles it efficiently:
 
 ```sql
--- SQL batch insert
-INSERT INTO users (email, username) VALUES
-('alice@example.com', 'alice'),
-('bob@example.com', 'bob'),
-('charlie@example.com', 'charlie');
+SELECT name, department, salary,
+       AVG(salary) OVER (PARTITION BY department) AS dept_avg,
+       RANK() OVER (PARTITION BY department ORDER BY salary DESC) AS dept_rank
+FROM employees WHERE active = TRUE;
 ```
 
-### 4.4 Pagination
+### 2. Keyset Pagination for Social Media Feed
 
-```java
-@Repository
-public interface PostRepository extends JpaRepository<Post, Long> {
-    Page<Post> findByPublishedTrue(Pageable pageable);
-
-    @Query("SELECT p FROM Post p WHERE p.author.id = :authorId")
-    Slice<Post> findByAuthor(@Param("authorId") Long authorId, Pageable pageable);
-}
-
-// Service usage
-public Page<Post> getPublishedPosts(int page, int size) {
-    Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
-    return postRepository.findByPublishedTrue(pageable);
-}
-```
-
-## 5. Real-World Scenarios
-
-### 5.1 Soft Delete Pattern
+A social media app loads 20 posts at a time. `OFFSET 100000 LIMIT 20` reads and discards 100K rows. Keyset pagination uses a WHERE clause on the last cursor for constant-time pagination:
 
 ```sql
-ALTER TABLE users ADD COLUMN deleted_at TIMESTAMP NULL;
-CREATE INDEX idx_users_active ON users(deleted_at) WHERE deleted_at IS NULL;
+SELECT id, content, created_at FROM posts
+WHERE (created_at, id) < ('2024-06-01T00:00:00', 5000)
+ORDER BY created_at DESC, id DESC
+LIMIT 20;
 ```
 
-```java
-@Entity
-@Table(name = "users")
-@SQLDelete(sql = "UPDATE users SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?")
-@Where(clause = "deleted_at IS NULL")
-public class User {
-    @Column(name = "deleted_at")
-    private LocalDateTime deletedAt;
-}
-```
+### 3. Recursive CTE for Organizational Hierarchy
 
-### 5.2 Versioning / Optimistic Locking
-
-```java
-@Entity
-public class Product {
-    @Version
-    private Long version;
-}
-```
-
-### 5.3 Audit Logging with Triggers
+An HR system needs the full reporting chain for any employee. Recursive CTEs traverse the tree in a single query handling arbitrary depth:
 
 ```sql
-CREATE TABLE audit_log (
-    id BIGSERIAL PRIMARY KEY,
-    table_name TEXT NOT NULL,
-    row_id BIGINT NOT NULL,
-    operation TEXT NOT NULL,
-    old_data JSONB,
-    new_data JSONB,
-    changed_by TEXT,
-    changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+WITH RECURSIVE org_chain AS (
+    SELECT id, name, manager_id, 1 AS depth
+    FROM employees WHERE id = 123
+    UNION ALL
+    SELECT e.id, e.name, e.manager_id, oc.depth + 1
+    FROM employees e
+    JOIN org_chain oc ON e.manager_id = oc.id
+)
+SELECT * FROM org_chain ORDER BY depth;
 ```
 
-## 6. Performance
+## Scenario-Based Questions
 
-### 6.1 SELECT * Anti-Pattern
+1. **Q: You are building a billing system that generates monthly invoices. A single customer can have thousands of transactions. You need to compute the total per customer, apply tiered discounts, and insert results into an invoices table. How do you write this efficiently?**
+   A: Use a single INSERT...SELECT with aggregations and a CASE expression for tiered discounts: `WITH customer_totals AS (SELECT customer_id, SUM(amount) AS total FROM transactions WHERE date >= $1 AND date < $2 GROUP BY customer_id) INSERT INTO invoices SELECT customer_id, total * CASE WHEN total > 10000 THEN 0.9 ELSE 1.0 END FROM customer_totals`. Process in batches to avoid long-running transactions.
 
-Always select only needed columns. SELECT * forces full table scan, increases I/O, and prevents index-only scans.
+2. **Q: Your reporting query joins 6 tables and takes 45 seconds. The CEO needs a dashboard that refreshes in under 5 seconds. You cannot change the schema. What do you do?**
+   A: Check the execution plan for full table scans, nested loops with many loops, and sort spills. Add missing indexes on join and filter columns. Use a materialized view that pre-joins the data and refreshes periodically. If data can be slightly stale, use a read-only replica. As a last resort, cache results in Redis with a TTL.
 
-### 6.2 N+1 Query Problem
+3. **Q: A DELETE removing 5M rows from a 50M row table takes 30 minutes and blocks other queries. How do you make it non-blocking and faster?**
+   A: Batch the delete in chunks of 1000 rows with `LIMIT` inside a loop, adding `pg_sleep(0.1)` between batches: `DELETE FROM table WHERE id IN (SELECT id FROM table WHERE condition LIMIT 1000)`. This holds short-lived locks per batch. Consider partitioning if you can drop entire partitions.
 
-```java
-// BAD: N+1 queries
-List<Author> authors = authorRepository.findAll();
-for (Author author : authors) {
-    System.out.println(author.getBooks().size()); // triggers query per author
-}
+4. **Q: Your application team uses `SELECT * FROM users WHERE email = $1` and it's fast. But a new query `SELECT * FROM users WHERE email LIKE '%@gmail.com'` is extremely slow despite an index on email. Why?**
+   A: B-Tree indexes only support prefix patterns (`LIKE 'pattern%'`). `LIKE '%pattern'` cannot use a B-Tree. Use a trigram GIN index: `CREATE INDEX ON users USING GIN (email gin_trgm_ops)`. This enables efficient wildcard searches on both sides.
 
-// FIX: Join fetch
-@Query("SELECT a FROM Author a JOIN FETCH a.books")
-List<Author> findAllWithBooks();
+5. **Q: A `LEFT JOIN` returns 3x more rows than expected for a one-row-per-customer report. What happened?**
+   A: The right table has multiple matching rows per left row, causing row multiplication. Use `DISTINCT ON (customer.id)` with proper ORDER BY to pick the desired match, or aggregate the right side: `LEFT JOIN (SELECT customer_id, COUNT(*) FROM orders GROUP BY customer_id)`.
 
-// Or use EntityGraph
-@EntityGraph(attributePaths = {"books"})
-@Query("SELECT a FROM Author a")
-List<Author> findAllWithBooks();
-```
+6. **Q: Your yearly cleanup runs `DELETE FROM logs WHERE created_at < NOW() - INTERVAL '1 year'`. It works for months but suddenly fails with "out of disk space" on the WAL. Why?**
+   A: The DELETE generates massive WAL in a single transaction. Batch in smaller transactions (10K rows each), committing after each batch. Each commit recycles WAL. Add `pg_sleep(0.1)` between batches to allow autovacuum to keep up.
 
-### 6.3 Connection Pooling
+7. **Q: A query with multiple CTEs runs slower than an equivalent subquery version. You expected CTEs to be faster. What's happening?**
+   A: In PostgreSQL, CTEs are optimization fences — the optimizer cannot push predicates through CTEs. The CTE is materialized fully before the outer query runs. Use `NOT MATERIALIZED` (PostgreSQL 12+) to inline the CTE, or rewrite as subqueries.
 
-```yaml
-# application.yml
-spring:
-  datasource:
-    hikari:
-      maximum-pool-size: 20
-      minimum-idle: 5
-      idle-timeout: 300000
-      connection-timeout: 20000
-      max-lifetime: 1200000
-```
+8. **Q: A table has 100 columns. `SELECT *` for a paginated list takes 200ms. Selecting only 3 columns takes 20ms. Why such a big difference?**
+   A: `SELECT *` reads all 100 columns from disk, using more I/O and bandwidth. The 10x difference suggests the table is wider than a single page per row. Always select only needed columns. In JPA, use DTO projections for read-only queries.
 
-## 7. Security
+9. **Q: Your query uses `WHERE status IN (SELECT status FROM allowed_statuses)`. The subquery returns 3 values but is slow. How would you rewrite it?**
+   A: The subquery may be evaluated per row (correlated). Rewrite as a JOIN: `SELECT t.* FROM table t JOIN allowed_statuses a ON t.status = a.status`. If `allowed_statuses` is small, use a hardcoded IN list. Check the plan for SubPlan vs InitPlan.
 
-### 7.1 SQL Injection Prevention
+10. **Q: A batch INSERT of 10K rows into a table with 5 indexes takes 10 seconds. A single-row INSERT takes 2ms. Why doesn't it scale linearly?**
+    A: Each index has O(log n) insert cost. Without batching, each INSERT is a separate transaction with commit overhead. Use multi-row INSERT (`INSERT INTO t VALUES (...), (...), (...)`), batch in a single transaction, and configure `hibernate.jdbc.batch_size` in JPA.
 
-```java
-// NEVER do this:
-String sql = "SELECT * FROM users WHERE email = '" + userInput + "'";
+## Interview Questions
 
-// ALWAYS use parameterized queries:
-@Query("SELECT u FROM User u WHERE u.email = :email")
-Optional<User> findByEmail(@Param("email") String email);
+1. **What is the logical execution order of a SELECT statement?**
+   A: FROM → JOIN → WHERE → GROUP BY → HAVING → SELECT → DISTINCT → ORDER BY → LIMIT/OFFSET. The optimizer may reorder operations physically.
 
-// For native queries, use ? binding
-@Query(value = "SELECT * FROM users WHERE email = ?1", nativeQuery = true)
-Optional<User> findByEmailNative(String email);
-```
+2. **What is the difference between INNER JOIN and LEFT JOIN?**
+   A: INNER JOIN returns only rows with matches in both tables. LEFT JOIN returns all rows from the left table, with NULLs where the right has no match.
 
-### 7.2 Least Privilege Principle
+3. **How does NULL behave in SQL?**
+   A: NULL represents unknown. `NULL = NULL` yields NULL, not TRUE. Use `IS NULL` not `= NULL`. Aggregate functions ignore NULLs except `COUNT(*)`. `WHERE col NOT IN (1,2,3)` excludes NULL rows.
 
-```sql
-CREATE USER app_user WITH PASSWORD 'secure';
-GRANT SELECT, INSERT, UPDATE, DELETE ON all_tables TO app_user;
-REVOKE ALL ON sensitive_table FROM app_user;
-```
+4. **What is the difference between UNION and UNION ALL?**
+   A: UNION removes duplicates (requires a sort), UNION ALL keeps all rows. UNION ALL is faster when duplicates are acceptable.
 
-## 8. Common Mistakes
+5. **What is a correlated subquery?**
+   A: A subquery that references columns from the outer query and executes once per outer row. Usually less efficient than a JOIN with GROUP BY.
 
-1. **Using SELECT DISTINCT to hide missing JOIN conditions** — indicates a Cartesian product
-2. **Forgetting NULL handling** — NULL IN (1,2,3) is NULL, not FALSE
-3. **Missing indexes on foreign keys** — leads to sequential scans on JOINs
-4. **Using functions in WHERE clauses** — `WHERE YEAR(date) = 2024` prevents index usage
-5. **Assuming implicit row ordering** — without ORDER BY, order is undefined
-6. **Overusing subqueries when JOINs suffice** — correlated subqueries are especially slow
-7. **Ignoring transaction boundaries** — each JPA repository call is a separate transaction by default
+6. **How do window functions differ from GROUP BY?**
+   A: Window functions perform calculations across related rows without collapsing them. GROUP BY collapses groups into single rows. Window functions use OVER (PARTITION BY ...).
 
-## 9. Senior Engineer Perspective
+7. **What is the difference between HAVING and WHERE?**
+   A: WHERE filters rows before GROUP BY. HAVING filters groups after GROUP BY. HAVING can use aggregate functions; WHERE cannot.
 
-Production SQL considerations:
-- **Idempotency**: Use UPSERT (INSERT ... ON CONFLICT DO UPDATE) for retry-safe operations
-- **Idempotency keys**: Store idempotency_key with UNIQUE constraint
-- **Schema migrations**: Use Flyway or Liquibase — never manual DDL
-- **Read replicas**: Route read queries to replicas, writes to primary
-- **Database per service**: In microservices, avoid shared databases
-- **Connection management**: Always return connections to pool, use connection timeout
+8. **How do you paginate efficiently in SQL?**
+   A: Keyset pagination uses `WHERE id > :last_id ORDER BY id LIMIT :size` — O(1) per page. OFFSET pagination is O(n) because skipped rows are read internally.
 
-## 10. Interview Questions (20)
+9. **What is a CTE and when is it useful?**
+   A: A Common Table Expression (WITH clause) defines a named temporary result set. Useful for recursive queries, breaking complex queries into steps, and reusing subquery results.
 
-### Easy (10)
+10. **How do you safely interpolate user input in SQL?**
+    A: Use parameterized queries. Never concatenate user input into SQL strings. In JPA use `:param` with @Param. In JDBC use PreparedStatement placeholders.
 
-1. What is the difference between WHERE and HAVING?
-2. Explain the difference between INNER JOIN and LEFT JOIN.
-3. What is a PRIMARY KEY?
-4. What does NULL mean in SQL?
-5. Explain the difference between UNION and UNION ALL.
-6. What is a foreign key constraint?
-7. How do you count rows in a table?
-8. What is the difference between DELETE and TRUNCATE?
-9. Explain LIKE and its wildcard characters.
-10. What is the purpose of DISTINCT?
+## Developer Recommendations
 
-### Medium (10)
+- **Always use explicit column lists instead of SELECT *** — `SELECT *` reads all columns, increasing I/O, network transfer, and memory. Changes to schema with `SELECT *` may break application code. Explicit columns enable index-only scans.
 
-11. Write a query to find duplicate email addresses in a users table.
-12. Explain the difference between `WHERE` and `ON` in a JOIN.
-13. What is a correlated subquery? Give an example.
-14. How would you paginate results in SQL? Write the syntax.
-15. What is the difference between CHAR and VARCHAR?
-16. Write a query to find the nth highest salary.
-17. Explain GROUP BY and why non-aggregated columns must appear in it.
-18. What is a self-join? When would you use it?
-19. What is the difference between `HAVING COUNT(*) > 1` and putting the condition in WHERE?
-20. How does NULL behave with aggregate functions like COUNT, SUM, AVG?
+- **Prefer JOINs over correlated subqueries** — Correlated subqueries execute once per outer row (O(n × m)). A JOIN with GROUP BY does the same work in a single pass. Exception: when the subquery returns a single row and the filter is highly selective.
 
-## 11. Advanced Interview Questions (20)
+- **Use keyset pagination instead of OFFSET for deep pages** — OFFSET 100000 reads 100K rows internally. Keyset pagination uses a WHERE clause on the last-seen cursor for constant time. Trade-off: requires a unique sort column and cannot jump to arbitrary pages.
 
-### Hard (10)
+- **Batch DML operations in transactions** — Each individual DML outside a transaction issues an implicit commit. Batching 1000 rows in a single transaction improves throughput 10-100x. In JPA, configure `hibernate.jdbc.batch_size`.
 
-1. Write a recursive CTE to generate a date range or traverse a tree.
-2. Explain the difference between `EXISTS` and `IN` with a subquery. When is each faster?
-3. How do you implement intersection in a database that doesn't support INTERSECT?
-4. What is a window function? Write a query with ROW_NUMBER() and RANK().
-5. How would you implement a pivot in SQL (rows to columns)?
-6. Explain the difference between CROSS APPLY and INNER JOIN (SQL Server).
-7. Write a query to find gaps in a sequence of numbers.
-8. What is the difference between `WITH TIES` and `WITHOUT TIES` in ORDER BY?
-9. How does the MERGE (UPSERT) statement work? Write an example.
-10. Explain SQL injection and demonstrate safe parameterized query patterns.
+- **Avoid functions on indexed columns in WHERE clauses** — `WHERE YEAR(date) = 2024` prevents index usage. Use `WHERE date >= '2024-01-01' AND date < '2025-01-01'`. For LOWER(), create a functional index.
 
-### System Design (10)
+- **Use DISTINCT sparingly** — DISTINCT often masks a missing JOIN condition creating a Cartesian product. Verify JOIN correctness before adding DISTINCT.
 
-11. Design a database schema for a URL shortener.
-12. Design the schema for a social media feed with likes and comments.
-13. How would you store hierarchical data (org chart, tree) in SQL?
-14. Design a multi-tenant database schema (shared vs isolated approaches).
-15. Design the schema for a booking system with availability checking.
-16. How would you implement a queue using SQL tables?
-17. Design a schema for an e-commerce product catalog with varying attributes.
-18. How would you design a rate-limiting system using a relational database?
-19. Design the schema for a chat/messaging application.
-20. How would you implement full-text search with SQL (without external search engines)?
-
-## 12. Expert-Level Interview Questions (10)
-
-1. You have a table with 500 million rows. How do you add a new column with a default value without downtime?
-2. Describe how you would migrate from a monolithic database to microservice-owned databases.
-3. How do you implement a distributed transaction across multiple databases without 2PC?
-4. Design a change-data-capture (CDC) system using triggers, audit tables, or logical replication.
-5. How would you implement optimistic offline locking in a REST API backed by SQL?
-6. Design a multi-region active-active database topology with conflict resolution.
-7. How do you handle schema migrations in a zero-downtime deployment pipeline?
-8. Describe the internals of how a B-tree maintains balance during concurrent inserts.
-9. Design a system to generate globally unique, time-sortable IDs (like Snowflake) using SQL sequences.
-10. How would you detect and resolve deadlocks in a high-throughput transaction processing system?
-
-## 13. Debugging & Troubleshooting
-
-### Common Issues and Diagnostics
-
-```sql
--- Find long-running queries
-SELECT pid, now() - pg_stat_activity.query_start AS duration, query, state
-FROM pg_stat_activity
-WHERE state != 'idle'
-ORDER BY duration DESC;
-
--- Check for blocking locks
-SELECT blocked_locks.pid AS blocked_pid,
-       blocking_locks.pid AS blocking_pid,
-       blocked_activity.query AS blocked_query,
-       blocking_activity.query AS blocking_query
-FROM pg_locks blocked_locks
-JOIN pg_locks blocking_locks ON blocked_locks.locktype = blocking_locks.locktype
-JOIN pg_stat_activity blocked_activity ON blocked_locks.pid = blocked_activity.pid
-JOIN pg_stat_activity blocking_activity ON blocking_locks.pid = blocking_activity.pid
-WHERE NOT blocked_locks.granted;
-
--- MySQL SHOW PROCESSLIST equivalent
-SHOW FULL PROCESSLIST;
-```
-
-### JPA/Hibernate Debugging
-
-```yaml
-# application.yml
-logging:
-  level:
-    org.hibernate.SQL: DEBUG
-    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
-    org.springframework.transaction: TRACE
-```
-
-## 14. Comparison Section
-
-| Feature | SQL | NoSQL (MongoDB) |
-|---------|-----|-----------------|
-| Schema | Fixed (relational) | Flexible (document) |
-| Joins | Native | $lookup (aggregation) |
-| Transactions | ACID | Limited (multi-doc) |
-| Scaling | Vertical (sharding complex) | Horizontal (native) |
-| Query | Declarative (SQL) | JSON-based API |
-| Consistency | Strong | Tunable (eventual) |
-| Best for | Complex relationships, reporting | High volume, rapid iteration |
-
-| Statement | DDL vs DML vs DCL |
-|-----------|-------------------|
-| CREATE, ALTER, DROP | DDL (changes structure) |
-| SELECT, INSERT, UPDATE, DELETE | DML (manages data) |
-| GRANT, REVOKE | DCL (controls access) |
-
-## 15. Revision Notes
-
-- SQL is declarative; the optimizer decides HOW to execute
-- Logical order: FROM -> WHERE -> GROUP BY -> HAVING -> SELECT -> ORDER BY
-- NULL is unknown; use IS NULL/IS NOT NULL, never = NULL
-- Always parameterize queries to prevent SQL injection
-- Understand the difference between JOIN types: INNER, LEFT, RIGHT, FULL, CROSS, SEMI
-- Window functions (ROW_NUMBER, RANK, DENSE_RANK, LAG, LEAD) are powerful for analytics
-- CTEs improve readability; recursive CTEs traverse hierarchies
-- DISTINCT is not a free operation — it causes a sort or hash
-- Indexes speed up reads but slow down writes
-- Use EXPLAIN ANALYZE to understand query performance
-
-## 16. Cheat Sheet
-
-```
-+-------------------------------------------------------------------+
-|                        SQL CHEAT SHEET                            |
-+-------------------------------------------------------------------+
-|                                                                   |
-|  SELECT [DISTINCT] columns                                        |
-|  FROM table                                                       |
-|  [JOIN other ON condition]                                        |
-|  [WHERE condition]                                                |
-|  [GROUP BY columns]                                               |
-|  [HAVING condition]                                               |
-|  [ORDER BY columns [ASC|DESC]]                                    |
-|  [LIMIT n [OFFSET m]]                                             |
-|                                                                   |
-+-------------------------------------------------------------------+
-|  JOIN TYPES:                                                      |
-|                                                                   |
-|  INNER JOIN  -> Only matching rows                                |
-|  LEFT JOIN   -> All from left + matches from right                |
-|  RIGHT JOIN  -> All from right + matches from left                |
-|  FULL JOIN   -> All from both sides                               |
-|  CROSS JOIN  -> Cartesian product                                 |
-|  SEMI JOIN   -> Rows in left that have match in right (EXISTS)    |
-+-------------------------------------------------------------------+
-|  WINDOW FUNCTIONS:                                                |
-|                                                                   |
-|  ROW_NUMBER() OVER (PARTITION BY col ORDER BY col)                |
-|  RANK()       OVER (PARTITION BY col ORDER BY col)                |
-|  LAG(col, n)  OVER (ORDER BY col)                                 |
-|  LEAD(col, n) OVER (ORDER BY col)                                 |
-|  SUM(col)     OVER (PARTITION BY col ORDER BY col)                |
-+-------------------------------------------------------------------+
-|  AGGREGATE FUNCTIONS:                                             |
-|                                                                   |
-|  COUNT(*), COUNT(col)     -> number of rows/non-null               |
-|  SUM(col)                 -> total (ignores NULLs)                |
-|  AVG(col)                 -> average (ignores NULLs)              |
-|  MIN(col), MAX(col)       -> min/max value                        |
-|  STRING_AGG(col, delim)   -> concatenate values                   |
-+-------------------------------------------------------------------+
-|  DATA TYPES (COMMON):                                             |
-|                                                                   |
-|  Character:  CHAR(n), VARCHAR(n), TEXT                            |
-|  Numeric:    INTEGER, BIGINT, DECIMAL(p,s), FLOAT, DOUBLE         |
-|  Date/Time:  DATE, TIME, TIMESTAMP, TIMESTAMPTZ, INTERVAL         |
-|  Binary:     BYTEA, BLOB                                          |
-|  JSON:       JSON, JSONB (PostgreSQL)                             |
-+-------------------------------------------------------------------+
-|  CONSTRAINTS:                                                     |
-|                                                                   |
-|  PRIMARY KEY (col)          -> unique + not null                  |
-|  FOREIGN KEY (col) REFERENCES t(col) [ON DELETE CASCADE]          |
-|  UNIQUE (col)               -> all values distinct                |
-|  NOT NULL                   -> column cannot be NULL              |
-|  CHECK (condition)          -> row must satisfy condition         |
-|  DEFAULT value              -> default when not specified         |
-+-------------------------------------------------------------------+
-|  SET OPERATIONS:                                                  |
-|                                                                   |
-|  query1 UNION [ALL] query2   -> combine results (distinct/all)   |
-|  query1 INTERSECT query2      -> common rows                      |
-|  query1 EXCEPT query2         -> rows in q1 not in q2             |
-+-------------------------------------------------------------------+
-|  TRANSACTION CONTROL:                                             |
-|                                                                   |
-|  BEGIN / START TRANSACTION    -> start transaction                |
-|  COMMIT                       -> save changes                     |
-|  ROLLBACK                     -> undo changes                      |
-|  SAVEPOINT name               -> named rollback point             |
-+-------------------------------------------------------------------+
-|  CONDITIONAL EXPRESSIONS:                                         |
-|                                                                   |
-|  COALESCE(val1, val2, ...)  -> first non-NULL value               |
-|  NULLIF(a, b)               -> NULL if a = b, else a              |
-|  CASE WHEN c THEN r ELSE d END -> if-else logic                   |
-+-------------------------------------------------------------------+
+- **Handle NULLs explicitly in WHERE clauses** — `WHERE col NOT IN (1,2,3)` silently excludes rows where col IS NULL. Use `WHERE (col NOT IN (1,2,3) OR col IS NULL)`.

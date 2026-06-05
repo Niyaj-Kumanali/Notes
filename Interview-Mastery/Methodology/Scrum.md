@@ -1,18 +1,24 @@
-# Scrum Study Guide
+# Scrum
 
-## 1. Executive Summary
+---
 
-Scrum is a lightweight agile framework for developing, delivering, and sustaining complex products. Based on empiricism (transparency, inspection, adaptation), Scrum uses fixed-length iterations called sprints to deliver incremental value. It defines three roles (Product Owner, Scrum Master, Development Team), five events (Sprint, Sprint Planning, Daily Scrum, Sprint Review, Sprint Retrospective), and three artifacts (Product Backlog, Sprint Backlog, Increment). Scrum is the most widely adopted agile framework globally.
+## Overview
 
-## 2. Core Theory
+- **Definition:** Scrum is a lightweight agile framework for developing, delivering, and sustaining complex products. Based on empiricism (transparency, inspection, adaptation), it uses fixed-length iterations called sprints.
+- **Why It Exists:** Traditional project management fails for complex product development. Scrum provides a structured yet flexible framework that embraces uncertainty through iterative delivery, frequent inspection, and team self-organization.
+- **Key Concepts:** **Three Pillars** (Transparency, Inspection, Adaptation), **Three Roles** (PO, SM, Dev Team), **Five Events** (Sprint, Planning, Daily, Review, Retro), **Three Artifacts** (Product Backlog, Sprint Backlog, Increment), **Three Commitments** (Product Goal, Sprint Goal, Definition of Done).
 
-### 2.1 The Three Pillars of Scrum
+---
 
-- **Transparency**: Significant process aspects must be visible to those responsible
-- **Inspection**: Scrum artifacts must be inspected frequently for variances
-- **Adaptation**: Process must be adjusted quickly when deviations are detected
+## Core Concepts
 
-### 2.2 Scrum Values
+### The Three Pillars
+
+- **Transparency:** Process aspects visible to those responsible
+- **Inspection:** Artifacts inspected frequently for variances
+- **Adaptation:** Process adjusted quickly when deviations detected
+
+### Scrum Values
 
 | Value | Description |
 |-------|-------------|
@@ -22,54 +28,25 @@ Scrum is a lightweight agile framework for developing, delivering, and sustainin
 | Openness | Team is open about work and challenges |
 | Respect | Team members respect each other |
 
-### 2.3 Scrum Team Structure
+### Team Structure
 
 ```
-+====================================+
-|          SCRUM TEAM                |
-|  +-----------------------------+  |
-|  |   Product Owner (1)         |  |
-|  +-----------------------------+  |
-|  +-----------------------------+  |
-|  |   Scrum Master (1)          |  |
-|  +-----------------------------+  |
-|  +-----------------------------+  |
-|  |   Development Team (3-9)    |  |
-|  |   [Cross-functional]        |  |
-|  |   [Self-organizing]         |  |
-|  +-----------------------------+  |
-+====================================+
+Product Owner (1) — maximizes value, manages backlog
+Scrum Master (1) — coaches team, removes impediments
+Dev Team (3-9) — self-organizing, cross-functional
 ```
 
-## 3. Under-the-Hood Deep Dive
+### Five Events
 
-### 3.1 Sprint Cycle
+| Event | Timebox | Purpose |
+|-------|---------|---------|
+| **Sprint** | ≤ 1 month | Container for all other events |
+| **Sprint Planning** | max 4 hrs / 2wk | What + How for the sprint |
+| **Daily Scrum** | 15 min | Sync + plan next 24h |
+| **Sprint Review** | max 4 hrs / 2wk | Demo completed work, get feedback |
+| **Sprint Retrospective** | max 3 hrs / 2wk | Inspect + adapt team process |
 
-```
-Sprint Planning (max 4 hrs)
-       |
-       v
-Daily Standup (15 min, daily)
-       |
-       v
-Sprint Review (max 4 hrs, end)
-       |
-       v
-Sprint Retrospective (max 3 hrs, end)
-       |
-       v
-Next Sprint Planning
-```
-
-### 3.2 Sprint Length
-
-| Duration | Pros | Cons | Best For |
-|----------|------|------|----------|
-| 1 week | Fast feedback, easy planning | High overhead | Early stage, uncertain |
-| 2 weeks | Balance of predictability | Moderate overhead | Most teams |
-| 3-4 weeks | Longer to deliver | Slow feedback | Established products |
-
-### 3.3 Artifacts and Commitments
+### Artifacts & Commitments
 
 | Artifact | Commitment | Description |
 |----------|------------|-------------|
@@ -77,495 +54,148 @@ Next Sprint Planning
 | Sprint Backlog | Sprint Goal | Selected items + delivery plan |
 | Increment | Definition of Done | Usable product at sprint end |
 
-## 4. Production Code Examples
-
-### 4.1 Sprint Backlog Template
-
-```yaml
-sprint_backlog:
-  sprint_goal: "Implement user authentication system"
-  duration: "2 weeks"
-  team_members:
-    - name: "Alice"
-      capacity: 8
-    - name: "Bob"
-      capacity: 7
-    - name: "Charlie"
-      capacity: 10
-  total_capacity: 25
-
-  backlog_items:
-    - id: US-42
-      title: "User login with email/password"
-      points: 8
-      status: "In Progress"
-      owner: "Alice"
-      tasks:
-        - "Create login form"
-        - "Implement authentication API"
-        - "Write unit tests"
-        - "Add error handling"
-      acceptance_criteria:
-        - "User can login with email and password"
-        - "Invalid credentials show error message"
-        - "Session persists for 24 hours"
-
-    - id: US-43
-      title: "Password reset flow"
-      points: 5
-      status: "In Review"
-      owner: "Bob"
-      tasks:
-        - "Create reset password page"
-        - "Implement email notification"
-        - "Add rate limiting"
-
-    - id: TECH-7
-      title: "Upgrade auth library"
-      points: 3
-      status: "Done"
-      owner: "Charlie"
-```
-
-### 4.2 Burndown Chart Generator
-
-```python
-import matplotlib.pyplot as plt
-from datetime import datetime, timedelta
-
-def generate_burndown(sprint_days, total_points, daily_remaining):
-    dates = [datetime.now() + timedelta(days=i) for i in range(sprint_days)]
-    ideal_line = [total_points * (1 - i/sprint_days) for i in range(sprint_days)]
-
-    plt.figure(figsize=(10, 6))
-    plt.plot(dates, ideal_line, '--', label='Ideal', color='gray')
-    plt.plot(dates[:len(daily_remaining)], daily_remaining,
-             marker='o', label='Actual', color='blue')
-    plt.fill_between(dates[:len(daily_remaining)],
-                     daily_remaining, ideal_line[:len(daily_remaining)],
-                     alpha=0.3,
-                     color='red' if daily_remaining[-1] > ideal_line[-1] else 'green')
-    plt.title('Sprint Burndown Chart')
-    plt.xlabel('Date')
-    plt.ylabel('Remaining Points')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    return plt
-```
-
-### 4.3 Sprint Automation (GitHub Actions)
-
-```yaml
-name: Scrum Board Automation
-
-on:
-  pull_request:
-    types: [opened, closed, ready_for_review]
-
-jobs:
-  update-board:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Move to In Review
-        if: github.event.action == 'ready_for_review'
-        run: |
-          curl -X POST https://api.zenhub.com/p1/workspaces/.../repositories/.../issues/${{ github.event.pull_request.number }}/moves \
-            -H "X-Authentication-Token: ${{ secrets.ZENHUB_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d '{"pipeline_id": "in_review"}'
-
-      - name: Move to Done
-        if: github.event.action == 'closed' && github.event.pull_request.merged == true
-        run: |
-          curl -X POST https://api.zenhub.com/p1/workspaces/.../repositories/.../issues/${{ github.event.pull_request.number }}/moves \
-            -H "X-Authentication-Token: ${{ secrets.ZENHUB_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d '{"pipeline_id": "done"}'
-```
-
-### 4.4 Capacity Calculator
-
-```python
-def calculate_sprint_capacity(team_members, sprint_days, focus_factor=0.6):
-    total_capacity = 0
-    for member in team_members:
-        available = sprint_days - member['vacation_days'] - member['ceremony_days']
-        effective = available * focus_factor
-        total_capacity += effective
-        member['effective_capacity'] = effective
-
-    story_point_velocity = total_capacity * team_members[0]['points_per_day']
-
-    return {
-        'total_person_days': total_capacity,
-        'story_point_capacity': story_point_velocity,
-        'recommended_backlog': story_point_velocity * 0.8
-    }
-
-team = [
-    {'name': 'Alice', 'vacation_days': 0, 'ceremony_days': 2, 'points_per_day': 1.5},
-    {'name': 'Bob', 'vacation_days': 1, 'ceremony_days': 2, 'points_per_day': 1.2},
-    {'name': 'Charlie', 'vacation_days': 0, 'ceremony_days': 2, 'points_per_day': 1.8},
-]
-print(calculate_sprint_capacity(team, sprint_days=10))
-```
-
-## 5. Real-World Scenarios
-
-### 5.1 Rescue: Team Missing Sprint Goals
-
-Symptoms:
-- 3 consecutive incomplete sprints
-- Team morale declining
-- PO frustrated with predictability
-
-Diagnosis:
-1. Compare goals to historical velocity
-2. Check for unplanned work interruptions
-3. Review DoD strictness
-
-Recovery:
-1. Reduce sprint to 1 week temporarily
-2. Add 20% buffer in planning
-3. Enforce no mid-sprint changes
-4. Swarm on incomplete items
-
-### 5.2 Distributed Scrum Configuration
-
-```yaml
-distributed_team:
-  locations:
-    - city: "New York"
-      timezone: "EST (UTC-5)"
-      members: [Alice, Bob]
-    - city: "London"
-      timezone: "GMT (UTC+0)"
-      members: [Charlie, Diana]
-    - city: "Bangalore"
-      timezone: "IST (UTC+5:30)"
-      members: [Eve, Frank]
-
-  agreements:
-    core_hours: "14:00-18:00 UTC"
-    standup_time: "15:00 UTC"
-    async_updates: true
-    recording_policy: "All ceremonies recorded"
-```
-
-## 6. Performance
-
-### 6.1 Scrum Metrics
-
-```yaml
-metrics:
-  velocity:
-    description: "Points delivered per sprint"
-    target: "Stable or increasing trend"
-
-  sprint_goal_success_rate:
-    description: "% of sprints achieving goal"
-    target: "> 80%"
-
-  predictability:
-    description: "Planned vs actual variance"
-    target: "< 15% variance"
-
-  happiness_index:
-    description: "Team morale (1-5)"
-    target: "> 4.0"
-
-  escaped_defects:
-    description: "Bugs found in production"
-    target: "Decreasing"
-```
-
-### 6.2 Sprint Health Assessment
-
-```yaml
-sprint_health:
-  green:
-    - velocity consistent with historical
-    - sprint goal achieved
-    - no escaped defects
-    - happiness >= 4
-
-  yellow:
-    - velocity dropped >20%
-    - sprint goal partially missed
-    - minor defects escaped
-    - happiness 3-4
-
-  red:
-    - velocity dropped >40%
-    - sprint goal not achieved
-    - major defects
-    - happiness < 3
-```
-
-## 7. Security
-
-- Security stories in backlog with priority
-- Security review as part of DoD
-- Threat modeling in sprint planning
-- Penetration testing per release
-- Security champion in team
-
-## 8. Common Mistakes
-
-| Mistake | Impact | Solution |
-|---------|--------|----------|
-| No PO availability | Wrong priorities | PO accessible daily |
-| SM also develops | Conflict of interest | Dedicated SM |
-| Changing sprint scope | Loss of focus | Protect sprint goal |
-| No sprint goal | Aimless sprint | Define goal each sprint |
-| Missing retros | No improvement | Make mandatory |
-| Standup > 15 min | Waste | Focus on blockers |
-| Team too large/small | Inefficiency | 3-9 members |
-| No DoD | Technical debt | Create and enforce DoD |
-| No estimation history | Inaccurate | Track velocity |
-| No backlog refinement | Poor planning | 10% sprint time |
-
-## 9. Senior Engineer Perspective
-
-### 9.1 Scrum Master vs Project Manager
-
-| Activity | Scrum Master | Project Manager |
-|----------|-------------|-----------------|
-| Governance | Scrum rules | Budget, timeline |
-| Role | Servant leader | Manager |
-| Focus | Process improvement | Deliverable |
-| Decision making | Team-driven | Authority-driven |
-| Metrics | Velocity, happiness | Budget, schedule |
-
-### 9.2 When Not to Use Scrum
-
-- Maintenance-only teams (use Kanban)
-- Highly uncertain research (use XP/Lean Startup)
-- Regulated environments (adapt with compliance gates)
-- Very small teams (1-2 people need simpler approach)
-
-## 10. Interview Questions (Easy)
-
-1. What is Scrum?
-2. What are the three Scrum roles?
-3. What is a sprint?
-4. What is a product backlog?
-5. What is the daily standup?
-6. What is a sprint retrospective?
-7. What is the Definition of Done?
-8. What is a user story?
-9. What is sprint planning?
-10. Who owns the product backlog?
-
-## 10. Interview Questions (Medium)
-
-11. Scrum Master vs Product Owner?
-12. How to handle unfinished work at sprint end?
-13. Velocity vs capacity?
-14. How do you estimate work in Scrum?
-15. What happens when a team member is on vacation?
-16. Multiple teams on same product backlog?
-17. Sprint Goal and who defines it?
-18. PO changes requirements mid-sprint?
-19. Scrum vs SAFe?
-20. Measure Scrum team effectiveness?
-
-## 11. Advanced Interview Questions (Hard)
-
-1. Implement Scrum in safety-critical system (aviation, medical).
-2. Design Scrum-of-Scrums for 8 teams building one product.
-3. Handle technical debt without compromising features.
-4. Design early warning dashboard for sprint failure.
-5. Adapt Scrum for hardware + software product.
-6. Scrum adoption plan for 200-person org.
-7. Manage dependencies between Scrum teams.
-8. Cross-team retrospective insight sharing.
-9. Maintain quality under velocity pressure.
-10. Scrum Master rotation program.
-
-## 11. Advanced Interview Questions (System Design)
-
-11. Tool auto-generating retros from git, tickets, CI/CD data.
-12. Dependency visualization for multi-team Scrum.
-13. Capacity planning from historical Scrum data.
-14. Sprint planning optimization algorithm.
-15. Scrum Master AI assistant for team health.
-16. Cross-team impediment resolution system.
-17. Predictive sprint outcome model.
-18. Scrum training and certification platform.
-19. Real-time Scrum board for distributed teams.
-20. Enterprise release coordination with Scrum.
-
-## 12. Expert-Level Interview Questions (Architect)
-
-1. Design enterprise-wide Scrum transformation for 10,000-person financial institution with regulatory compliance, union contracts, 40-year legacy culture.
-
-2. Architect system auto-detecting Scrum anti-patterns across 500+ teams from repo data, communication patterns, delivery metrics.
-
-3. Design compensation system rewarding Scrum values (commitment, courage, focus, openness, respect) over individual heroics.
-
-4. Organization where C-suite operates using Scrum (OKRs as product goals, executive sprints, leadership retros).
-
-5. Framework blending Scrum with Kanban (ops), XP (engineering), Lean Startup (product discovery) into unified system.
-
-6. Contract model enabling true agile partnerships while satisfying procurement, legal, finance.
-
-7. Real-time org health monitoring using Scrum metrics to predict burnout, turnover, productivity decline.
-
-8. Physical/digital workspace for 1000-person Scrum org optimizing flow, collaboration, deep work.
-
-9. System auto-generating improvement experiments from retro insights across thousands of teams.
-
-10. Redesign education to teach Scrum from primary school through university, creating agile-native workers.
-
-## 13. Debugging & Troubleshooting
-
-### 13.1 Scrum Anti-Patterns
-
-| Anti-Pattern | Symptom | Solution |
-|-------------|---------|----------|
-| Zombie Scrum | Going through motions | Revisit Scrum values |
-| Water-Scrum-Fall | Agile ceremonies, waterfall mindset | True cross-functional teams |
-| ScrumBut | "We use Scrum but..." | Identify what to change |
-| Hero culture | Same person saves every sprint | Spread work, coach others |
-| Proxy PO | Delegate makes decisions | PO must be available |
-
-### 13.2 Sprint Recovery
-
-```yaml
-mid_sprint_intervention:
-  triggers:
-    - velocity < 50% of planned at midpoint
-    - critical blocker identified
-    - team member unavailable
-  actions:
-    - immediate: "Replan remaining work"
-    - short_term: "Remove lowest priority items"
-    - escalation: "Inform stakeholders of revised scope"
-```
-
-## 14. Comparison Section
-
-### Scrum vs Kanban
-
-| Aspect | Scrum | Kanban |
-|--------|-------|--------|
-| Cadence | Fixed sprints | Continuous |
-| Roles | SM, PO, Dev Team | None prescribed |
-| WIP Limits | Implicit (sprint scope) | Explicit |
-| Estimation | Required | Optional |
-| Changes | No mid-sprint | Anytime |
-| Metrics | Velocity, burndown | Cycle time, throughput |
-| Best for | Complex products | Support, operations |
-
-### Scrum vs XP
-
-| Aspect | Scrum | XP |
-|--------|-------|----|
-| Focus | Management process | Engineering practices |
-| Practices | Ceremonies, roles | TDD, pair programming, CI |
-| Planning | Sprint planning | Release planning |
-| Quality | DoD | Built-in quality practices |
-
-## 15. Revision Notes
-
-```
-SCRUM SUMMARY
-- Framework for complex product delivery
-- Based on empiricism (transparency, inspection, adaptation)
-- Iterative (sprints) and incremental (increment)
-
-THREE ROLES
-- Product Owner: What to build (value)
-- Scrum Master: How to work (process)
-- Dev Team: Build it (execution)
-
-FIVE EVENTS
-- Sprint (container, < 1 month)
-- Sprint Planning (what + how)
-- Daily Scrum (daily sync)
-- Sprint Review (inspect increment)
-- Retrospective (inspect process)
-
-THREE ARTIFACTS
-- Product Backlog (ordered, evolving)
-- Sprint Backlog (planned work)
-- Increment (usable product)
-
-THREE COMMITMENTS
-- Product Goal (backlog commitment)
-- Sprint Goal (sprint commitment)
-- Definition of Done (quality commitment)
-```
-
-## 16. Cheat Sheet
-
-```text
-+======================================================================+
-|                     SCRUM CHEAT SHEET                                |
-+======================================================================+
-
-  SCRUM FRAMEWORK
-+----------------------------------------------------------------------+
-| Roles:     Product Owner (1) | Scrum Master (1) | Dev Team (3-9)    |
-| Events:    Sprint | Planning | Daily Standup | Review | Retro       |
-| Artifacts: Product Backlog | Sprint Backlog | Increment             |
-| Commitments: Product Goal | Sprint Goal | Definition of Done       |
-+----------------------------------------------------------------------+
-
-  SPRINT PLANNING (max 4 hrs for 2-week sprint)
-+----------------------------------------------------------------------+
-| Part 1 (What): PO presents top backlog items, team selects           |
-| Part 2 (How): Team decomposes into tasks, estimates effort           |
-| Output: Sprint Goal + Sprint Backlog                                 |
-+----------------------------------------------------------------------+
-
-  DAILY SCRUM (15 min, same time/place)
-+----------------------------------------------------------------------+
-| Each team member answers:                                            |
-| 1. What did I do yesterday?                                          |
-| 2. What will I do today?                                             |
-| 3. What blockers are in my way?                                      |
-| NOT a status report - team sync                                      |
-+----------------------------------------------------------------------+
-
-  SPRINT REVIEW (max 4 hrs for 2-week sprint)
-+----------------------------------------------------------------------+
-| Team demos completed work to stakeholders                            |
-| PO discusses what's done and what's not                              |
-| Stakeholders give feedback                                           |
-| Backlog adjusted based on feedback                                   |
-+----------------------------------------------------------------------+
-
-  SPRINT RETROSPECTIVE (max 3 hrs for 2-week sprint)
-+----------------------------------------------------------------------+
-| Format: Start-Stop-Continue | Sailboat | Mad-Sad-Glad                |
-| Focus: What went well? What could improve? Action items             |
-| Rule: Blameless, psychological safety required                       |
-| Output: At least one actionable improvement                          |
-+----------------------------------------------------------------------+
-
-  DEFINITION OF DONE (Example)
-+----------------------------------------------------------------------+
-| [ ] Code peer reviewed                                               |
-| [ ] All tests pass (unit, integration, E2E)                          |
-| [ ] Code coverage >= 80%                                             |
-| [ ] Acceptance criteria verified                                     |
-| [ ] No known P0/P1 defects                                           |
-| [ ] Deployed to staging                                              |
-| [ ] Smoke tests pass                                                 |
-| [ ] Documentation updated                                            |
-| [ ] PO approval                                                      |
-+----------------------------------------------------------------------+
-
-+======================================================================+
-|  PRO TIPS: Sprint Goal is the most important output.                 |
-|  Removing impediments is Scrum Master's #1 job.                     |
-|  Protect team from interruptions during sprint.                     |
-|  Retros must produce actionable outcomes.                           |
-|  Self-organization requires trust from management.                  |
-|  Done means DONE - releasable, usable, valuable.                    |
-+======================================================================+
-```
+### Sprint Length Trade-offs
+
+| Duration | Pros | Cons | Best For |
+|----------|------|------|----------|
+| 1 week | Fast feedback, easy planning | High overhead | Early stage, uncertain |
+| 2 weeks | Balance of predictability | Moderate overhead | Most teams |
+| 3-4 weeks | Longer to deliver | Slow feedback | Established products |
+
+### Key Metrics
+
+- **Velocity:** Points delivered per sprint (trend matters, not value)
+- **Sprint Goal Success Rate:** % of sprints achieving goal (> 80% target)
+- **Predictability:** Planned vs actual variance (< 15% target)
+- **Happiness Index:** Team morale 1-5 (> 4.0 target)
+- **Escaped Defects:** Bugs found in production (decreasing trend)
+
+---
+
+## Common Mistakes
+
+- **No PO availability** — Wrong priorities; PO accessible daily required
+- **SM also develops** — Conflict of interest; dedicated SM needed
+- **Changing sprint scope** — Loss of focus; protect sprint goal
+- **No sprint goal** — Aimless sprint; define goal each sprint
+- **Missing retros** — No improvement; make mandatory
+- **Standup > 15 min** — Waste; focus on blockers
+- **Team too large/small** — Inefficiency; 3-9 members
+- **No DoD** — Technical debt; create and enforce DoD
+- **No estimation history** — Inaccurate; track velocity
+- **No backlog refinement** — Poor planning; 10% sprint time
+- **Zombie Scrum** — Going through motions; revisit Scrum values
+- **Water-Scrum-Fall** — Agile ceremonies, waterfall mindset; true cross-functional teams
+- **Hero culture** — Same person saves every sprint; spread work, coach others
+- **Proxy PO** — Delegate makes decisions; PO must be available
+
+---
+
+## Key Design Considerations
+
+- **Scrum Master vs Project Manager:** SM is servant leader focused on process; PM manages budget, timeline. One person cannot do both.
+- **When not to use Scrum:** Maintenance-only teams (use Kanban), highly uncertain research (use XP/Lean Startup), very small teams (1-2 people)
+- **Distributed Scrum:** Core hours overlap, async updates, recorded ceremonies, rotate meeting times
+- **Scaling:** Scrum-of-Scrums for multi-team coordination; Nexus (3-9 teams on same product), LeSS (3-8 teams), SAFe (enterprise)
+- **Sprint Health Assessment:** Green (consistent velocity, goal achieved, no defects, happiness ≥ 4), Yellow (velocity drop > 20%, partial goal, minor defects), Red (velocity drop > 40%, goal missed, major defects)
+
+---
+
+## Real-World Scenarios
+
+### Scenario 1: ScrumBut — Skipping Retros, No PO Availability
+A team claims to use Scrum but the PO is never available for backlog refinement, the SM is also a developer, and retros were cancelled 6 months ago. Sprint goals are rarely met, and the team feels like they're in a "feature factory." **Diagnosis:** This is Zombie Scrum — going through ceremonies without the mindset. **Fix:** Dedicated SM (no development work), PO must attend planning/refinement/review weekly, reinstate retros with a strict action-item tracking system. Coach the team on the "why" behind each Scrum event.
+
+### Scenario 2: Twenty-Person Scrum Team
+Twenty developers are in a single Scrum team. Standups take 45 minutes, sprint planning takes 8 hours, and communication overhead is crippling. **Fix:** Split into three feature-aligned Scrum teams (6-7 members each). Each team has its own backlog and sprint goal but shares a common Product Goal. Use a Scrum-of-Scrums for cross-team coordination (3 representatives, 3 times a week, 15 minutes). One PO works with three APIOs (Associate POs) per team.
+
+### Scenario 3: Sprint Reviews Nobody Attends
+The team holds sprint reviews on Friday at 4 PM. Stakeholders rarely attend. When they do, they give vague feedback ("looks good"). The team feels demotivated. **Fix:** Move the review to Tuesday at 10 AM. Invite stakeholders individually (not a blanket calendar invite). Prepare a structured demo: show one working feature, share metrics (velocity, quality, customer feedback), then ask specific questions ("Would this feature solve your problem? What's missing?"). Record sessions for absent stakeholders.
+
+---
+
+## Scenario-Based Questions
+
+1. **Q: You are a Scrum Master for a team where the PO treats the team as "resources" and assigns individual tasks. The team is demotivated and self-organization is dead. How do you restore Scrum?**
+   A: Coach the PO on the difference between "commanded" and "self-organizing" teams. Explain that the Dev Team commits to the Sprint Goal, not individual tasks. Introduce swarm-based commitment: the team collectively owns all items. If coaching fails, facilitate a retro where the team shares how the assignment model affects them. Escalate to management with data: task-assigned teams have 30% lower velocity and 50% higher turnover.
+
+2. **Q: Your team's sprint reviews are poorly attended (2 of 10 stakeholders show up). Those who attend give vague feedback. The team feels they're demoing to an empty room. How do you fix this?**
+   A: Change the format and timing. (1) Move reviews to Tuesday/Wednesday at 10 AM — avoid Monday/Friday. (2) Send personalized invitations with a 1-line teaser of what will be demoed. (3) Shorten the demo to 15 minutes — show one working feature end-to-end. (4) Ask specific questions: "Does this solve your problem? What's missing?" (5) Record and share a 5-min video for absent stakeholders, asking for async feedback by Thursday.
+
+3. **Q: The team's velocity has been flat for 8 sprints despite the team growing from 5 to 8 members. What's happening and how do you diagnose?**
+   A: Brooks' Law — adding people to a late project makes it later. The new members need onboarding, create communication overhead, and the existing team spends time ramping them up. Diagnose: (1) Check sprint-by-sprint story completion. (2) Survey the team on productivity blockers. (3) Look at cycle time — it may have increased. Fix: improve onboarding, pair new members, ensure clear interfaces between work areas. Consider splitting into two teams.
+
+4. **Q: Management wants 2-week sprints, but the team works on a safety-critical medical device where every change requires regulatory review. Sprints end but releases take 3 months. How do you adapt Scrum?**
+   A: Use Scrum for development (2-week sprints for building features) but accept that releases follow a separate regulatory cadence. Create a "release train" — accumulated increments are submitted for regulatory review together. The Definition of Done includes all regulatory documentation and verification. Track "lead time" (idea to patient) separately from sprint delivery. This is not Water-Scrum-Fall — it's Scrum in a regulated context.
+
+5. **Q: A senior stakeholder often attends the Daily Scrum and asks detailed technical questions, turning it into a 30-minute status meeting. The team is afraid to ask her to leave. What do you do as SM?**
+   A: First, talk to the stakeholder privately: "The Daily Scrum is for the team to synchronize, not for status updates. Your attendance makes the team feel they're reporting to you." Offer an alternative: a 15-min weekly sync where you brief her. If she insists on attending, establish a ground rule: stakeholders listen only, speak only after the 15-min timebox. Put a timer visibly on the table. If necessary, physically move the standup to a location the stakeholder can't easily access.
+
+6. **Q: The team uses Scrum but the Sprint Backlog is never updated after planning. Stories stay "To Do" the whole sprint and on the last day they all move to "Done." What's missing?**
+   A: The team isn't using the Sprint Backlog as a living plan. Fix: (1) Visualize work with a physical or digital board updated daily. (2) Break stories into tasks (hours or smaller units). (3) In the Daily Scrum, reference the board — "I'm working on task X in story Y." (4) Use a burn-down chart visible to the team. (5) The SM should ask "what changed on the board today?" not "what did you do?"
+
+7. **Q: Two Scrum teams on the same product keep stepping on each other — modifying the same files, causing merge conflicts, and breaking each other's features. How do you coordinate?**
+   A: The teams lack architectural boundaries. Fix: (1) Define clear module ownership — each team owns specific components. (2) Establish API contracts between modules. (3) Implement CI that runs both teams' tests. (4) Have a weekly cross-team alignment meeting (Scrum-of-Scrums). (5) If conflict persists, merge into one team or restructure teams by feature vertical (not technical layer).
+
+8. **Q: A team member consistently delivers low-quality work — no tests, no documentation, frequent production bugs. The team is frustrated but avoids confrontation. How does the SM handle this?**
+   A: Privately coach the individual first: "I noticed some issues with the last few stories. Let's pair on the next one to see how we can improve." If no improvement, make quality a team conversation in retro, not personal criticism: "Our escaped defect rate went up. What can we change in our process?" Enforce the Definition of Done strictly — the team should not accept stories that don't meet DoD. If all fails, escalate to management with specific evidence (failed builds, production incidents).
+
+9. **Q: The product has 10 microservices. The team has 5 developers, and each sprint they must touch all 10 services to ship a feature. Sprints are chaotic. How do you structure the work?**
+   A: The team is a "feature team" touching too many surfaces. Fix: (1) Reduce scope — each sprint, focus changes to at most 3 services. (2) Create release trains for multi-service features across sprints. (3) If the product truly requires touching all 10 services per feature, the architecture is wrong — consolidate services. (4) Consider monorepo with shared CI to reduce cross-service overhead. (5) The PO should break features into smaller MVPs that affect fewer services.
+
+10. **Q: The team consistently over-commits and under-delivers. They're optimistic but demoralized when they fail the sprint goal every sprint. How do you improve forecasting?**
+    A: This is the "planning fallacy" — humans underestimate effort. Fix: (1) Use historical velocity as a hard ceiling for commitment, not a target. (2) Apply "reference class forecasting" — compare new work to similar past work. (3) Add a 30% buffer for unknowns. (4) Break large stories (< 8 points) into smaller ones. (5) After the sprint, do a "commitment vs delivery" analysis in retro. Celebrate when the team commits less but delivers fully — it builds confidence, not cynicism.
+
+---
+
+## Interview Questions
+
+1. **What are the three pillars of Scrum?**
+   A: Transparency (process visible), Inspection (artifacts inspected often), Adaptation (process adjusted when needed).
+
+2. **What are the five Scrum events?**
+   A: Sprint, Sprint Planning, Daily Scrum, Sprint Review, Sprint Retrospective. The Sprint is a container for all others.
+
+3. **What is the product backlog and who owns it?**
+   A: An ordered list of everything needed for the product. Owned by the Product Owner, who prioritizes and refines it continuously.
+
+4. **What is the Sprint Goal?**
+   A: A single objective for the sprint that unifies the selected backlog items. It answers "why are we doing this sprint?" and guides decision-making when priorities shift.
+
+5. **What is the difference between the Sprint Review and the Sprint Retrospective?**
+   A: Sprint Review inspects the product (what was built) with stakeholders. Sprint Retrospective inspects the process (how the team works) — team only.
+
+6. **What is a product increment?**
+   A: A usable, potentially releasable product at the end of each sprint. Each increment is additive to all previous increments.
+
+7. **What happens if a developer is blocked during a sprint?**
+   A: They raise it in the Daily Scrum. The SM removes impediments. If the impediment can't be resolved quickly, the team swarms to help or the blocked story is swapped out.
+
+8. **Who estimates work in Scrum?**
+   A: The Development Team — they will do the work, so they estimate. The PO provides context; the SM facilitates.
+
+9. **What is the Definition of Done?**
+   A: A checklist of criteria that must be met for work to be considered complete. It ensures quality and is agreed upon by the team, not imposed externally.
+
+10. **What is the recommended size of a Scrum team?**
+    A: 3-9 development team members. Smaller teams may lack cross-functionality; larger teams suffer from communication overhead and reduced collaboration.
+
+---
+
+## Developer Recommendations
+
+- **The Sprint Goal is the team's north star** — Without a clear Sprint Goal, the team just works through a task list. The goal enables the team to make decisions autonomously when unexpected work arises. Trade-off: defining a meaningful goal takes time during planning. Benefit: the team has direction, motivation, and a clear "done" criterion.
+
+- **Invest in backlog refinement as much as sprint execution** — Poorly refined backlog items lead to planning surprises and incomplete sprints. Dedicate 10% of sprint capacity to refinement. Trade-off: less time for delivery. Benefit: sprint planning becomes predictable (no surprises), and the team can estimate accurately.
+
+- **The Daily Scrum is for the team, not management** — Anyone can attend but only the team speaks. It synchronizes, identifies blockers, and re-plans the next 24 hours. Trade-off: 15 min/day of synchronized time. Benefit: prevents the "I didn't know you were blocked" problem that wastes days.
+
+- **Retros are the engine of continuous improvement** — Without action-oriented retros, the team repeats the same mistakes. Each retro must produce at least one SMART action item with an owner. Trade-off: 60-90 min per sprint. Benefit: compounding improvement — 1% better each sprint is 67% improvement in a year.
+
+- **The PO must be accessible daily** — A part-time or unavailable PO creates waste: the team builds the wrong things, blocks on decisions, or proceeds without clarity. Trade-off: the PO's full attention is expensive. Benefit: the team never waits for decisions and builds the right features.
+
+- **Enforce the Definition of DoD, not sprint scope** — Quality is non-negotiable. If the team can't finish all items within quality standards, deliver fewer items at high quality rather than more items with technical debt. Trade-off: lower velocity initially. Benefit: sustained velocity without quality-related slowdowns.
+
+- **Smaller teams are better** — 4-6 person teams outperform 8-10 person teams in communication efficiency, decision-making speed, and cohesion. Trade-off: fewer people per team means more teams to manage. Benefit: less overhead, more time building.
+
+- **Use Scrum, don't let Scrum use you** — Adapt the framework to your context. A 1-week sprint for a medical device team may not work. A team doing research might skip the Sprint Review if there's nothing to demo. Trade-off: too much adaptation erodes Scrum benefits. Benefit: context-appropriate practices that the team actually follows.

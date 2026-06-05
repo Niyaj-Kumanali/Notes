@@ -1,717 +1,199 @@
 # Distributed Tracing
 
-## 1. Executive Summary
+---
 
-Distributed tracing is an observability technique that tracks requests as they flow through multiple services in a distributed system. Each request is assigned a unique trace ID that is propagated across service boundaries. Individual units of work (spans) are collected from each service and assembled into a complete trace, providing end-to-end visibility into request flow, latency breakdown, and error propagation. Distributed tracing is essential for debugging performance issues and understanding system behavior in microservices architectures.
+## Overview
 
-## 2. Core Theory
+- **Definition:** Distributed tracing tracks requests as they flow through multiple services in a distributed system by assigning each request a unique trace ID propagated across service boundaries.
+- **Why It Exists:** In microservices, a single request crosses many services. Without tracing, you cannot see end-to-end latency, identify which service is slow, or understand error propagation.
+- **Key Concepts:** **Trace** (complete path of a request, a tree of spans), **Span** (named, timed unit of work with span ID, parent span ID, trace ID), **Context Propagation** (passing trace context via HTTP headers or message metadata), **Sampling** (capturing only a fraction of traces to control cost).
 
-### Key Concepts
+---
 
-**Trace:** The complete path of a single request as it travels through the distributed system. A trace is a tree of spans.
+## Core Concepts
 
-**Span:** A named, timed operation representing a unit of work. Contains:
-- Span ID (unique within trace)
-- Parent span ID (for tree structure)
-- Trace ID (shared across all spans)
-- Operation name
-- Start and end timestamps
-- Tags/attributes (key-value metadata)
-- Status (OK/ERROR)
-- Events (log statements with timestamps)
-
-**Context Propagation:** The mechanism by which trace context (trace ID, span ID) is passed from one service to another, typically via HTTP headers or message metadata.
-
-### Trace Structure
-
-```
-Trace: "Order Request"
-  |
-  +-- Span: "API Gateway" (duration: 50ms)
-       |
-       +-- Span: "Authenticate" (duration: 10ms, parent: API Gateway)
-       |
-       +-- Span: "Create Order" (duration: 35ms, parent: API Gateway)
-            |
-            +-- Span: "Reserve Inventory" (duration: 15ms, parent: Create Order)
-            |
-            +-- Span: "Process Payment" (duration: 20ms, parent: Create Order)
-```
-
-## 3. Under-the-Hood Deep Dive
-
-### OpenTelemetry Architecture
-
-OpenTelemetry is the industry standard for distributed tracing, combining OpenTracing and OpenCensus.
-
-```
-[Application] -> [OpenTelemetry SDK] -> [Exporter] -> [Backend (Jaeger/Zipkin)]
-     |                    |                  |               |
- Instrumentation     Context       BatchSpanProcessor     Storage + UI
-  via API or      Propagation      (async, batched)
-  auto-inject
-```
-
-### Context Propagation Headers
-
-**W3C TraceContext (standard):**
-- `traceparent`: Format: `00-traceId-spanId-traceFlags`
-- `tracestate`: Vendor-specific trace data
-
-**Example:**
-```
-traceparent: 00-0af7651916cd43dd8448eb211c80319c-00f067aa0ba902b7-01
-             |  |______________________________| |________________| |
-             |                   |                       |         |
-           Version           Trace Id               Span Id     Flags
-```
-
-### Sampling Strategies
-
-1. **Head-based**: Decision at the start of the trace. Simple, but may miss interesting events.
-2. **Tail-based**: Keep all traces, decide later. More resource intensive.
-3. **Probabilistic**: Random sampling (e.g., 1% of traces).
-4. **Rate-limiting**: Fixed number of traces per second.
-5. **Adaptive**: Adjust sampling rate based on system state (increase during errors).
-
-## 4. Production Code Examples
-
-### OpenTelemetry with Spring Boot
+- **OpenTelemetry:** Industry standard combining OpenTracing and OpenCensus. Provides API, SDK, auto-instrumentation, and exporter (OTLP protocol) to backends like Jaeger or Zipkin.
+- **W3C TraceContext:** Standard header format: `traceparent: 00-{traceId}-{spanId}-{flags}`. Ensures interoperability across different tracing systems.
+- **Sampling Strategies:** **Head-based** (decision at trace start — simple, may miss errors), **Tail-based** (keep all, decide later — captures all errors, more resource intensive), **Probabilistic** (random %), **Rate-limiting** (fixed traces/sec).
+- **SpanKind:** CLIENT (outgoing call), SERVER (incoming), INTERNAL (internal op), PRODUCER/CONSUMER (messaging).
 
 ```java
-@Configuration
-public class TracingConfig {
-
-    @Bean
-    public OpenTelemetry openTelemetry() {
-        // Configure OTLP exporter to send to Jaeger/collector
-        OtlpGrpcSpanExporter spanExporter = OtlpGrpcSpanExporter.builder()
-            .setEndpoint("http://jaeger:4317")
-            .setCompression("gzip")
-            .setTimeout(Duration.ofSeconds(30))
-            .build();
-
-        SdkTracerProvider tracerProvider = SdkTracerProvider.builder()
-            .setResource(Resource.getDefault()
-                .toBuilder()
-                .put(ResourceAttributes.SERVICE_NAME, "order-service")
-                .put(ResourceAttributes.DEPLOYMENT_ENVIRONMENT, "production")
-                .build())
-            .addSpanProcessor(BatchSpanProcessor.builder(spanExporter)
-                .setMaxQueueSize(2048)
-                .setMaxExportBatchSize(512)
-                .setScheduleDelay(Duration.ofMillis(5000))
-                .build())
-            .setSampler(Sampler.traceIdRatioBased(0.1)) // 10% sampling
-            .build();
-
-        return OpenTelemetrySdk.builder()
-            .setTracerProvider(tracerProvider)
-            .setPropagators(ContextPropagators.create(
-                W3CTraceContextPropagator.getInstance()))
-            .build();
-    }
-
-    @Bean
-    public Tracer tracer(OpenTelemetry openTelemetry) {
-        return openTelemetry.getTracer("com.example.order");
-    }
-}
+// Manual span creation
+Span span = tracer.spanBuilder("createOrder")
+    .setSpanKind(SpanKind.SERVER)
+    .setAttribute("user.id", request.getUserId())
+    .startSpan();
+try (Scope scope = span.makeCurrent()) {
+    Order order = new Order(request);
+    reserveInventory(order);
+    span.setStatus(StatusCode.OK);
+    return order;
+} catch (Exception e) {
+    span.recordException(e);
+    span.setStatus(StatusCode.ERROR);
+    throw e;
+} finally { span.end(); }
 ```
 
-### Manual Instrumentation with OpenTelemetry
+---
+
+## Common Mistakes
+
+- **No Sampling** — Capturing every trace creates massive data volume and cost. Use 1-10% sampling in production.
+- **Too Many Spans** — Every method call as a span creates noise. Focus on service boundaries and significant operations.
+- **No Context Propagation** — Tracing breaks when context isn't passed to async threads or message queues.
+- **Missing Error Attributes** — Errors without exception details in spans are impossible to diagnose.
+
+---
+
+## Key Design Considerations
+
+- **Auto-Instrumentation** — Use OpenTelemetry Java agent for zero-code tracing of HTTP, JDBC, Kafka, gRPC, Redis, etc. Covers most common libraries.
+- **Trace-Log Correlation** — Include `trace_id` and `span_id` in log MDC. Query logs by trace ID to correlate with traces.
+- **Trace-Based SLOs** — Define SLOs like "95% of checkout traces complete within 2s." Monitor compliance over rolling windows.
+- **Sampling for Errors** — Tail-based sampling keeps 100% of ERROR traces while sampling normal ones, ensuring no errors are missed.
+- **Multi-Signal Observability** — Combine traces, logs, and metrics with common labels (trace_id, service, environment) for unified debugging.
+
+---
+
+## Real-World Scenarios
+
+### Scenario 1: Debugging a Slow Order Checkout
+**Context:** Users report that checkout takes 5+ seconds intermittently. The order service calls inventory, payment, and shipping services. No one knows which service is slow or why.
+
+**Resolution:** Implement distributed tracing with OpenTelemetry. Auto-instrument all services (HTTP, database, messaging). Each checkout request gets a unique trace ID. Tracing reveals that the payment service's database query (`SELECT ... FROM transactions WHERE user_id = ?`) has a missing index and takes 3 seconds for users with many transactions. The trace shows the exact span causing the slowdown.
 
 ```java
+// Auto-instrumentation — zero code changes needed
+// Add OpenTelemetry Java agent to JVM args:
+// -javaagent:opentelemetry-javaagent.jar
+
+// Manual span creation for custom business logic
 @Service
-public class OrderService {
-
+public class CheckoutService {
     private final Tracer tracer;
 
-    public OrderService(Tracer tracer) {
-        this.tracer = tracer;
-    }
-
-    public Order createOrder(CreateOrderRequest request) {
-        // Create a span for the order creation operation
-        Span span = tracer.spanBuilder("createOrder")
-            .setSpanKind(SpanKind.SERVER)
+    public Order checkout(CheckoutRequest request) {
+        Span span = tracer.spanBuilder("checkout")
             .setAttribute("user.id", request.getUserId())
-            .setAttribute("order.items", request.getItems().size())
+            .setAttribute("order.total", request.getTotal().toString())
             .startSpan();
-
-        // Put span in context
         try (Scope scope = span.makeCurrent()) {
-            // Business logic
-            Order order = new Order(request);
-
-            // Call inventory service with propagated context
-            reserveInventory(order, request.getItems());
-
-            // Call payment service with propagated context
-            processPayment(order);
-
+            validateInventory(request.getItems());  // Automatically traced
+            Order order = createOrder(request);
             span.setStatus(StatusCode.OK);
-            span.setAttribute("order.id", order.getId());
-            span.setAttribute("order.total", order.getTotalAmount().doubleValue());
-
             return order;
         } catch (Exception e) {
             span.recordException(e);
             span.setStatus(StatusCode.ERROR, e.getMessage());
             throw e;
-        } finally {
-            span.end(); // Always end the span
-        }
-    }
-
-    private void reserveInventory(Order order, List<OrderItem> items) {
-        Span span = tracer.spanBuilder("reserveInventory")
-            .setSpanKind(SpanKind.CLIENT)
-            .setAttribute("items.count", items.size())
-            .startSpan();
-
-        try (Scope scope = span.makeCurrent()) {
-            // HTTP call to inventory service
-            // OpenTelemetry propagates context via HTTP headers automatically
-            inventoryClient.reserve(order.getId(), items);
-            span.setStatus(StatusCode.OK);
-        } catch (Exception e) {
-            span.recordException(e);
-            span.setStatus(StatusCode.ERROR);
-            throw e;
-        } finally {
-            span.end();
-        }
+        } finally { span.end(); }
     }
 }
 ```
 
-### Auto-Instrumentation with OpenTelemetry Agent
+### Scenario 2: Tracing Across Kafka Messages
+**Context:** An order event flows through Kafka: Order Service → Payment Service → Shipping Service. When a shipping delay occurs, it's unclear if the issue is in publishing, consuming, or processing.
 
-```bash
-# No code changes needed! Add Java agent to JVM startup
-java -javaagent:opentelemetry-javaagent.jar \
-     -Dotel.service.name=order-service \
-     -Dotel.traces.exporter=otlp \
-     -Dotel.exporter.otlp.endpoint=http://jaeger:4317 \
-     -Dotel.traces.sampler=parentbased_traceidratio \
-     -Dotel.traces.sampler.arg=0.1 \
-     -jar order-service.jar
-```
+**Resolution:** OpenTelemetry auto-instruments Kafka producers and consumers. The trace context is propagated in Kafka record headers. The trace shows: produce time in OrderService → queue time (offset from produce to consume) → process time in PaymentService → produce to Shipping → process time. This identifies whether the delay is in queueing, processing, or network.
 
-### Custom Span Attributes and Events
+### Scenario 3: Trace-Log Correlation for Incident Response
+**Context:** An outage occurs. Errors are logged across 10 services. Without correlation, engineers spend hours manually matching timestamps to understand the request flow.
+
+**Resolution:** Configure all services to emit structured JSON logs with `trace_id` and `span_id` in MDC. During the incident, search the log aggregator for the trace ID of an error trace. All logs for that request appear, ordered by span hierarchy, across all services. The root cause is identified in minutes instead of hours.
+
+---
+
+## Scenario-Based Questions
+
+1. **Q: Users report that checkout takes 10 seconds intermittently. You suspect it's a specific downstream service, but traditional monitoring shows all services are healthy. How do you identify the root cause?**
+   - A: Implement distributed tracing with OpenTelemetry. Auto-instrument all services. Each checkout request creates a trace with spans for each service call. The trace shows the exact duration of each span. Look at the trace waterfall — the service with the longest span is the bottleneck. Drill into that span's attributes (database query, HTTP URL) to find the root cause. Use tail-based sampling to capture all error traces.
+
+2. **Q: You have 500 microservices. Tracing every request generates 10TB of data per day. Storage costs are exploding. How do you reduce data volume while keeping useful traces?**
+   - A: Implement sampling. Head-based probabilistic sampling (e.g., 1% of all traces) for general monitoring. Tail-based sampling to keep 100% of error traces (regardless of rate) and 10% of slow traces (>P95 latency). Use rate-limiting sampling to cap at 100 traces/second for high-traffic endpoints. Configure different sampling rates per service — critical services (payments) get higher sampling than trivial ones (health checks).
+
+3. **Q: Your tracing system shows spans from most services, but Kafka message processing appears as disconnected spans — they don't connect to the parent trace. What's broken?**
+   - A: Context propagation across Kafka is not working. OpenTelemetry auto-instruments Kafka for producer/consumer, but you may need to configure it explicitly. Ensure the Kafka instrumentation is enabled (`otel.instrumentation.kafka.enabled=true`). Verify that the producer injects trace context into Kafka record headers, and the consumer extracts it. Check the OpenTelemetry agent version — older versions may not support Kafka headers.
+
+4. **Q: You manually create spans for business operations, but junior developers keep forgetting to close spans, causing dangling spans that break the trace. How do you enforce proper span management?**
+   - A: Use OpenTelemetry's auto-instrumentation as much as possible — it handles span lifecycle correctly. For manual spans, enforce the try-with-resources pattern using code reviews and static analysis. Create a wrapper utility that ensures spans are always closed:
 
 ```java
-@RestController
-@RequestMapping("/api/orders")
-public class OrderController {
-
-    @GetMapping("/{id}")
-    public ResponseEntity<Order> getOrder(@PathVariable String id) {
-        // Get current span from context
-        Span currentSpan = Span.current();
-
-        // Add attributes to current span
-        currentSpan.setAttribute("order.id", id);
-
-        // Add events (timed log entries within span)
-        currentSpan.addEvent("Fetching order from database",
-            Attributes.of(
-                AttributeKey.stringKey("db.query"), "SELECT * FROM orders WHERE id = ?",
-                AttributeKey.stringKey("db.system"), "postgresql"
-            ));
-
-        Order order = orderService.findById(id);
-
-        if (order == null) {
-            currentSpan.setStatus(StatusCode.ERROR, "Order not found");
-            return ResponseEntity.notFound().build();
-        }
-
-        currentSpan.setAttribute("order.status", order.getStatus().name());
-        return ResponseEntity.ok(order);
-    }
+public static <T> T trace(String name, Map<String, String> attributes, Supplier<T> block) {
+    Span span = tracer.spanBuilder(name).startSpan();
+    attributes.forEach(span::setAttribute);
+    try (Scope scope = span.makeCurrent()) {
+        return block.get();
+    } catch (Exception e) {
+        span.recordException(e); span.setStatus(StatusCode.ERROR); throw e;
+    } finally { span.end(); }
 }
 ```
 
-### Spring Cloud Sleuth / Micrometer Tracing
-
-```java
-// With Micrometer Tracing (Spring Boot 3.x)
-@Service
-public class PaymentService {
-
-    private final Tracer tracer;
-    private final RestTemplate restTemplate;
-
-    public PaymentService(Tracer tracer, RestTemplate restTemplate) {
-        this.tracer = tracer;
-        this.restTemplate = restTemplate;
-    }
-
-    @Observed(name = "payment.process",
-        contextualName = "process-payment",
-        lowCardinalityKeyValues = {"paymentType", "credit_card"})
-    public PaymentResponse processPayment(PaymentRequest request) {
-        // Observation creates spans automatically
-        return restTemplate.postForObject(
-            "http://payment-service/api/payments",
-            request,
-            PaymentResponse.class
-        );
-    }
-}
-
-// application.yml for tracing
-spring:
-  application:
-    name: order-service
-  sleuth:
-    sampler:
-      probability: 0.1  # 10% sampling (Spring Boot 2.x)
-  tracing:
-    sampling:
-      probability: 0.1  # Spring Boot 3.x with Micrometer Tracing
-```
-
-### Trace ID in Logs
-
-```java
-// OpenTelemetry auto-instruments logging framework
-// trace_id and span_id are automatically added to MDC
-
-// logback-spring.xml - include trace/span ID in logs
-<encoder class="net.logstash.logback.encoder.LogstashEncoder">
-    <includeMdcKeyName>trace_id</includeMdcKeyName>
-    <includeMdcKeyName>span_id</includeMdcKeyName>
-    <includeMdcKeyName>trace_flags</includeMdcKeyName>
-</encoder>
-
-// Resulting log entry
-{
-  "@timestamp": "2024-01-01T12:00:00Z",
-  "level": "INFO",
-  "message": "Order created",
-  "trace_id": "0af7651916cd43dd8448eb211c80319c",
-  "span_id": "00f067aa0ba902b7",
-  "service": "order-service"
-}
-```
-
-## 5. Real-World Scenarios
-
-### Diagnosing Latency Issues
-
-A user reports slow checkout. Tracing shows:
-```
-Total: 3500ms
-  - API Gateway: 100ms
-  - Order Service: 3200ms
-      - Inventory Check: 50ms
-      - Payment Processing: 3000ms (slowest span!)
-      - Confirmation: 50ms
-  - Notification: 100ms (async, not in critical path)
-```
-
-Root cause: Payment gateway call is slow. Add circuit breaker and timeout.
-
-### Error Detection with Traces
-
-Alert: error rate > 5%.
-- Open Jaeger, search for traces with errors in the last 15 minutes.
-- Filter by service: payment-service.
-- See error spans with stack traces.
-- Identify: "Connection refused" to payment gateway.
-- Fix: Restart payment gateway connection pool.
-
-## 6. Performance
-
-### Tracing Overhead
-
-| Component | Overhead |
-|-----------|----------|
-| Auto-instrumentation agent | ~5-10% CPU (max) |
-| Span creation | ~1 microsecond |
-| Attribute addition | < 1 microsecond per attribute |
-| Batch export | Background thread, batching |
-| Export to backend | Per batch, background |
+5. **Q: Your microservices run asynchronously — the order service pushes a message to Kafka and the payment service processes it minutes later. The trace doesn't connect them. How do you correlate asynchronous processing?**
+   - A: OpenTelemetry's Kafka instrumentation handles this. Trace context is serialized into the Kafka message headers by the producer. When the consumer deserializes the message, it extracts the context and creates a child span linked to the parent trace. The trace shows a gap (the queue time) between the producer span end and consumer span start. This gap is the time the message spent in Kafka, which is useful for monitoring consumer lag.
 
-### Optimization
-- Reduce sampling rate (1-10% is typical).
-- Batch export (not per-span export).
-- Limit span attributes (avoid high cardinality).
-- Use async exporter (non-blocking).
+6. **Q: Your tracing backend (Jaeger) is down. Do traces still propagate through services?**
+   - A: Yes. Tracing instrumentation is non-blocking and should never affect application performance or reliability. If the exporter can't reach the backend, spans are dropped (or buffered if configured with memory/disk buffer). Trace context propagation via HTTP headers continues regardless — services pass trace IDs downstream even if spans aren't exported. The application works normally; you just temporarily lose visibility.
 
-## 7. Security
+7. **Q: You deploy a new service that doesn't use any tracing library. Requests through this service appear as broken traces — no spans from this service. How do you fix this?**
+   - A: Add the OpenTelemetry Java agent to the new service's JVM arguments. Auto-instrumentation covers HTTP, database, messaging, and many other libraries without code changes. If the service is in a different language (Node.js, Python, Go), use the appropriate OpenTelemetry SDK and auto-instrumentation package. The trace context is propagated via standard W3C headers, so it works across languages.
 
-### Trace Security Considerations
+8. **Q: Your tracing shows that 95% of checkout traces complete in 1 second, but 5% take 10+ seconds. All services show similar latency distributions independently. How does tracing help find the root cause?**
+   - A: The trace waterfall reveals whether the slow requests are slow in the same service every time or in different services. If a specific combination of input data causes slowness (e.g., users with 10K+ orders), the trace attributes (user ID, order count) from the first service's span will correlate with slow downstream spans. Use trace-based analytics: group traces by user tier, look for patterns in the slow traces.
 
-- Traces may contain sensitive data (user IDs, request payloads).
-- Configure span attribute filtering to exclude sensitive data.
-- Use encrypted connections between agent and collector/backend.
-- Access control on tracing backend.
-- Retention policy for trace data.
+9. **Q: Your system uses gRPC for inter-service communication. OpenTelemetry's auto-instrumentation doesn't capture gRPC spans. How do you add tracing for gRPC?**
+   - A: OpenTelemetry supports gRPC instrumentation via the `opentelemetry-instrumentation-grpc` library. For Spring Boot gRPC (grpc-spring-boot-starter), add the OpenTelemetry gRPC instrumentation dependency. Configure client and server interceptors that propagate trace context via gRPC metadata. The auto-instrumentation agent includes gRPC instrumentation when the library is on the classpath.
 
-```java
-@Bean
-public SpanProcessor spanProcessor() {
-    return new BatchSpanProcessor(spanExporter) {
-        @Override
-        public void onStart(Context context, ReadWriteSpan span) {
-            // Filter out sensitive attributes
-            // Implementation depends on OpenTelemetry version
-        }
-    };
-}
-```
+10. **Q: You need to trace requests that start from a mobile app and go through your API Gateway. How do you propagate the trace ID from the mobile client?**
+    - A: The mobile app generates a trace ID and sends it in the `traceparent` HTTP header. The API Gateway and downstream services recognize the W3C TraceContext header and continue the trace. On the mobile side, use OpenTelemetry's mobile SDK (or manually generate a trace ID). If the mobile app can't add tracing headers, the API Gateway generates the trace ID as the entry point. All subsequent services propagate it.
 
-## 8. Common Mistakes
+---
 
-### Mistake 1: No Sampling
-Tracing every request creates massive data volumes and costs.
+## Interview Questions
 
-### Mistake 2: Too Many Spans
-Every method call as a span creates noise. Focus on service boundaries and significant operations.
+1. **What is distributed tracing?**
+   - A: A technique that tracks a request across multiple services by propagating a unique trace ID, collecting timed spans (operations) from each service to reconstruct the end-to-end request path and identify bottlenecks.
 
-### Mistake 3: No Context Propagation
-Tracing breaks when context isn't propagated to async operations or message queues.
+2. **What is the difference between a trace and a span?**
+   - A: A trace is the complete end-to-end request path — a tree of spans. A span is a single timed operation within that trace (e.g., an HTTP call, database query, or function execution). Spans have parent-child relationships forming the trace tree.
 
-### Mistake 4: Missing Error Attributes
-Errors without recording exception details in spans are hard to diagnose.
+3. **What is context propagation?**
+   - A: The mechanism of passing trace context (trace ID, span ID) across service boundaries via HTTP headers (`traceparent`), message metadata (Kafka headers), or gRPC metadata. Ensures all spans from a single request link to the same trace.
 
-### Mistake 5: Not Using Auto-Instrumentation
-Manual instrumentation is error-prone. Auto-instrumentation covers most common libraries.
+4. **What is OpenTelemetry?**
+   - A: The industry standard observability framework combining OpenTracing and OpenCensus. Provides API, SDK, auto-instrumentation, and a vendor-agnostic protocol (OTLP) for exporting traces, metrics, and logs to any backend (Jaeger, Zipkin, Datadog, etc.).
 
-## 9. Senior Engineer Perspective
+5. **How do you trace a Kafka message?**
+   - A: OpenTelemetry auto-instruments Kafka producers and consumers. Trace context is injected into Kafka record headers as `traceparent` on produce. On consume, the context is extracted, creating a child span linked to the parent trace.
 
-### Trace-Driven Development
+6. **What is head-based vs tail-based sampling?**
+   - A: Head-based: sampling decision made at trace start (e.g., 1% of all traces). Simple but may miss errors. Tail-based: buffer all traces, decide later — keeps 100% of errors and slow traces while sampling normal traces. More resource-intensive but captures all incidents.
 
-- Use traces to validate performance during development.
-- Add custom spans for business transactions (checkout, signup).
-- Set trace-based SLOs: "95% of checkout traces complete within 2s."
-- Trace analysis in CI/CD: compare trace distributions before/after deployment.
+7. **How do you correlate traces with logs?**
+   - A: Include `trace_id` and `span_id` in the logging MDC. Configure the logging framework to emit these fields in structured JSON logs. Search logs by trace ID to see all log entries for a specific request across all services.
 
-### Correlation with Other Signals
+8. **What is the W3C traceparent header format?**
+   - A: `traceparent: 00-{32-char traceId}-{16-char spanId}-{2-char flags}`. Example: `00-0af7651916cd43dd8448eb211c80319c-00f067aa0ba902b7-01`. The flags field indicates sampling (01 = sampled).
 
-```
-Trace ID: abc123
-  |
-  +-- Logs filtered by traceId: "abc123"
-  +-- Metrics filtered by traceId: latency, error rate
-  +-- All three correlated in a single dashboard
-```
+9. **How do you propagate context across async boundaries?**
+   - A: Store the current context before the async operation, restore it in the async thread. OpenTelemetry's `Context.wrap(Runnable)` or `Context.current().makeCurrent()` handles this. Auto-instrumentation wraps thread pools automatically.
 
-### Distributed Tracing Maturity
+10. **Design a tracing system for 500+ microservices.**
+    - A: OpenTelemetry auto-instrumentation on all services. OpenTelemetry Collector per cluster for batching, filtering, and retries. Kafka as a buffering layer between collectors and backend. Jaeger or Grafana Tempo backend with object storage (S3/GCS). Sampling: head-based 1% for general, tail-based for errors. Trace-log-metric correlation via common attributes (service, trace_id).
 
-| Level | Capability |
-|-------|------------|
-| 1. Basic | Single-service spans |
-| 2. Connected | Context propagation across services |
-| 3. Instrumented | All services traced, custom spans |
-| 4. Analyzed | Trace-based alerting, SLO tracking |
-| 5. Automated | Trace-driven auto-scaling, AI-based root cause |
+---
 
-## 10. Interview Questions (20: 10 easy + 10 medium)
+## Developer Recommendations
 
-### Easy
+- **Use OpenTelemetry auto-instrumentation as the default, manual spans only for business logic** — Auto-instrumentation covers HTTP, gRPC, database calls, messaging, and caching without any code changes. Add manual spans only for business operations that the auto-instrumentation can't capture (e.g., "processOrder" or "applyDiscount"). This gives 90% of tracing value with 10% of the effort.
 
-1. **Q:** What is distributed tracing?
-   **A:** A technique to track requests as they flow through multiple services in a distributed system.
+- **Propagate trace context everywhere, including async and messaging** — The most common tracing failure is broken context propagation. OpenTelemetry handles this for standard patterns, but verify: HTTP headers (`traceparent`), Kafka/RabbitMQ message headers, gRPC metadata, and async thread pools (`ExecutorService` wrap). Without propagation, traces break at service boundaries, and you lose end-to-end visibility.
 
-2. **Q:** What is a trace?
-   **A:** The complete path of a single request through the system, composed of multiple spans.
+- **Include trace_id and span_id in all structured log output** — A trace without logs is missing context; logs without a trace ID are impossible to correlate. Configure MDC to include `trace_id`, `span_id`, `service`, and `environment` in every log entry. This enables "click from trace to logs" debugging. OpenTelemetry's auto-instrumentation automatically populates MDC.
 
-3. **Q:** What is a span?
-   **A:** A named, timed unit of work within a trace, representing a single operation.
+- **Use tail-based sampling to capture every error trace** — Head-based probabilistic sampling misses most errors because errors are rare (typically 0.1-1% of traffic). Tail-based sampling buffers all traces and keeps 100% of error traces. This ensures no error goes undiagnosed. The extra storage cost for error traces is negligible compared to the debugging time saved.
 
-4. **Q:** What is context propagation?
-   **A:** Passing trace context (trace ID, span ID) across service boundaries via headers or message metadata.
+- **Set meaningful span attributes for business context** — Auto-instrumentation sets technical attributes (HTTP method, URL, status code). Add business attributes that help debugging: `user.id`, `order.id`, `payment.amount`, `error.category`. These attributes make traces searchable and actionable. Don't add PII or high-cardinality attributes (user IDs are usually fine within a trace system).
 
-5. **Q:** What is OpenTelemetry?
-   **A:** The industry standard for distributed tracing, providing API, SDK, and auto-instrumentation.
-
-6. **Q:** What is Jaeger?
-   **A:** An open-source distributed tracing backend for visualizing and analyzing traces.
-
-7. **Q:** What is the W3C traceparent header?
-   **A:** A standardized HTTP header for trace context propagation: `00-traceId-spanId-flags`.
-
-8. **Q:** What is sampling and why is it needed?
-   **A:** Sampling decides which traces to capture (e.g., 1%). Needed because capturing every trace is expensive.
-
-9. **Q:** What is the difference between a trace ID and span ID?
-   **A:** Trace ID identifies the entire request. Span ID identifies a single operation within the trace.
-
-10. **Q:** What libraries does OpenTelemetry auto-instrument?
-    **A:** HTTP clients, JDBC, Kafka, gRPC, Servlet, Redis, and many more.
-
-### Medium
-
-11. **Q:** How do you propagate trace context across async boundaries?
-    **A:** Store current context before async operation, restore context in the async thread. OpenTelemetry's ContextStorage handles this via `Context#wrap` or agent auto-wrapping.
-
-12. **Q:** What is the difference between head-based and tail-based sampling?
-    **A:** Head-based: decide at trace start. Tail-based: keep all traces, decide later which to store. Tail-based can selectively keep error traces.
-
-13. **Q:** How do you trace messaging systems (Kafka)?
-    **A:** OpenTelemetry auto-instruments Kafka producer/consumer. Trace context is propagated in Kafka record headers.
-
-14. **Q:** What is the OpenTelemetry Collector?
-    **A:** A vendor-agnostic agent that receives traces, processes them (filtering, sampling, enrichment), and exports to backends.
-
-15. **Q:** How do you correlate traces with logs?
-    **A:** Include trace ID in log MDC. Configure logging framework to emit trace_id and span_id. Query logs by trace ID.
-
-16. **Q:** What is a span attribute?
-    **A:** Key-value metadata added to a span (e.g., HTTP method, status code, user ID, database query).
-
-17. **Q:** What is SpanKind?
-    **A:** Classification of span: CLIENT (outgoing call), SERVER (incoming request), INTERNAL (internal operation), PRODUCER (message send), CONSUMER (message receive).
-
-18. **Q:** How does tracing help with performance debugging?
-    **A:** Shows which service/operation is slowest in the request chain. Provides timing breakdown per span.
-
-19. **Q:** What is the OTLP protocol?
-    **A:** OpenTelemetry Protocol, the standard for exporting telemetry data to backends (gRPC or HTTP).
-
-20. **Q:** How do you handle trace context in gRPC?
-    **A:** OpenTelemetry auto-instruments gRPC. Context propagated via gRPC metadata (binary traceparent).
-
-## 11. Advanced Interview Questions (20: 10 hard + 10 system design)
-
-### Hard
-
-1. **Q:** Design a tail-based sampling system for traces.
-    **A:** Collect all spans in a buffer. Define rules: keep all ERROR traces, sample 10% of slow traces (P99+), sample 1% of normal traces. Make decisions after trace completes. Implement with OpenTelemetry Collector or streaming processor.
-
-2. **Q:** How do you implement trace context propagation across message queues (Kafka)?
-    **A:** OpenTelemetry auto-instruments Kafka: inject trace context into Kafka record headers on produce, extract on consume. For manual: extract context from current span, put in headers, send.
-
-3. **Q:** Design a system to detect trace anomalies in real-time.
-    **A:** Stream traces through Kafka. ML model detects: unusual span duration, missing spans, new service in trace path, cycle detection. Alert on anomalies. Use Flink/KSQL for stream processing.
-
-4. **Q:** How do you handle trace context in event-driven systems with eventual consistency?
-    **A:** Trace ID is generated at the entry point (API). Propagated to all events. Each event handler adds its own spans under the same trace. Different event handlers may run at different times; backend assembles the full trace.
-
-5. **Q:** Design a distributed tracing system that handles 100K spans/second.
-    **A:** OpenTelemetry Collector with multiple pipelines. Load balance spans across collector instances. Use Kafka as buffer between collector and backend. Backend: Jaeger with Cassandra/Elasticsearch. Downsample older traces.
-
-6. **Q:** How do you trace database queries?
-    **A:** OpenTelemetry auto-instruments JDBC: each query is a child span under the caller. Captures: query text (sanitized), bind parameters, duration, rows returned.
-
-7. **Q:** Design a system for cross-service dependency discovery using traces.
-    **A:** Process trace data to build service dependency graph. Nodes = services. Edges = calls between services. Weight by call count. Track changes: new dependencies (unexpected), deprecated dependencies.
-
-8. **Q:** How do you implement trace-based SLO monitoring?
-    **A:** Define SLO: "95% of checkout traces complete within 2s." Track traces by type. Compute SLO compliance over rolling window. Alert when error budget depleted.
-
-9. **Q:** Design a trace storage strategy that balances query performance and cost.
-    **A:** Hot storage (Cassandra/Elasticsearch): 7 days, full detail. Warm: 30 days, downsampled (remove high-cardinality attributes). Cold: S3/Parquet, query via Presto/Athena. Ingest via OpenTelemetry Collector.
-
-10. **Q:** How do you debug missing spans in a trace?
-    **A:** Check context propagation (missing headers). Check sampling decisions (was trace sampled?). Check span exporter errors. Check if async boundaries preserve context.
-
-### System Design
-
-11. **Q:** Design a distributed tracing system for 500+ microservices.
-    **A:** Auto-instrumentation for all services. OpenTelemetry Collector per cluster. Kafka for buffering. Jaeger backend with Cassandra storage. Service mesh (Istio) provides trace context propagation by default. Centralized sampling configuration.
-
-12. **Q:** Design a tracing system that correlates frontend (browser) and backend traces.
-    **A:** Frontend: OpenTelemetry JS SDK generates trace. Propagate trace ID via response header. Backend: extract and continue the same trace. Combined view in Jaeger.
-
-13. **Q:** Design a tracing system for a serverless architecture (AWS Lambda).
-    **A:** AWS X-Ray as backend. OpenTelemetry Lambda layers for auto-instrumentation. X-Ray SDK for custom spans. Propagate trace context via HTTP headers / SQS message attributes.
-
-14. **Q:** Design a multi-cluster tracing system for a global platform.
-    **A:** Each region has its own trace backend (Jaeger). Global trace ID enables cross-region correlation. Propagate trace context across regions via gRPC/HTTP headers.
-
-15. **Q:** Design a cost-effective tracing solution for a startup.
-    **A:** Jaeger all-in-one (single binary). 1% sampling rate. Auto-instrumentation only (no manual spans). Retention: 7 days. Upgrade to Jaeger production stack when scale demands.
-
-16. **Q:** Design a trace-based debugging tool for production.
-    **A:** Search traces by: trace ID, service, operation, tags, status (error/latency). View waterfall diagram. Compare traces side by side. Slow-motion replay of trace events.
-
-17. **Q:** Design a system for continuous trace comparison (canary analysis).
-    **A:** Compare traces from canary vs stable deployment. Metrics: P50/P95/P99 latency difference, error rate difference, new span operations. Auto-rollback if significant degradation detected.
-
-18. **Q:** Design a tracing system for a financial platform requiring full audit traceability.
-    **A:** 100% sampling (no probabilistic). Long trace retention (1 year). Immutable trace storage. Trace integrity verification (Merkle chain). Access control on tracing backend.
-
-19. **Q:** Design a tracing system that respects data privacy (GDPR).
-    **A:** Attribute filtering: remove PII before export. Retention: configurable per data class (business traces: 30d, technical: 7d). Deletion API: delete traces by user ID. Encryption: TLS + storage encryption.
-
-20. **Q:** Design a unified observability query across traces, logs, and metrics.
-    **A:** Common labels: trace_id, service, environment. Query: "find traces with error, then get logs for those trace_ids, overlay on metric dashboard." Implemented via Loki (logs) + Tempo (traces) + Mimir (metrics) with Grafana.
-
-## 12. Expert-Level Interview Questions (10: architect-level)
-
-1. **Q:** Design a distributed tracing system that provides root cause analysis automatically.
-    **A:** ML model trained on historical traces: learns normal patterns. For each new trace, flag deviations: unexpected latency in specific span, new error pattern, missing completion. Rank by impact. Suggest root cause: "Service X had 500ms latency increase due to database query Y."
-
-2. **Q:** How do you design a trace context propagation system that works across protocols (HTTP, gRPC, Kafka, WebSocket, RabbitMQ)?
-    **A:** W3C TraceContext for HTTP/gRPC. Inject traceparent into message headers for messaging systems. OpenTelemetry SDK auto-instruments all protocols. Custom instrumentation for non-standard protocols.
-
-3. **Q:** Design a zero-overhead tracing system for latency-sensitive applications.
-    **A:** eBPF-based tracing: kernel-level instrumentation with zero application code changes. Trace syscalls, network calls, not application code. Higher-level traces sampled at very low rate (0.1%).
-
-4. **Q:** How do you implement distributed tracing for a multi-tenant SaaS platform?
-    **A:** Each trace tagged with tenant ID. Tenant-isolated trace storage. Rate limit traces per tenant. Tenant-specific sampling rules. Dashboard: tenant-level trace analysis.
-
-5. **Q:** Design a system that uses traces for capacity planning.
-    **A:** Analyze trace patterns: which services are called for each operation, what resources they use. Model: trace volume + per-trace resource usage = total load. Forecast capacity based on trace growth.
-
-6. **Q:** How do you design trace sampling for a platform where every error must be captured?
-    **A:** Tail-based sampling: keep all traces, decide at end. Rules: keep 100% of ERROR traces, keep 100% of traces from priority users, keep 10% of slow traces (>P50), drop remaining if over budget.
-
-7. **Q:** Design a system that detects unknown/unexpected service dependencies using traces.
-    **A:** Build dependency graph from trace data. Compare to declared dependencies (service mesh config, API registry). Alert on undeclared dependencies. Track new dependencies over time.
-
-8. **Q:** How do you implement distributed tracing in a high-throughput (1M req/s) system?
-    **A:** Low overhead: 0.01% sampling rate. Auto-instrumentation only. Minimal attributes. eBPF-level tracing for common cases. Prioritize error traces.
-
-9. **Q:** Design a system that replays production traces in a staging environment.
-    **A:** Capture trace attributes: request URL, headers, parameters, response. Anonymize sensitive data. Replay: send traced requests to staging. Compare: staging trace vs production trace (latency, behavior differences).
-
-10. **Q:** How do you design a federated tracing system across organizational boundaries?
-    **A:** Shared trace ID: generated by entry point, propagated across org boundaries. Each org runs its own trace backend. Global trace endpoint: queries each org's backend and assembles. Auth: mTLS between backends.
-
-## 13. Debugging & Troubleshooting
-
-### Common Tracing Issues
-
-**Issue: Missing spans in trace**
-- Context propagation failure (missing header).
-- Async boundary not preserving context.
-- Sampling: different decisions at different services.
-
-**Issue: Trace not visible in Jaeger**
-- Check span exporter: any errors?
-- Check sampling: was trace sampled?
-- Check Jaeger connection: port, network.
-- Check indexing delay: may take a few seconds.
-
-**Issue: High tracing overhead**
-- Reduce sampling rate.
-- Reduce span attributes.
-- Check for synchronous exporter (should be async).
-
-**Issue: Context not propagated to async threads**
-```java
-// WRONG - context lost in async
-CompletableFuture.supplyAsync(() -> {
-    Span span = tracer.spanBuilder("async-work").startSpan(); // No parent!
-});
-
-// RIGHT - propagate context
-Context context = Context.current();
-CompletableFuture.supplyAsync(() -> {
-    try (Scope scope = context.makeCurrent()) {
-        Span span = tracer.spanBuilder("async-work").startSpan();
-        // span has correct parent
-    }
-});
-```
-
-## 14. Comparison Section
-
-### Distributed Tracing vs Logging vs Metrics
-
-| Aspect | Tracing | Logging | Metrics |
-|--------|---------|---------|---------|
-| Granularity | Per-request path | Per-event | Aggregated |
-| Data | Span tree | Text/JSON events | Numeric time-series |
-| Volume | Medium | High | Low |
-| Query | By trace/service | By text/filters | By metric/labels |
-| Use case | Performance, flow | Debugging, audit | Alerts, dashboards |
-
-### OpenTelemetry vs Jaeger vs Zipkin
-
-| Feature | OpenTelemetry | Jaeger | Zipkin |
-|---------|--------------|--------|--------|
-| Role | API/SDK/Collector | Backend (storage + UI) | Backend (storage + UI) |
-| Protocol | OTLP | Jaeger thrift | Zipkin JSON/Thrift |
-| Storage | N/A | Cassandra, ES, Badger | Cassandra, ES, MySQL |
-| Sampling | Configurable | Head-based | Configurable |
-| Adoption | Industry standard | Widely used | Legacy |
-
-### Head-based vs Tail-based Sampling
-
-| Aspect | Head-based | Tail-based |
-|--------|------------|------------|
-| Decision timing | At trace start | At trace end |
-| Resource usage | Lower | Higher (buffer all) |
-| Error capture | Probabilistic | Guaranteed |
-| Slow trace capture | Probabilistic | Guaranteed |
-| Implementation | Simple | Complex |
-| Best for | Most systems | Error-sensitive systems |
-
-## 15. Revision Notes
-
-### Quick Recap
-- **Trace**: End-to-end request path across services.
-- **Span**: Single timed operation within a trace.
-- **Context Propagation**: Passing trace context across boundaries.
-- **OpenTelemetry**: Industry standard API/SDK.
-- **W3C TraceContext**: Standard header format (traceparent).
-- **Sampling**: Reduce data volume (1-10% typical).
-- **Jaeger/Zipkin**: Backend storage and visualization.
-- **Auto-instrumentation**: No-code tracing via Java agent.
-
-### Key Fields in Every Span
-- trace_id, span_id, parent_span_id
-- service.name, operation.name
-- start_time, end_time, duration
-- status (OK/ERROR)
-- Attributes (method, url, status_code)
-
-## 16. Cheat Sheet
-
-```
-+-------------------------------------------------------------------+
-|                DISTRIBUTED TRACING CHEAT SHEET                     |
-+-------------------------------------------------------------------+
-| CONCEPT       | DESCRIPTION                                        |
-+---------------+---------------+-----------------------------------+
-| Trace         | Complete request path across services               |
-| Span          | Single operation (timed)                            |
-| Trace ID      | Unique per request, shared across spans             |
-| Span ID       | Unique per span within a trace                     |
-| Parent Span ID| Links spans in tree structure                      |
-| Context       | Propagation of trace context across boundaries      |
-+---------------+---------------+-----------------------------------+
-| W3C TRACEPARENT HEADER                                             |
-+-------------------------------------------------------------------+
-| traceparent: 00-<traceId>-<spanId>-<flags>                        |
-| Format: version-traceId-spanId-traceFlags                         |
-| Example: 00-0af7651916cd43dd8448eb211c80319c-00f067aa0ba902b7-01  |
-+-------------------------------------------------------------------+
-| OPENOTELEMETRY QUICK REFERENCE                                     |
-+-------------------------------------------------------------------+
-| Tracer                    | Creates spans                           |
-| SpanBuilder               | Configures and starts spans            |
-| Span                      | Timed operation, has attributes        |
-| Scope                     | Makes span active in current context   |
-| Attributes                | Key-value metadata on span             |
-| SpanKind                  | CLIENT, SERVER, INTERNAL, PRODUCER,    |
-|                           | CONSUMER                                |
-| Status                    | OK, ERROR (with description)           |
-| SpanProcessor             | Process spans (batch export)           |
-| Sampler                   | Decision: keep or drop trace           |
-+-------------------------------------------------------------------+
-| SPRING BOOT 3.x CONFIG                                             |
-+-------------------------------------------------------------------+
-| application.yml:                                                    |
-|   spring.tracing.sampling.probability=0.1                          |
-|   management.tracing.enabled=true                                  |
-|   management.otlp.tracing.endpoint=http://jaeger:4318/v1/traces   |
-|                                                                     |
-| Gradle: implementation 'io.micrometer:micrometer-tracing-bridge-   |
-|         bridge-otel'                                               |
-+-------------------------------------------------------------------+
-| COMMANDS                                                           |
-+-------------------------------------------------------------------+
-| Jaeger UI: http://localhost:16686                                  |
-| Jaeger Query API: GET /api/traces?service=order-service            |
-| OpenTelemetry Collector: otelcol --config config.yaml              |
-+-------------------------------------------------------------------+
-```
+- **Monitor tracing system health separate from application health** — The tracing pipeline (agent → collector → backend) can fail without affecting the application. Monitor: trace ingestion rate (sudden drop means instrumentation failure), span export latency, collector queue depth, and backend storage utilization. Without this, you may lose visibility during the very incidents you need tracing for.

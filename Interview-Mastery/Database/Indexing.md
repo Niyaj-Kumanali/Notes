@@ -1,548 +1,234 @@
-# Indexing
+# Database Indexing
 
-## 1. Executive Summary
+---
 
-Database indexes are data structures that improve the speed of data retrieval at the cost of additional writes and storage. Indexes are critical for query performance — a missing index is the most common cause of slow queries. However, over-indexing degrades write performance and increases storage costs. Understanding index internals (B-trees, hash indexes, GiST, GIN) enables engineers to design effective indexing strategies. In Spring Boot applications, JPA provides declarative index definitions that complement database-native index creation.
+## What is Indexing?
 
-## 2. Core Theory
+**Database indexes** are data structures that improve the speed of data retrieval at the cost of additional writes and storage. They act like a book's index — instead of scanning every page, you look up the term in the index and jump directly to the relevant pages. The default index type in most databases is the **B-Tree**, but other types like **Hash**, **GiST**, **GIN**, and **BRIN** serve specialized use cases.
 
-### 2.1 What an Index Does
+### Key Concepts:
 
-An index is a copy of selected columns from a table, organized in a search-optimized structure. Without an index, the database performs a sequential (full) table scan. With an index, the database can locate rows using a tree traversal (O(log n)) or hash lookup (O(1)).
+1. **How Indexes Work**:
 
-### 2.2 B-Tree Index
+   - An index is a copy of selected columns from a table, organized in a search-optimized structure (typically a B-Tree).
+   - Without an index, the database performs a **sequential (full) table scan** — reading every row.
+   - With an index, the database can locate rows using a **tree traversal (O(log n))** or **hash lookup (O(1))**, avoiding the full scan.
 
-The default and most common index type in SQL databases.
+2. **B-Tree Index Structure**:
 
-- **Structure**: Balanced tree where leaf nodes contain pointers to heap rows (or the actual data in index-organized tables)
-- **Height**: Typically 3-5 levels for billions of rows
-- **Fanout**: Number of entries per node (depends on page size, typically ~200-500 entries per node)
-- **Ordering**: Entries are sorted, enabling range scans and ORDER BY without additional sorting
+   B-Trees are balanced trees where:
+   - **Root node** contains pivot values that guide search direction.
+   - **Internal nodes** direct the search to the correct child node.
+   - **Leaf nodes** contain the actual index entries plus a pointer to the heap row.
+   - All leaf nodes are at the same depth (balanced property).
+   - Height is typically 3-5 levels for billions of rows.
 
-### 2.3 Other Index Types
+3. **Index Scan Types**:
 
-| Type | Use Case | Supported By |
-|------|----------|-------------|
-| B-Tree | General purpose, equality, range, ordering | All databases |
-| Hash | Equality lookups only | PostgreSQL, MySQL (MEMORY) |
-| GiST | Full-text, geometric, range types | PostgreSQL |
-| GIN | Array contains, JSONB queries, full-text search | PostgreSQL |
-| BRIN | Large tables with naturally ordered data | PostgreSQL |
-| Bitmap | Low-cardinality columns, data warehousing | Oracle, PostgreSQL |
-| Clustered | Physical row ordering (table as index) | MySQL/InnoDB, SQL Server |
-| Covering | All columns needed by query in index | All databases |
-| Partial | Only subset of rows indexed | PostgreSQL, SQL Server |
-| Functional | Index on expression | All databases |
-| Spatial | Geographic coordinates (R-tree) | MySQL, PostgreSQL, SQL Server |
+   - **Index Scan (Index Seek)** — Traverse B-Tree to leaf, then fetch row from heap by pointer.
+   - **Index-Only Scan** — All needed columns are in the index; no heap access required. Fastest option.
+   - **Bitmap Index Scan** — Build a bitmap of matching page locations, then fetch heap pages in order. Reduces random I/O for multi-condition queries.
+   - **Skip Scan** (PostgreSQL 15+) — Efficiently find distinct values when the leading column has few values and the trailing column is filtered.
 
-## 3. Under-the-Hood Deep Dive
+4. **Composite Indexes**:
 
-### 3.1 B-Tree Structure
+   Indexes on multiple columns follow the **leftmost prefix rule**. An index on `(A, B, C)` can be used for queries on:
+   - `A` only (uses prefix)
+   - `A AND B` (full match on prefix)
+   - `A AND B AND C` (full match)
+   - But NOT for `B` alone or `C` alone
 
-```
-         [10, 20]
-        /    |    \
-   [1,5,8] [12,15] [22,25,30]
-   / | | \  / | \   / |  | \
-  p1 p2 p3 p4 p5 p6 p7 p8 p9 p10
-```
+   Column order matters: put **equality conditions first**, then **range conditions**, then **sort columns**.
 
-- **Root node**: Top level, contains pivot values
-- **Internal nodes**: Guide search direction
-- **Leaf nodes**: Contain index entries + pointer (row ID / TID / primary key) to heap row
-- All leaf nodes are at the same depth (balanced property)
+5. **Other Index Types**:
 
-### 3.2 Index Scan Types
+   - **Hash Index** — O(1) lookup for equality only. No sorting, no range queries.
+   - **GiST** — Extensible index for full-text search, geometric data, and range types.
+   - **GIN** — Index for composite values like arrays, JSONB, and full-text search vectors.
+   - **BRIN** — Tiny index for naturally ordered data (time-series, logs). Very space-efficient.
+   - **Partial Index** — Indexes only a subset of rows (e.g., `WHERE status = 'ACTIVE'`). Saves space.
+   - **Covering Index** — Includes extra columns via `INCLUDE` to enable index-only scans.
+   - **Functional Index** — Index on an expression like `LOWER(email)`.
 
-1. **Index Scan (Index Seek)**: Traverse B-tree to leaf, then fetch row from heap by pointer
-2. **Index-Only Scan**: All needed columns are in the index; no heap access required
-3. **Bitmap Index Scan**: Build bitmap of matching page locations, then fetch heap pages in order (reduces random I/O)
-4. **Skip Scan (PostgreSQL 15+)**: Efficiently find distinct values when leading column has few values and trailing column is filtered
+---
 
-### 3.3 How Indexes Affect INSERT/UPDATE/DELETE
+## Core Concepts
 
-- **INSERT**: New entry added to each index on the table (O(log n) per index)
-- **UPDATE**: If indexed column changes, index entry is moved (delete old + insert new)
-- **DELETE**: Index entry must be removed from each index
-- **Page splits**: When a B-tree node is full, it splits into two nodes — an expensive operation
+### 1. How Indexes Affect Write Operations
 
-### 3.4 Fillfactor
+   Indexes speed up reads but slow down writes:
+   - **INSERT** — New entry added to each index (O(log n) per index).
+   - **UPDATE** — If indexed column changes, the index entry is moved (delete + insert).
+   - **DELETE** — Index entry removed from each index.
+   - **Page Splits** — When a B-Tree node is full, it splits into two — an expensive operation. Use `fillfactor` (e.g., `70`) to reserve free space for updates and reduce splits.
 
-```sql
-CREATE INDEX idx_orders_status ON orders(status) WITH (fillfactor = 70);
-```
+### 2. Index Selectivity
 
-Fillfactor reserves free space in index pages for future updates. For tables with frequent updates to indexed columns, a fillfactor of 70-80 reduces page splits.
+   - **High selectivity** (many unique values) — Index is very efficient, quickly narrows results.
+   - **Low selectivity** (few unique values, like a boolean) — Index may not help for common values but helps for rare values. A **partial index** is ideal for low-selectivity columns.
 
-### 3.5 Composite Indexes
+   ```sql
+   -- For a table where 99% of orders are 'COMPLETED' and 1% are 'PENDING':
+   CREATE INDEX idx_orders_pending ON orders(id) WHERE status = 'PENDING';
+   ```
 
-```sql
-CREATE INDEX idx_orders_status_date ON orders(status, created_at DESC);
-```
+### 3. JPA Index Declarations
 
-- **Leftmost prefix rule**: The index can be used for queries on `status`, or `status AND created_at`, but NOT `created_at` alone
-- **Order of columns matters**: Put high-selectivity columns first, or columns used in equality conditions before range conditions
+   ```java
+   @Entity
+   @Table(name = "orders", indexes = {
+       @Index(name = "idx_orders_status", columnList = "status"),
+       @Index(name = "idx_orders_user_status", columnList = "user_id, status"),
+       @Index(name = "idx_orders_created_at", columnList = "created_at DESC")
+   })
+   public class Order { ... }
+   ```
 
-## 4. Production Code Examples
+### 4. Managing Indexes with Migrations
 
-### 4.1 JPA Index Declarations
+   Complex indexes (partial, functional, concurrent) belong in migration scripts:
 
-```java
-@Entity
-@Table(name = "orders", indexes = {
-    @Index(name = "idx_orders_status", columnList = "status"),
-    @Index(name = "idx_orders_user_status", columnList = "user_id, status"),
-    @Index(name = "idx_orders_created_at", columnList = "created_at DESC")
-})
-public class Order {
-    @Id
-    private Long id;
+   ```sql
+   CREATE INDEX CONCURRENTLY idx_orders_user_id ON orders(user_id);
+   REINDEX INDEX CONCURRENTLY idx_orders_status;
+   ```
 
-    @Column(name = "status", length = 20)
-    private String status;
+   `CONCURRENTLY` avoids locking writes during index creation — essential for production.
 
-    @Column(name = "created_at")
-    private LocalDateTime createdAt;
+---
 
-    @Column(name = "user_id")
-    private Long userId;
-}
-```
+## Common Mistakes
 
-### 4.2 Unique Indexes for Constraint Enforcement
+1. **No index on foreign key columns** — JOINs perform sequential scans instead of index seeks.
 
-```java
-@Entity
-@Table(name = "users", uniqueConstraints = {
-    @UniqueConstraint(name = "uq_users_email", columnNames = {"email"}),
-    @UniqueConstraint(name = "uq_users_username", columnNames = {"username"})
-})
-public class User {
-    // ...
-}
-```
+2. **Indexing every column** — Each index adds write overhead and storage cost. Only index columns used in WHERE, JOIN, and ORDER BY.
 
-### 4.3 Functional Index in SQL
+3. **Wrong column order in composite indexes** — The leading column does not match query patterns, making the index useless. Put equality columns first.
 
-```sql
--- PostgreSQL: index on expression
-CREATE INDEX idx_users_lower_email ON users(LOWER(email));
+4. **Creating indexes during business hours without CONCURRENTLY** — Blocks writes on the table. Always use `CREATE INDEX CONCURRENTLY` in production.
 
--- Query that uses this index:
-SELECT * FROM users WHERE LOWER(email) = 'alice@example.com';
-```
+5. **Over-indexing small tables** — Small tables (few hundred rows) are faster with sequential scans. Index overhead outweighs benefits.
 
-```java
-// Spring Data JPA with function index
-@Query("SELECT u FROM User u WHERE LOWER(u.email) = LOWER(:email)")
-Optional<User> findByEmailCaseInsensitive(@Param("email") String email);
-```
+6. **Assuming indexes work for `LIKE '%pattern'`** — B-Tree indexes only help for prefix patterns (`pattern%`). Use GIN with trigrams for suffix/containment patterns.
 
-### 4.4 Partial Index
+7. **Not analyzing after bulk data loads** — Stale statistics cause the optimizer to ignore valid indexes. Run `ANALYZE` after large data changes.
+
+8. **Indexing boolean columns without a partial index** — Most rows have the same value, making the index rarely useful. Use `WHERE col = TRUE`.
+
+---
+
+## Real-World Scenarios
+
+### 1. E-Commerce Product Search with Composite Indexes
+
+A product catalog with 10M products. Users filter by `category_id` and sort by `price`. Without a composite index on `(category_id, price)`, the database filters then sorts in memory. With the index, the B-Tree stores rows sorted by price within each category:
 
 ```sql
--- Only index active users (reduces index size)
-CREATE INDEX idx_users_active ON users(email) WHERE status = 'ACTIVE';
+CREATE INDEX idx_category_price ON products(category_id, price);
 
--- Query that uses this partial index:
-SELECT * FROM users WHERE status = 'ACTIVE' AND email = 'test@test.com';
-```
-
-```java
-// Partial indexes are database-side; JPA cannot declare them
-// Use Flyway/Liquibase for schema management
-```
-
-### 4.5 Managing Indexes with Flyway
-
-```sql
--- V2__add_indexes.sql
-CREATE INDEX CONCURRENTLY idx_orders_user_id ON orders(user_id);
--- CONCURRENTLY avoids locking writes during index creation
-```
-
-```java
-// @Index annotations for JPA, but use migration for complex indexes
-@Configuration
-public class FlywayConfig {
-    @Bean
-    public FlywayMigrationStrategy flywayStrategy() {
-        return flyway -> {
-            flyway.migrate();
-            // Verify indexes exist
-        };
-    }
-}
-```
-
-## 5. Real-World Scenarios
-
-### 5.1 Indexing for Common Query Patterns
-
-```sql
--- Common query:
-SELECT id, title, status FROM posts
-WHERE status = 'PUBLISHED'
-  AND category_id = 5
-  AND created_at > '2024-01-01'
-ORDER BY created_at DESC
+SELECT id, name, price FROM products
+WHERE category_id = 42
+ORDER BY price
 LIMIT 20;
-
--- Best index:
-CREATE INDEX idx_posts_lookup ON posts(category_id, status, created_at DESC) INCLUDE (id, title);
 ```
 
-### 5.2 Eliminating Sorting with Index
+### 2. Time-Series Monitoring with BRIN Indexes
+
+An IoT platform ingests 1B events/day into `sensor_readings`. Queries filter by `timestamp`. A B-Tree index takes 50GB. A BRIN index takes 50MB — 1000x smaller:
 
 ```sql
--- Query with ORDER BY
-SELECT * FROM orders WHERE user_id = 100 ORDER BY created_at DESC LIMIT 10;
+CREATE INDEX idx_readings_time ON sensor_readings USING BRIN(timestamp);
 
--- Without index: sort of all user's orders
--- With (user_id, created_at) index: B-tree already orders by created_at within user_id
-CREATE INDEX idx_orders_user_date ON orders(user_id, created_at DESC);
+SELECT * FROM sensor_readings
+WHERE timestamp >= '2024-06-01' AND timestamp < '2024-06-02';
 ```
 
-### 5.3 Hot Spot Detection and Index Maintenance
+### 3. Social Media Notifications with Partial Indexes
+
+A notifications table has 100M rows, 99.9% are `read = TRUE`. A full index on `(user_id, created_at)` is 2GB. A partial index with `WHERE read = FALSE` is 2MB with identical performance:
 
 ```sql
--- Check index usage statistics
-SELECT schemaname, tablename, indexname, idx_scan, idx_tup_read, idx_tup_fetch
-FROM pg_stat_user_indexes
-ORDER BY idx_scan ASC;
+CREATE INDEX idx_unread_notifications ON notifications(user_id, created_at) WHERE read = FALSE;
 
--- Find unused indexes
-SELECT indexrelid::regclass AS index_name, relid::regclass AS table_name,
-       idx_scan, idx_tup_read, idx_tup_fetch
-FROM pg_stat_user_indexes
-WHERE idx_scan = 0;
+SELECT * FROM notifications WHERE read = FALSE AND user_id = 123 ORDER BY created_at DESC LIMIT 50;
 ```
 
-### 5.4 Reindexing
+## Scenario-Based Questions
 
-```sql
--- Rebuild index to remove bloat
-REINDEX INDEX idx_orders_status;
-REINDEX TABLE orders;
--- In production, use CONCURRENTLY to avoid locking
-REINDEX INDEX CONCURRENTLY idx_orders_status;
-```
+1. **Q: You are building an e-commerce product listing where users filter by any combination of 8 optional attributes. How do you index without creating 256 indexes?**
+   A: Use a composite index on the 2-3 most selective columns queried most often. For the rest, let PostgreSQL use bitmap scans combining multiple single-column indexes. Alternatively, use a GIN index on a JSONB column storing all attribute values, or create partial indexes per common filter combination (e.g., `WHERE category_id IS NOT NULL AND price IS NOT NULL`).
 
-### 5.5 Indexing for Text Search
+2. **Q: Your application's write throughput dropped 80% after adding 5 B-Tree indexes to a table receiving 10K writes/second. The indexes are necessary for reads. How do you fix it?**
+   A: First, replace full indexes with partial indexes where possible (e.g., only index active records). Second, reduce `fillfactor` to 70-80 to minimize page splits. Third, batch writes to reduce per-row index maintenance overhead. Fourth, consider table partitioning so each partition has smaller indexes.
 
-```sql
--- PostgreSQL: GIN index for full-text search
-CREATE INDEX idx_posts_fts ON posts USING GIN(to_tsvector('english', title || ' ' || content));
+3. **Q: A 500M row orders table dashboard query groups by `status` and `region` aggregating `total`. It runs fine at 2AM but times out at 2PM with a different execution plan. How do you stabilize it?**
+   A: Plan instability caused by changing statistics or parameter values. Create a covering index on `(status, region) INCLUDE (total)` for index-only scans. Increase `work_mem` to prevent disk spills for hash aggregates. Use a materialized view refreshed periodically for the dashboard query.
 
--- Query:
-SELECT * FROM posts
-WHERE to_tsvector('english', title || ' ' || content) @@ to_tsquery('english', 'database & optimization');
-```
+4. **Q: Your team uses UUID primary keys. Insert performance degrades beyond 10M rows. What is the root cause and how do you fix it?**
+   A: Random UUIDs cause frequent B-Tree page splits — new rows insert at random positions. The tree becomes unbalanced and cache hit ratio drops. Fix by switching to UUID v7 (time-ordered), using ULIDs, or using a sequential `BIGSERIAL` as the clustered PK with UUID as a secondary unique index.
 
-## 6. Performance
+5. **Q: A `WHERE status IN ('PENDING', 'PROCESSING')` query scans the full index but performs poorly. Both values are common (~15% each). The index is on `(status, created_at)`. How do you optimize?**
+   A: For IN lists with common values, the optimizer may choose a bitmap or seq scan. Create a partial index for rare statuses and let common statuses use a different path. Reorder to `(created_at, status)` if the query always uses a date range. Add a BRIN index on `created_at` combined with a separate status index.
 
-### 6.1 Index Selectivity
+6. **Q: `SELECT COUNT(*) FROM orders WHERE status = 'SHIPPED'` on a 200M row table takes 30 seconds despite having an index. How do you make it instant?**
+   A: The index still visits all 200M matching entries to count them. Use a partial index: `CREATE INDEX idx_shipped ON orders(id) WHERE status = 'SHIPPED'` so `COUNT(*)` scans only matching entries. Alternatively, maintain a materialized view with pre-aggregated counts.
 
-- **High selectivity** (unique values): Index is very efficient
-- **Low selectivity** (boolean column): Index may not help for 50% values, but helps for the rare value
+7. **Q: After `VACUUM FULL` on a heavily updated table, queries are slower than before. What happened?**
+   A: `VACUUM FULL` rebuilds the table and indexes in physical order. If the original order matched query patterns (time-ordered inserts), the new order may increase random I/O. It also invalidates cached plans and statistics. Run `ANALYZE` afterward.
 
-```sql
--- For a table where 99% of orders are 'COMPLETED' and 1% are 'PENDING':
--- Index on status is only useful for WHERE status = 'PENDING' queries
--- A partial index is ideal:
-CREATE INDEX idx_orders_pending ON orders(id) WHERE status = 'PENDING';
-```
+8. **Q: Your Spring Boot app generates `WHERE id IN (1, 2, ..., 50)`. Performance is fine for 50 IDs but degrades at 500 IDs. Why?**
+   A: The planner may choose a seq scan over repeated index lookups when the IN list is large — random I/O for 500 index probes exceeds seq scan cost. Use a temporary table with JOIN for large lists, or batch in chunks of 50-100.
 
-### 6.2 Index Size Estimation
+9. **Q: A migration adds a new index and application queries start blocking during creation. What went wrong?**
+   A: The index was created without `CONCURRENTLY`. Plain `CREATE INDEX` acquires a lock blocking writes. Always use `CREATE INDEX CONCURRENTLY` in production. Monitor progress via `pg_stat_progress_create_index`.
 
-```sql
--- Check index size
-SELECT pg_size_pretty(pg_indexes_size('orders')) AS index_size;
-SELECT pg_size_pretty(pg_relation_size('idx_orders_status')) AS single_index_size;
-```
+10. **Q: A query joining `orders` (10M rows) and `customers` (5M rows) on `customer_id` uses a nested loop with 10M loops despite an index on `orders.customer_id`. Why is this slow and how do you fix it?**
+    A: Even with an index, 10M random I/O operations are expensive. The optimizer chose nested loop expecting few rows. Ensure statistics are current. Force a hash join temporarily with `enable_nestloop = off` or increase `work_mem` to accommodate the hash table.
 
-### 6.3 Bitmap vs B-Tree for Low Cardinality
+## Interview Questions
 
-For low-cardinality columns (e.g., status with 3 values), a bitmap scan can be more efficient than a B-tree scan because it uses bitwise operations to combine conditions.
+1. **What is a B-Tree index and how does it work?**
+   A: A B-Tree is a balanced tree data structure where leaf nodes contain index entries pointing to heap rows. Search traverses from root to leaf in O(log n) time, supporting equality and range lookups.
 
-### 6.4 Multi-Column Index Ordering Rules
+2. **What is the difference between clustered and non-clustered indexes?**
+   A: A clustered index determines physical row order on disk — a table can have only one. A non-clustered index is a separate structure with pointers to heap rows. InnoDB uses the PK as clustered; PostgreSQL uses heap with separate indexes.
 
-| Query Pattern | Best Index Order |
-|--------------|-----------------|
-| `WHERE a = 1 AND b = 2` | Either (a,b) or (b,a) — both work well |
-| `WHERE a = 1 AND b > 5` | (a, b) — equality first, then range |
-| `WHERE b > 5 ORDER BY a` | (b, a) — or consider (a, b) if b range is small |
-| `WHERE a = 1 ORDER BY b` | (a, b) — equality then sort column |
-| `WHERE a > 1 AND b = 2` | (b, a) — equality on b, then range on a |
+3. **When would you use a GIN index over a B-Tree?**
+   A: GIN indexes are for composite values like JSONB, arrays, and full-text search vectors. B-Trees cannot index the individual elements of an array or JSONB field efficiently.
 
-## 7. Security
+4. **What is index selectivity and why does it matter?**
+   A: Selectivity measures how many rows a query condition matches. High selectivity (few rows) makes indexes efficient. Low selectivity (many rows) may make a sequential scan cheaper. Partial indexes address low selectivity.
 
-### 7.1 Index-Based Information Leakage
+5. **What is the leftmost prefix rule?**
+   A: For a composite index on (A, B, C), queries must reference column A (the leftmost) for the index to be used. The index supports A, A+B, and A+B+C but not B alone or C alone.
 
-Indexes can leak information through timing side channels. An attacker can determine if a value exists by measuring response time (index hit vs miss). For applications handling highly sensitive data, consider:
-- Using constant-time comparison queries
-- Not indexing fields that could leak existence information
+6. **When does PostgreSQL choose a bitmap scan over an index scan?**
+   A: When multiple conditions match rows scattered across disk pages. A bitmap scan builds a page-level bitmap of matching locations, sorts them, then fetches pages in order — reducing random I/O.
 
-### 7.2 Index on Encrypted Columns
+7. **How do you detect and remove unused indexes?**
+   A: Query `pg_stat_user_indexes` for indexes with `idx_scan = 0`. Drop unused indexes to reduce write overhead and storage. Use `DROP INDEX CONCURRENTLY` in production.
 
-```sql
--- Indexing encrypted data is tricky
-CREATE INDEX idx_encrypted_email ON users(encrypted_email);
--- This indexes the encrypted value, which is useless for lookup by plaintext
-```
+8. **How does CREATE INDEX CONCURRENTLY differ from regular CREATE INDEX?**
+   A: `CREATE INDEX CONCURRENTLY` builds the index without locking writes, using three passes. It takes longer but avoids downtime. If it fails, the invalid index must be dropped before retrying.
 
-For indexed lookups on encrypted data:
-- Use deterministic encryption (e.g., AES with same IV per value) — but reduces security
-- Consider a hash index on a salted hash of the value
-- Use application-level search indexes (Elasticsearch) with field-level encryption
+9. **What is index bloat, what causes it, and how do you fix it?**
+   A: Index bloat is wasted space from dead index entries left by UPDATE/DELETE operations. Fix with `REINDEX INDEX CONCURRENTLY`. Ensure autovacuum is tuned. Monitor with `pgstattuple`.
 
-## 8. Common Mistakes
+10. **How would you index a 1B row table with frequent GROUP BY queries on `department_id` aggregating `salary`?**
+    A: Create a covering index on `(department_id) INCLUDE (salary)` for index-only scans. If `department_id` has low cardinality, consider partitioning by department.
 
-1. **No index on foreign key columns** — JOINs perform sequential scans
-2. **Indexing every column** — each index adds write overhead
-3. **Wrong column order in composite index** — leading column doesn't match query patterns
-4. **Ignoring NULL filtering** — PostgreSQL B-tree indexes do include NULLs (unless WHERE clause excludes them)
-5. **Creating indexes during business hours without CONCURRENTLY** — causes table locks
-6. **Over-indexing small tables** — small tables benefit from sequential scans; index overhead outweighs benefits
-7. **Forgetting to drop unused indexes** — waste of space and write performance
-8. **Assuming index will be used for `LIKE '%pattern'`** — only prefix patterns (`pattern%`) use B-tree indexes
-9. **Not analyzing after bulk data loads** — stale statistics lead to optimizer ignoring valid indexes
-10. **Indexing boolean columns without partial index** — most values are equal, index rarely useful
+## Developer Recommendations
 
-## 9. Senior Engineer Perspective
+- **Use composite indexes with equality-first column ordering** — An index on `(status, created_at)` supports `WHERE status = 'PENDING' ORDER BY created_at`. Placing range columns last prevents the index from being used for equality filters after the first range condition.
 
-### Indexing Strategy Design
+- **Prefer partial indexes for low-selectivity columns** — A full index on a boolean column indexes both true and false values. A partial index with `WHERE is_active = TRUE` is dramatically smaller and equally effective.
 
-1. **Gather query patterns**: Analyze slow query log, identify most common WHERE, JOIN, ORDER BY patterns
-2. **Design indexes for queries, not tables**: An index must match the query pattern, including column order
-3. **Consider index maintenance**: Indexes on high-write tables need periodic reindexing
-4. **Monitor index bloat**: In MVCC databases (PostgreSQL), updated/deleted index entries leave dead tuples
-5. **Plan for zero-downtime**: Use CREATE INDEX CONCURRENTLY in migrations
-6. **Test in staging**: Verify index usage with EXPLAIN before rolling to production
-7. **Automation**: Use tools like pg_qualstats, pg_stat_statements, or pgbadger to identify missing index opportunities
+- **Monitor index usage via pg_stat_user_indexes** — Indexes with `idx_scan = 0` waste write throughput and storage with no read benefit. Drop them after testing.
 
-### Index Design Decision Tree
+- **Use covering indexes with INCLUDE for index-only scans** — Adding non-filtered columns via `INCLUDE` avoids heap fetches for frequent queries. The trade-off is larger index size but faster reads.
 
-```
-Is the table read-heavy or write-heavy?
-  read-heavy: Add more indexes for query coverage
-  write-heavy: Minimize indexes, prioritize critical queries
+- **Set fillfactor on tables with frequent UPDATEs** — Default 100 fills pages completely, causing expensive page splits on updates. Set fillfactor to 70-80 to reserve space for in-place updates (HOT updates in PostgreSQL).
 
-What is the query pattern?
-  Equality on multiple columns -> composite index (equality first)
-  Range condition -> index on range column after equality columns
-  ORDER BY -> include sort column in index
-  JOIN column -> always index foreign keys
-  
-What is the column cardinality?
-  High cardinality -> B-tree index
-  Low cardinality with rare value -> partial index
-  Low cardinality with many AND/OR -> bitmap or GIN index
-  JSON/array -> GIN index
-```
+- **Create indexes CONCURRENTLY in production** — Plain `CREATE INDEX` blocks writes. `CREATE INDEX CONCURRENTLY` adds the index without downtime at the cost of slower creation and higher resource usage.
 
-## 10. Interview Questions (20)
-
-### Easy (10)
-
-1. What is a database index?
-2. What is the difference between a clustered and non-clustered index?
-3. What data structure does the default index use?
-4. How does an index speed up queries?
-5. What is a primary key index?
-6. What is a unique index?
-7. Can you index a NULL value?
-8. How many indexes can a table have?
-9. What is the trade-off of adding an index?
-10. What is a full table scan?
-
-### Medium (10)
-
-11. Explain the leftmost prefix rule for composite indexes.
-12. What is the difference between an index scan and an index-only scan?
-13. How would you choose column order in a composite index?
-14. What is a covering index? Give an example.
-15. When would a bitmap index be more efficient than a B-tree index?
-16. Explain index selectivity and why it matters.
-17. What is index bloat and how do you address it?
-18. How does a partial index work? When would you use one?
-19. What is a functional index? Give an example.
-20. How does the database use indexes for ORDER BY?
-
-## 11. Advanced Interview Questions (20)
-
-### Hard (10)
-
-1. Explain the internal algorithm for a B-tree page split and how it affects concurrency.
-2. How does PostgreSQL's heap-only-tuple (HOT) optimization reduce index bloat?
-3. What is the difference between a GiST and GIN index? When would you use each?
-4. How would you design an index for geospatial queries (points within a radius)?
-5. Explain the concept of index skip scan and how PostgreSQL 15+ implements it.
-6. How do partial indexes interact with prepared statements and parameterized queries?
-7. What is the effect of fillfactor on B-tree performance and maintenance?
-8. How would you index a table with 500 columns that are all queryable?
-9. Explain the difference between synchronous and asynchronous index creation (CONCURRENTLY).
-10. How does index deduplication work in PostgreSQL 13+ B-tree indexes?
-
-### System Design (11-20)
-
-11. Design an index maintenance strategy for a 24/7 production system.
-12. How would you automate detection of missing indexes across thousands of databases?
-13. Design a system that recommends indexes based on query workload analysis.
-14. How would you index a time-series database where queries filter on time ranges and device IDs?
-15. Design a search system using GIN indexes for a document store with 10M+ documents.
-16. How would you implement index-based full-text search with ranking in PostgreSQL?
-17. Design a hybrid indexing strategy combining in-memory and disk-based indexes.
-18. How would you handle index rebuilds for a table with 1B rows without downtime?
-19. Design an index sharding strategy for a globally distributed database.
-20. How would you implement a covering index strategy for a table with frequently accessed BLOB columns?
-
-## 12. Expert-Level Interview Questions (10)
-
-1. You have a table with 100M rows and 20 indexes. Write-heavy workload is causing index bloat and poor performance. How do you redesign the indexing strategy?
-2. Design a concurrent B-tree index structure that supports lock-free searches during page splits.
-3. How would you implement a multi-dimensional index (e.g., for 10D vector similarity) on top of PostgreSQL's GiST framework?
-4. Describe how a database can use LSM-trees (LevelDB/RocksDB style) instead of B-trees. When would LSM be preferable?
-5. How would you implement an index advisor that uses machine learning to predict the cost/benefit of candidate indexes?
-6. Design a system where indexes are stored on NVMe SSD while the heap is on HDD, optimizing for cost and performance.
-7. How would you implement partial updates to a JSONB column such that only changed keys are reindexed in the GIN index?
-8. Describe the algorithm for merging multiple B-tree indexes into a single composite index without downtime.
-9. How would you design an index structure that supports both point lookups and similarity search (hybrid B-tree + HNSW)?
-10. Design a distributed index for a global database where write latency to different regions varies from 1ms to 500ms.
-
-## 13. Debugging & Troubleshooting
-
-### Identifying Missing Indexes
-
-```sql
--- PostgreSQL: Queries that would benefit from indexes
-SELECT relname, seq_scan, seq_tup_read, idx_scan,
-       seq_tup_read / NULLIF(seq_scan, 0) AS avg_rows_per_seq_scan
-FROM pg_stat_user_tables
-WHERE seq_scan > 1000
-ORDER BY seq_tup_read DESC
-LIMIT 20;
-
--- MySQL: Full scan queries
-SELECT * FROM sys.schema_unused_indexes;
-SELECT * FROM sys.schema_index_statistics;
-```
-
-### Detecting Index Bloat
-
-```sql
--- PostgreSQL: estimate index bloat
-SELECT
-    current_database(), schemaname, tablename, indexname,
-    ROUND(100 * (avg_leaf_density - 4) / (69 - 4)) AS bloat_pct
-FROM pg_stat_user_indexes;
-
--- More precise bloat estimation with pgstattuple
-CREATE EXTENSION pgstattuple;
-SELECT * FROM pgstatindex('idx_orders_status');
-```
-
-### Checking JPA Index Creation
-
-```yaml
-logging:
-  level:
-    org.hibernate.tool.hbm2ddl: DEBUG
-```
-
-## 14. Comparison Section
-
-| Index Type | Pros | Cons | Best For |
-|-----------|------|------|----------|
-| B-Tree | Balance, general purpose | Not for complex types | Equality, range, sort |
-| Hash | O(1) lookup | Only equality, no sorting | Primary key lookups |
-| GiST | Extensible, multi-purpose | Slower build, larger | FTS, geometry, ranges |
-| GIN | Fast for composite values | Slow inserts | Arrays, JSONB, FTS |
-| BRIN | Tiny index for ordered data | Only works for natural order | Time-series, logs |
-| Bitmap | Efficient for multiple conds | Not for OLTP | Data warehouse |
-| Partial | Small index size | Only covers subset | Frequent filter on rare value |
-| Covering | No heap access | Duplicates data | Frequent query columns |
-| Clustered | Fast range scans | One per table | Primary key range scans |
-
-## 15. Revision Notes
-
-- Index is a copy of data optimized for search — costs storage and write performance
-- B-tree is the default; height stays low even for billions of rows
-- Composite index: leftmost prefix rule — order columns by query pattern
-- Index types matter: use GIN for JSONB/arrays, GiST for geometry, BRIN for time-series
-- Partial indexes save space when queries only filter on a subset
-- Covering indexes (INCLUDE) enable index-only scans
-- Monitor unused indexes and index bloat
-- Use CREATE INDEX CONCURRENTLY to avoid production downtime
-- Hibernate @Index is convenient; complex indexes go in migration scripts
-
-## 16. Cheat Sheet
-
-```
-+-------------------------------------------------------------------+
-|                      INDEXING CHEAT SHEET                         |
-+-------------------------------------------------------------------+
-|                                                                   |
-|  B-TREE INDEX STRUCTURE:                                          |
-|                                                                   |
-|             [Root: 50, 100]                                       |
-|            /        |        \                                    |
-|   [10,20,30,40]  [60,70,80]  [110,120,130]                       |
-|   /  |  |  |  \   /  |  |  \   /   |   |   \                    |
-|  p1 p2 p3 p4 p5  p6 p7 p8 p9  p10  p11 p12 p13                  |
-|  Leaf nodes: (key, row_pointer)                                  |
-|  Height ~ log_fanout(rows) -> typically 3-5 levels               |
-|                                                                   |
-+-------------------------------------------------------------------+
-|  INDEX TYPE SELECTION:                                            |
-|                                                                   |
-|  Query Type                  Recommended Index                   |
-|  ---------------------------+----------------------------------- |
-|  =, <>, IN, <, >, BETWEEN   | B-Tree (default)                   |
-|  ORDER BY                    | B-Tree (match sort order)          |
-|  LIKE 'prefix%'              | B-Tree                            |
-|  LIKE '%any%'                | GIN (trigram) or Full-Text Search |
-|  JSONB @> key-value          | GIN                               |
-|  array_column @> {value}     | GIN                               |
-|  tsvector @@ tsquery         | GIN                               |
-|  geo_column <@ polygon       | GiST (SP-GiST)                    |
-|  timestamp range             | BRIN (if naturally ordered)       |
-|  WHERE status = 'RARE'       | Partial B-Tree                    |
-|  SELECT col1, col2 WHERE...  | Covering B-Tree (with INCLUDE)    |
-|                                                                   |
-+-------------------------------------------------------------------+
-|  COMPOSITE INDEX DESIGN RULES:                                    |
-|                                                                   |
-|  1. Equality conditions first, range conditions last              |
-|  2. High selectivity columns first                                |
-|  3. Leftmost prefix: index (a,b,c) supports:                     |
-|     - WHERE a = ?                    (uses prefix)                |
-|     - WHERE a = ? AND b = ?          (full match)                 |
-|     - WHERE a = ? AND b = ? AND c = ?(full match)                |
-|     - WHERE b = ?                    (no index)                   |
-|     - WHERE a = ? AND c = ?          (only a used)                |
-|                                                                   |
-+-------------------------------------------------------------------+
-|  SPRING BOOT JPA INDEX ANNOTATIONS:                               |
-|                                                                   |
-|  @Table(indexes = {                                               |
-|    @Index(name = "idx_name", columnList = "col1, col2")           |
-|  })                                                               |
-|                                                                   |
-|  @Table(uniqueConstraints = {                                     |
-|    @UniqueConstraint(name = "uq_name", columnNames = {"col1"})    |
-|  })                                                               |
-|                                                                   |
-+-------------------------------------------------------------------+
-|  PRODUCTION INDEX COMMANDS:                                       |
-|                                                                   |
-|  CREATE INDEX CONCURRENTLY idx ON t(col);     -- no lock          |
-|  CREATE UNIQUE INDEX idx ON t(col);           -- unique           |
-|  CREATE INDEX idx ON t(col1, col2 DESC);      -- composite/sort   |
-|  CREATE INDEX idx ON t USING GIN(col);        -- GIN              |
-|  CREATE INDEX idx ON t(col) WHERE cond;       -- partial          |
-|  CREATE INDEX idx ON t(LOWER(col));           -- functional       |
-|  DROP INDEX CONCURRENTLY IF EXISTS idx;       -- drop without lock|
-|  REINDEX INDEX CONCURRENTLY idx;              -- rebuild          |
-|                                                                   |
-+-------------------------------------------------------------------+
+- **Consider BRIN over B-Tree for append-only data** — BRIN indexes are 100-1000x smaller than B-Tree for time-ordered data. They work best when physical page order correlates with the indexed column (e.g., timestamps in log tables).

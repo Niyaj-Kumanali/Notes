@@ -1,685 +1,348 @@
 # Dapper
 
-## 1. Executive Summary
+---
 
-Dapper is a lightweight, high-performance micro-ORM created by the Stack Overflow team. It extends IDbConnection with extension methods for querying, executing, and mapping results to objects. Dapper is not a full ORM — it provides no change tracking, no LINQ provider, no migrations, and no unit of work. Instead, it focuses on fast execution of raw SQL with minimal overhead, making it ideal for performance-critical paths and scenarios where full SQL control is required.
+## Overview
 
-## 2. Core Theory
+- **Definition:** A lightweight, high-performance micro-ORM created by the Stack Overflow team. Extends `IDbConnection` with extension methods for querying, executing, and mapping results to objects.
+- **Why It Exists:** Provides near-ADO.NET performance (~2-10µs overhead per query after cache warmup) with automatic object mapping, parameterized queries, and multi-result-set support, without the overhead of a full ORM (no change tracking, no LINQ provider, no migrations).
+- **Key Concepts:** **`Query<T>`** (returns `IEnumerable<T>`), **`Execute`** (returns rows affected), **`QueryMultiple`** (multiple result sets), **`DynamicParameters`** (flexible parameter bags), **multi-mapping** (one-to-one/one-to-many via `splitOn`), **`buffered: false`** (streaming), and **type handlers** (custom column mapping).
 
-### Key Extension Methods
+---
+
+## Core Concepts
+
+- **Key Extension Methods:**
 
 ```csharp
-// Execute a command (returns rows affected)
-int rows = connection.Execute("UPDATE Products SET Price = @Price WHERE Id = @Id",
-    new { Price = 10.0m, Id = 1 });
-
-// Query and map to typed objects
-IEnumerable<Product> products = connection.Query<Product>(
-    "SELECT * FROM Products WHERE Price > @MinPrice",
-    new { MinPrice = 100.0m });
-
-// Query a single row
-Product product = connection.QueryFirstOrDefault<Product>(
-    "SELECT * FROM Products WHERE Id = @Id",
-    new { Id = 1 });
-
-// Query multiple result sets
-using var multi = connection.QueryMultiple(
-    "SELECT * FROM Products; SELECT * FROM Categories");
-var products = multi.Read<Product>();
-var categories = multi.Read<Category>();
-
-// Query with buffered vs unbuffered
-var stream = connection.Query<Product>(sql, buffered: false); // Streaming
+int rows = connection.Execute("UPDATE Products SET Price = @Price WHERE Id = @Id", new { Price = 10m, Id = 1 });
+IEnumerable<Product> products = connection.Query<Product>("SELECT * FROM Products WHERE Price > @Min", new { Min = 100m });
+Product product = connection.QueryFirstOrDefault<Product>("SELECT * FROM Products WHERE Id = @Id", new { Id = 1 });
 ```
 
-### How Dapper Maps Results
+- **Deserialization Cache:** When `Query<T>` is first called for a given `<T, column-set>` combination, Dapper inspects `T`'s properties and the result set columns, emits an IL delegate for fast deserialization, and caches it in a `ConcurrentDictionary`. Subsequent calls are fast delegate invocations. First call is slower (IL emit).
+- **Connection Management:** Dapper does NOT manage connections. It opens the connection if closed (on first command) and closes it after if it opened it. If you opened the connection, you must close it — especially important for transactions.
+- **Parameterization:** All query parameters via anonymous types or `DynamicParameters` are fully parameterized, preventing SQL injection. Never concatenate user input into SQL strings.
 
 ```csharp
-// 1. Dapper reads the IDataReader from the command
-// 2. For each row, it creates an instance of T (activator)
-// 3. For each column in the result set:
-//    a. Look up a property/field on T with matching name (case-insensitive)
-//    b. If found, set the value (type coercion via Convert.ChangeType if needed)
-// 4. Mapping results are cached in ConcurrentDictionary (by type + column set)
-
-// Dynamic mapping:
-dynamic result = connection.QueryFirst("SELECT Id, Name FROM Products WHERE Id = @Id", new { Id = 1 });
-int id = result.Id;
-string name = result.Name;
+// Multi-mapping: one-to-one
+var order = connection.Query<Order, Customer, Order>(
+    "SELECT o.*, c.* FROM Orders o JOIN Customers c ON c.Id = o.CustomerId",
+    (order, customer) => { order.Customer = customer; return order; },
+    splitOn: "CustomerId").FirstOrDefault();
 ```
 
-## 3. Under-the-Hood Deep Dive
-
-### Method Cache Internals
-
-```csharp
-// Dapper maintains several caches:
-// - SqlMapper.LazyCache: Dictionary<Type, Func<IDataReader, object>> for type deserialization
-// - TypeDeserializerCache: caches per-type serializers
-// - GetPropertyInfo: cached per TypeInfo
-
-// Deserialization function compilation:
-// 1. When Query<T> is first called, Dapper inspects T's properties and the result set's columns
-// 2. For each column, find matching member (case-insensitive, exact then fallback)
-// 3. Emit IL or use Expression trees to create a fast deserialization delegate
-// 4. Cache the delegate for subsequent calls
-
-// This means first query for a given <T, columns> combination is slower
-// Subsequent queries are very fast (delegate invocation).
-```
-
-### Connection Management
+- **Multi-Mapping (`splitOn`):** Dapper splits result set columns at the `splitOn` column name. The first `T` gets columns before `splitOn`; the second `T` gets columns after. Default `splitOn` is `"Id"`. For one-to-many, use a dictionary lookup to group children.
+- **GridReader (`QueryMultiple`):** Returns a `SqlMapper.GridReader` holding the `IDataReader`. `Read<T>()` reads the current result set and advances to the next. Dispose the reader when done to close the underlying reader.
+- **Type Handlers:** Custom mapping via `SqlMapper.AddTypeHandler<T>(new JsonTypeHandler<Metadata>())` for JSON columns, `DateOnly`, etc.
 
 ```csharp
-// Dapper does NOT manage connections. It uses the IDbConnection you pass.
-// Best practice:
-// - ASP.NET Core: open connection per request (scoped)
-// - Connection pooling handled by ADO.NET (SqlConnectionPool)
-// - Always use 'using' or dispose connections
-
-// Dapper will:
-// - Open the connection if it's closed (on first command)
-// - Close it after the command if it opened it
-// - NOT close it if you opened it yourself
-
-// This is particularly important for transactions:
-connection.Open();
-using var tx = connection.BeginTransaction();
-connection.Execute(sql, transaction: tx);
-tx.Commit();
-// connection.Close() is YOUR responsibility
-```
-
-### GridReader (QueryMultiple)
-
-```csharp
-// QueryMultiple returns a SqlMapper.GridReader
-// Internally it holds the IDataReader and advances through result sets
-// Read<T>() reads the current result set and advances to the next
-
-// IMPORTANT: Dispose GridReader when done to close the underlying reader
-// Unconsumed result sets are dropped on dispose
-```
-
-## 4. Production Code Examples
-
-```csharp
-// Full CRUD with Dapper
-public class ProductRepository
-{
-    private readonly string _connectionString;
-
-    public ProductRepository(string connectionString) =>
-        _connectionString = connectionString;
-
-    public async Task<Product?> GetByIdAsync(int id)
-    {
-        await using var conn = new SqlConnection(_connectionString);
-        return await conn.QueryFirstOrDefaultAsync<Product>(
-            "SELECT * FROM Products WHERE Id = @Id",
-            new { Id = id });
-    }
-
-    public async Task<IReadOnlyList<Product>> GetByPriceRangeAsync(decimal min, decimal max)
-    {
-        await using var conn = new SqlConnection(_connectionString);
-        var results = await conn.QueryAsync<Product>(
-            "SELECT * FROM Products WHERE Price BETWEEN @Min AND @Max",
-            new { Min = min, Max = max });
-        return results.ToList();
-    }
-
-    public async Task<int> CreateAsync(Product product)
-    {
-        await using var conn = new SqlConnection(_connectionString);
-        return await conn.ExecuteAsync(
-            @"INSERT INTO Products (Name, Price, CategoryId, CreatedAt)
-              VALUES (@Name, @Price, @CategoryId, @CreatedAt)",
-            product);
-    }
-
-    public async Task<bool> UpdatePriceAsync(int id, decimal price)
-    {
-        await using var conn = new SqlConnection(_connectionString);
-        int rows = await conn.ExecuteAsync(
-            "UPDATE Products SET Price = @Price WHERE Id = @Id",
-            new { Id = id, Price = price });
-        return rows > 0;
-    }
-
-    public async Task<bool> DeleteAsync(int id)
-    {
-        await using var conn = new SqlConnection(_connectionString);
-        int rows = await conn.ExecuteAsync(
-            "DELETE FROM Products WHERE Id = @Id",
-            new { Id = id });
-        return rows > 0;
-    }
-}
-```
-
-```csharp
-// Multi-mapping: one-to-one relationships
-public class Order
-{
-    public int Id { get; set; }
-    public int CustomerId { get; set; }
-    public Customer? Customer { get; set; }
-    public decimal Total { get; set; }
-}
-
-public class Customer
-{
-    public int Id { get; set; }
-    public string Name { get; set; } = "";
-}
-
-// Query with JOIN and split on CustomerId
-var sql = @"SELECT o.*, c.*
-            FROM Orders o
-            INNER JOIN Customers c ON c.Id = o.CustomerId
-            WHERE o.Id = @OrderId";
-
-var order = await connection.QueryAsync<Order, Customer, Order>(
-    sql,
-    (order, customer) =>
-    {
-        order.Customer = customer;
-        return order;
-    },
-    new { OrderId = 1 },
-    splitOn: "CustomerId")  // Dapper splits columns at this column name
-    .FirstOrDefault();
-```
-
-```csharp
-// Multi-mapping: one-to-many relationships
-public class Category
-{
-    public int Id { get; set; }
-    public string Name { get; set; } = "";
-    public List<Product> Products { get; set; } = new();
-}
-
-var sql = @"SELECT c.*, p.*
-            FROM Categories c
-            LEFT JOIN Products p ON p.CategoryId = c.Id
-            WHERE c.Id = @CategoryId";
-
-var lookup = new Dictionary<int, Category>();
-var categories = connection.Query<Category, Product, Category>(
-    sql,
-    (category, product) =>
-    {
-        if (!lookup.TryGetValue(category.Id, out var existing))
-        {
-            existing = category;
-            lookup.Add(category.Id, existing);
-        }
-        if (product is not null)
-            existing.Products.Add(product);
-        return existing;
-    },
-    new { CategoryId = 1 },
-    splitOn: "Id")
-    .Distinct()
-    .ToList();
-```
-
-```csharp
-// Stored procedure execution
-public async Task<List<Product>> SearchProductsAsync(
-    string searchTerm, int page, int pageSize)
-{
-    await using var conn = new SqlConnection(_connectionString);
-    var results = await conn.QueryAsync<Product>(
-        "usp_SearchProducts",
-        new
-        {
-            SearchTerm = searchTerm,
-            PageNumber = page,
-            PageSize = pageSize
-        },
-        commandType: CommandType.StoredProcedure);
-    return results.ToList();
-}
-```
-
-```csharp
-// Bulk insert with table-valued parameters
-public async Task BulkInsertAsync(IEnumerable<Product> products)
-{
-    await using var conn = new SqlConnection(_connectionString);
-    var table = new DataTable();
-    table.Columns.Add("Name", typeof(string));
-    table.Columns.Add("Price", typeof(decimal));
-    table.Columns.Add("CategoryId", typeof(int));
-
-    foreach (var p in products)
-        table.Rows.Add(p.Name, p.Price, p.CategoryId);
-
-    await conn.ExecuteAsync(
-        "INSERT INTO Products (Name, Price, CategoryId) SELECT Name, Price, CategoryId FROM @Products",
-        new { Products = table.AsTableValuedParameter("dbo.ProductType") });
-}
-```
-
-```csharp
-// Unit of work with transactions
-public class UnitOfWork : IDisposable
-{
-    private readonly IDbConnection _connection;
-    private IDbTransaction? _transaction;
-
-    public UnitOfWork(string connectionString)
-    {
-        _connection = new SqlConnection(connectionString);
-        _connection.Open();
-        _transaction = _connection.BeginTransaction();
-    }
-
-    public IDbConnection Connection => _connection;
-    public IDbTransaction? Transaction => _transaction;
-
-    public async Task CommitAsync()
-    {
-        _transaction?.Commit();
-        _transaction?.Dispose();
-        _transaction = null;
-    }
-
-    public async Task RollbackAsync()
-    {
-        _transaction?.Rollback();
-        _transaction?.Dispose();
-        _transaction = null;
-    }
-
-    public void Dispose()
-    {
-        _transaction?.Dispose();
-        _connection?.Dispose();
-    }
-}
-```
-
-```csharp
-// Dynamic parameters for flexible queries
-public async Task<IEnumerable<Product>> FlexibleSearchAsync(
-    string? name = null,
-    decimal? minPrice = null,
-    decimal? maxPrice = null,
-    int? categoryId = null)
-{
-    var sql = new StringBuilder("SELECT * FROM Products WHERE 1=1");
-    var parameters = new DynamicParameters();
-
-    if (name is not null)
-    {
-        sql.Append(" AND Name LIKE @Name");
-        parameters.Add("Name", $"%{name}%");
-    }
-    if (minPrice.HasValue)
-    {
-        sql.Append(" AND Price >= @MinPrice");
-        parameters.Add("MinPrice", minPrice.Value);
-    }
-    if (maxPrice.HasValue)
-    {
-        sql.Append(" AND Price <= @MaxPrice");
-        parameters.Add("MaxPrice", maxPrice.Value);
-    }
-    if (categoryId.HasValue)
-    {
-        sql.Append(" AND CategoryId = @CategoryId");
-        parameters.Add("CategoryId", categoryId.Value);
-    }
-
-    return await connection.QueryAsync<Product>(sql.ToString(), parameters);
-}
-```
-
-## 5. Real-World Scenarios
-
-**Scenario 1: Stack Overflow Itself**
-- Dapper was created for Stack Overflow's high-traffic environment.
-- Raw SQL for full control over query plans.
-- Microseconds-level overhead per query.
-
-**Scenario 2: Reporting System**
-- Complex SQL with window functions, CTEs, and aggregations.
-- Dapper maps to flat DTOs or dynamic types.
-- `QueryMultiple` for paginated results + total count.
-
-**Scenario 3: High-Throughput API**
-- `buffered: false` for streaming large result sets.
-- `Async` methods for non-blocking I/O.
-- Raw SQL with query hints for index selection.
-
-**Scenario 4: Migration from EF Core**
-- Performance-critical queries moved to Dapper.
-- `Dapper.Contrib` for simple CRUD boilerplate.
-- Manual SQL migration scripts.
-
-## 6. Performance
-
-```csharp
-// Dapper overhead per query: ~2-10 microseconds (after cache warmup)
-// EF Core overhead: ~50-500 microseconds (query compilation + change tracking)
-
-// Raw ADO.NET: ~1-5 microseconds (but no object mapping)
-// Dapper vs EF Core vs ADO.NET benchmark (1000 queries):
-
-// Dapper:          ~15ms, 1.2MB allocated
-// EF Core (NT):    ~80ms, 8.5MB allocated
-// EF Core (Track): ~120ms, 15MB allocated
-// ADO.NET (manual):~10ms, 0.8MB allocated
-```
-
-### Optimization Tips
-
-```csharp
-// 1. Use buffered: false for large result sets (streams, no memory spike)
-var stream = connection.Query<Product>("SELECT * FROM HugeTable", buffered: false);
-
-// 2. Use Async methods for non-blocking
-await connection.QueryAsync<Product>(sql);
-
-// 3. Use Dapper's type handler for custom types
-SqlMapper.AddTypeHandler(new JsonTypeHandler<Metadata>());
-
-// 4. Pre-compile queries? Dapper doesn't have compiled queries
-//    But the deserialization is cached per <T, columns>, so subsequent calls are fast
-
-// 5. Use CommandBehavior.SequentialAccess for large binary data
-var reader = connection.ExecuteReader(sql, commandBehavior: CommandBehavior.SequentialAccess);
-```
-
-## 7. Security
-
-```csharp
-// Dapper parameterizes ALL query parameters automatically
-// This prevents SQL injection when using anonymous types or DynamicParameters
-
-// SAFE: parameterized
-connection.Execute("DELETE FROM Products WHERE Id = @Id", new { Id = userInput });
-
-// DANGEROUS: string concatenation
-connection.Execute($"DELETE FROM Products WHERE Id = {userInput}"); // Injection!
-
-// For dynamic table/column names:
-// - DO validate against a whitelist
-// - DO NOT concatenate user input directly
-var allowedTables = new[] { "Products", "Categories" };
-if (!allowedTables.Contains(tableName))
-    throw new ArgumentException("Invalid table name");
-connection.Execute($"SELECT * FROM {tableName}"); // Safe because whitelisted
-
-// Connection strings: use managed identity or environment variables
-```
-
-## 8. Common Mistakes
-
-```csharp
-// MISTAKE 1: Not disposing connections
-var conn = new SqlConnection(connStr);
-var result = conn.Query(sql); // Connection not disposed!
-// FIX: await using var conn = new SqlConnection(connStr);
-
-// MISTAKE 2: Forgetting to open connection
-// (Dapper opens/closes automatically, but for transactions you must open manually)
-
-// MISTAKE 3: Not handling Dapper's "splitOn" correctly in multi-mapping
-connection.Query<Order, Customer, Order>(sql, map, splitOn: "Id");
-// splitOn defaults to "Id". If your JOIN has multiple Id columns, results will be wrong
-// FIX: specify splitOn explicitly for each JOIN boundary
-
-// MISTAKE 4: Using buffered: true for huge result sets
-var all = connection.Query<HugeRow>("SELECT * FROM BillionRowTable"); // OutOfMemory!
-// FIX: use buffered: false and iterate
-
-// MISTAKE 5: Ignoring Dapper's return type
-// ExecuteAsync returns Task<int> (rows affected), not null
-// Always check the return value
-
-// MISTAKE 6: Multi-mapping in query with no matching rows
-var order = connection.Query<Order, Customer, Order>(sql, map, splitOn: "Id").FirstOrDefault();
-// If no rows, FirstOrDefault returns default(Order) = null
-
-// MISTAKE 7: Mixing sync and async
-connection.QueryAsync(sql).Wait(); // Deadlock possible!
-// FIX: await all the way
-
-// MISTAKE 8: Not caching connection strings
-// FIX: store in configuration, not hardcoded
-
-// MISTAKE 9: Using Dapper with Entity Framework in same transaction
-// EF and Dapper use different connections; wrap in TransactionScope for distributed tx
-
-// MISTAKE 10: Overlooking Dapper.Contrib for simple CRUD
-// Dapper.Contrib provides Get<T>, Insert<T>, Update<T>, Delete<T> for simple cases
-```
-
-## 9. Senior Engineer Perspective
-
-**1. Dapper is not a replacement for EF Core.** Use Dapper for queries where you need full SQL control and maximum performance; use EF Core for complex domain logic with change tracking.
-
-**2. Use Dapper with CQRS:** EF Core on the command side (domain logic); Dapper on the query side (read models, reporting).
-
-**3. Type handlers for custom column mappings:**
-
-```csharp
+// Type handler for JSON columns
 public class JsonTypeHandler<T> : SqlMapper.TypeHandler<T>
 {
-    public override T Parse(object value) =>
-        JsonSerializer.Deserialize<T>((string)value)!;
-
+    public override T Parse(object value) => JsonSerializer.Deserialize<T>((string)value)!;
     public override void SetValue(IDbDataParameter parameter, T value) =>
         parameter.Value = JsonSerializer.Serialize(value);
 }
-
-SqlMapper.AddTypeHandler(new JsonTypeHandler<Metadata>());
 ```
 
-**4. Use `SqlMapper.IParameterCallback` for output parameters.**
+---
 
-**5. Consider `Dapper.FastCrud` or `DapperExtensions` if you need more LINQ-like syntax but prefer Dapper's performance.**
+## Common Mistakes
 
-**6. Always use `AsList()` on `QueryAsync` results** to avoid multiple enumeration:
+- **Not disposing connections** — `var conn = new SqlConnection(connStr); conn.Query(sql);` leaks the connection. Always use `await using`.
+- **Forgetting to open connection for transactions** — Dapper opens/closes automatically for simple queries, but transactions require manual `connection.Open()` before `BeginTransaction`.
+- **Wrong `splitOn` in multi-mapping** — If a JOIN has multiple `Id` columns and `splitOn` defaults to `"Id"`, all split columns after the first get the second table's `Id` value — wrong matching. Specify `splitOn` explicitly at each join boundary.
+- **Using `buffered: true` for huge result sets** — `connection.Query<HugeRow>("SELECT * FROM BillionRowTable")` loads all into memory. Use `buffered: false` and iterate.
+- **Mixing sync and async** — `connection.QueryAsync(sql).Result` can deadlock. Always await all the way.
+- **Multi-mapping with no matching rows** — `Query<Order, Customer, Order>(...).FirstOrDefault()` returns `null` if no rows. Check for null before accessing.
+- **Not checking return value** — `ExecuteAsync` returns `Task<int>` (rows affected). Ignoring it misses error signals or unexpected results.
+
+```csharp
+// Always parameterize — never concatenate
+connection.Execute($"DELETE FROM Products WHERE Id = {userInput}"); // Injection!
+connection.Execute("DELETE FROM Products WHERE Id = @Id", new { Id = userInput }); // Safe
+```
+
+---
+
+## Key Design Considerations
+
+- **Dapper is not a replacement for EF Core** — Use Dapper for queries requiring full SQL control and maximum performance. Use EF Core for complex domain logic with change tracking.
+- **CQRS pattern with Dapper** — EF Core on the command side (write with domain logic); Dapper on the query side (read models, reporting, complex joins).
+- **Type handlers for custom column types** — Register type handlers for JSON columns, spatial types, `DateOnly`, etc. at application startup.
+- **Use `AsList()` on `QueryAsync` results** — `(await conn.QueryAsync<Product>(sql)).AsList()` returns `List<T>` to avoid multiple enumeration of the cached result.
 
 ```csharp
 var results = (await conn.QueryAsync<Product>(sql)).AsList();
 ```
 
-**7. Connection pooling:** Each `new SqlConnection` uses the pool (by connection string). Creating many connections is cheap if pooling is enabled (default).
+- **Connection pooling is automatic** — `new SqlConnection(connStr)` uses ADO.NET's connection pool keyed by connection string. Creating many connections is cheap if pooling is enabled (default).
+- **Dapper.Contrib for simple CRUD** — Provides `Get<T>`, `Insert<T>`, `Update<T>`, `Delete<T>` for simple cases without writing SQL.
+- **Use `CommandDefinition` for fine-grained control** — Set `commandTimeout`, `commandType`, `cancellationToken`, and transaction on a `CommandDefinition` object.
 
-## 10. Interview Questions (Easy)
+---
 
-1. What is Dapper and why was it created?
-2. How do you execute a query with Dapper?
-3. How does Dapper map query results to objects?
-4. What is the difference between `Query` and `Execute`?
-5. How do you pass parameters to a Dapper query?
-6. What is `QueryFirstOrDefault`?
-7. What is `DynamicParameters` used for?
-8. How does Dapper handle SQL injection?
-9. What is the difference between `buffered: true` and `buffered: false`?
-10. How do you execute a stored procedure with Dapper?
+## Real-World Scenarios
 
-## 11. Interview Questions (Medium)
-
-1. Explain how Dapper's multi-mapping (`Query<T1, T2, TReturn>`) works internally.
-2. What is the `splitOn` parameter and how does it work?
-3. How does Dapper cache type deserialization and what are the implications?
-4. Compare Dapper + raw SQL vs EF Core LINQ for complex reporting queries.
-5. How do you use `QueryMultiple` and what's the internal mechanism?
-6. Explain how to handle one-to-many relationships with Dapper.
-7. What is `Dapper.Contrib` and when would you use it?
-8. How does Dapper handle custom type mapping (type handlers)?
-9. Explain the performance characteristics of Dapper vs ADO.NET vs EF Core.
-10. How do you use Dapper with transactions?
-
-## 12. Advanced Interview Questions (Hard)
-
-1. Explain Dapper's IL-based deserialization cache in detail. How does it achieve near-ADO.NET performance?
-2. Design a Dapper-based repository that supports unit of work, transactions, and multi-tenancy.
-3. Implement a custom Dapper type handler for a `DateOnly` / `TimeOnly` column.
-4. Explain how `SqlMapper.LazyCache` works and how to clear it if needed.
-5. Design a Dapper extension that automatically adds soft-delete filters to queries.
-6. Implement a paging helper using Dapper that returns total count + page data in one round trip.
-7. How would you handle database provider abstraction with Dapper (SQL Server vs PostgreSQL)?
-8. Design a bulk insert strategy using Dapper that outperforms individual inserts.
-9. Explain how to use Dapper's `CommandDefinition` for fine-grained command control.
-10. Implement a Dapper-based multi-result-set sproc executor that maps to a unit of work.
-
-## 13. Interview Questions (System Design)
-
-1. Design a CQRS system using Dapper for reads and EF Core for writes.
-2. Design a high-throughput read layer for a social media feed using Dapper.
-3. Design a reporting dashboard with complex SQL queries mapped via Dapper.
-4. Design a pagination strategy for 10M+ rows using keyset pagination with Dapper.
-5. Design a data warehouse ingestion pipeline using Dapper bulk operations.
-6. Design a multi-database query executor that queries SQL Server + PostgreSQL via Dapper.
-7. Design an audit logging system using Dapper with temporal tables.
-8. Design a distributed query engine using Dapper across sharded databases.
-9. Design a materialized view refresh system using Dapper.
-10. Design a real-time analytics pipeline combining Dapper with SignalR streaming.
-
-## 14. Expert-Level Interview Questions (Architect)
-
-1. Architect a high-performance ORM that combines Dapper's mapping speed with EF Core's change tracking and LINQ support.
-2. Design a distributed query federator using Dapper that transparently routes queries to appropriate shards and aggregates results.
-3. Architect a code-first model generator that reverse-engineers SQL schema into C# classes and Dapper mapping code.
-4. Design a query profiler interceptor for Dapper that captures query execution time, row counts, and parameter values across all queries.
-5. Architect a schema migration tool that works alongside Dapper, generating versioned SQL scripts with rollback support.
-6. Design a polyglot persistence layer where Dapper abstracts SQL Server, PostgreSQL, and MySQL behind a common repository interface.
-7. Architect a real-time change data capture (CDC) system that uses Dapper to poll for changes and streams them via Kafka.
-8. Design a connection multiplexing layer for Dapper that pools and reuses connections across multiple repository instances.
-9. Architect a dynamic query builder that generates optimized SQL based on runtime parameters, using Dapper for execution.
-10. Design a cross-cutting instrumentation system using Dapper's profiling hooks that emits OpenTelemetry spans for every query.
-
-## 15. Debugging & Troubleshooting
+### Scenario 1: CQRS-Based Order Management System
+**Context:** An e-commerce system uses CQRS — EF Core for commands (write), Dapper for queries (read). The read side must efficiently fetch complex order summaries with multiple joins.
 
 ```csharp
-// Enable Dapper logging
-SqlMapper.LogHandler = (message, parameters) =>
+public class OrderQueries
 {
-    Debug.WriteLine(message);
-    // Log parameters too
-};
+    private readonly string _connectionString;
 
-// Or use MiniProfiler with Dapper
-// Install-Package MiniProfiler.AspNetCore
+    public async Task<OrderSummary?> GetOrderSummaryAsync(int orderId)
+    {
+        const string sql = @"
+            SELECT 
+                o.Id, o.OrderNumber, o.OrderDate, o.Status, o.TotalAmount,
+                c.Id, c.Name, c.Email,
+                oi.Id, oi.ProductName, oi.Quantity, oi.UnitPrice
+            FROM Orders o
+            JOIN Customers c ON c.Id = o.CustomerId
+            JOIN OrderItems oi ON oi.OrderId = o.Id
+            WHERE o.Id = @OrderId
+            ORDER BY oi.Id";
 
-// Common issues:
-// - "Column does not match property": column vs property name mismatch
-//   -> Use column aliases: SELECT Name AS ProductName FROM ...
-// - "No parameterless constructor": Dapper needs parameterless constructor or constructor with matching params
-// - "Invalid object name": wrong table name or schema
-// - "Timeout expired": long-running query; add CommandTimeout
-// - "Cannot open database": connection string or server issue
+        await using var conn = new SqlConnection(_connectionString);
 
-// Debug SQL:
-// - SQL Server Profiler / Extended Events
-// - `SET STATISTICS IO ON` before queries
-// - Use `Print` or `RAISERROR` in stored procedures
+        var orderLookup = new Dictionary<int, OrderSummary>();
+
+        await conn.QueryAsync<OrderSummary, CustomerInfo, OrderItem, OrderSummary>(
+            sql,
+            (order, customer, item) =>
+            {
+                if (!orderLookup.TryGetValue(order.Id, out var existing))
+                {
+                    order.Customer = customer;
+                    order.Items = new List<OrderItem>();
+                    orderLookup[order.Id] = existing = order;
+                }
+                existing.Items.Add(item);
+                return existing;
+            },
+            new { OrderId = orderId },
+            splitOn: "Id,Id");
+
+        return orderLookup.Values.FirstOrDefault();
+    }
+}
 ```
 
-## 16. Comparison Section
+### Scenario 2: High-Throughput Telemetry Ingestion
+**Context:** A telemetry service ingests 10K device readings/second. Each reading must be inserted with minimal overhead. Uses Dapper with table-valued parameters for batch inserts.
 
+```csharp
+public class TelemetryIngestionService
+{
+    private readonly string _connectionString;
+
+    public async Task IngestBatchAsync(IEnumerable<TelemetryReading> readings, CancellationToken ct)
+    {
+        await using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync(ct);
+        using var tran = conn.BeginTransaction();
+
+        try
+        {
+            // Create DataTable for TVP
+            var dt = new DataTable();
+            dt.Columns.Add("DeviceId", typeof(string));
+            dt.Columns.Add("Timestamp", typeof(DateTime));
+            dt.Columns.Add("MetricType", typeof(string));
+            dt.Columns.Add("Value", typeof(double));
+            dt.Columns.Add("Metadata", typeof(string));
+
+            foreach (var r in readings)
+                dt.Rows.Add(r.DeviceId, r.Timestamp, r.MetricType, r.Value, 
+                    JsonSerializer.Serialize(r.Metadata));
+
+            // Bulk insert via TVP — single round trip for all rows
+            await conn.ExecuteAsync(
+                "INSERT INTO Telemetry (DeviceId, Timestamp, MetricType, Value, Metadata) " +
+                "SELECT DeviceId, Timestamp, MetricType, Value, Metadata FROM @Readings",
+                new { Readings = dt.AsTableValuedParameter("dbo.TelemetryType") },
+                transaction: tran,
+                commandTimeout: 30);
+
+            tran.Commit();
+        }
+        catch
+        {
+            tran.Rollback();
+            throw;
+        }
+    }
+}
 ```
-+-----------------------+----------------+----------------+----------------+
-| Feature               | Dapper         | EF Core        | ADO.NET        |
-+-----------------------+----------------+----------------+----------------+
-| ORM type              | Micro-ORM      | Full ORM       | None           |
-| SQL abstraction       | Raw SQL        | LINQ + SQL     | Raw SQL        |
-| Object mapping        | Automatic      | Automatic      | Manual         |
-| Change tracking       | No             | Yes            | No             |
-| Query compilation     | Cached IL      | LINQ -> SQL    | N/A            |
-| Migration support     | No             | Yes            | No             |
-| Performance overhead  | ~2-10 us       | ~50-500 us     | ~1-5 us        |
-| Learning curve        | Low            | High           | Low            |
-| SQL injection safety  | Parameterized  | Parameterized  | Manual         |
-| Best for              | Performance    | Complex domain | Lowest level   |
-+-----------------------+----------------+----------------+----------------+
 
-+-----------------------+----------------+----------------+----------------+
-| Aspect                | Dapper sync    | Dapper async   | Raw ADO async  |
-+-----------------------+----------------+----------------+----------------+
-| Overhead per query    | ~2 us          | ~5 us          | ~1 us          |
-| Thread usage          | Blocks         | Non-blocking   | Non-blocking   |
-| Memory allocation     | Low            | Low            | Minimal        |
-| Code complexity       | Low            | Low            | High           |
-| Cancellation support  | No             | Yes            | Yes            |
-| Scalability           | Good           | Excellent      | Excellent      |
-+-----------------------+----------------+----------------+----------------+
+### Scenario 3: Dynamic Reporting with Custom Type Handlers
+**Context:** A reporting dashboard allows users to write custom SQL queries. Results include JSON columns and spatial data that need custom deserialization.
+
+```csharp
+// Register custom type handlers at startup
+SqlMapper.AddTypeHandler(new JsonListHandler<AuditEntry>());
+SqlMapper.AddTypeHandler(new SqlGeographyHandler());
+
+public class ReportingService
+{
+    public async Task<IEnumerable<dynamic>> ExecuteReportAsync(string sql, object parameters)
+    {
+        await using var conn = new SqlConnection(_connectionString);
+        
+        // Use buffered: false for large result sets
+        return await conn.QueryAsync(sql, parameters, commandTimeout: 120, buffered: false);
+    }
+}
+
+// Custom type handler for JSON columns
+public class JsonListHandler<T> : SqlMapper.TypeHandler<List<T>>
+{
+    public override List<T> Parse(object value) =>
+        JsonSerializer.Deserialize<List<T>>((string)value) ?? new List<T>();
+
+    public override void SetValue(IDbDataParameter parameter, List<T> value) =>
+        parameter.Value = JsonSerializer.Serialize(value);
+}
+
+// Custom type handler for SQL Geography
+public class SqlGeographyHandler : SqlMapper.TypeHandler<SqlGeography>
+{
+    public override SqlGeography Parse(object value) =>
+        SqlGeography.Parse(new SqlString((string)value));
+
+    public override void SetValue(IDbDataParameter parameter, SqlGeography value) =>
+        parameter.Value = value.ToString();
+}
 ```
 
-## 17. Revision Notes
+---
 
-- Extends `IDbConnection` with `Query`, `QueryAsync`, `Execute`, `ExecuteAsync`.
-- Parameters via anonymous types or `DynamicParameters` (always parameterized).
-- Multi-mapping: `Query<T1,T2,TReturn>(sql, map, splitOn)`.
-- `QueryMultiple` for multiple result sets from one command.
-- `buffered: false` for streaming large results (avoid memory spikes).
-- `Dapper.Contrib` adds `Get<T>`, `Insert<T>`, `Update<T>`, `Delete<T>`.
-- Custom type handlers via `SqlMapper.AddTypeHandler`.
-- Caches deserialization IL per `<T, columns>` combination.
-- No change tracking, no LINQ, no migrations.
-- Use for performance-critical queries with full SQL control.
+## Scenario-Based Questions
 
-## 18. Cheat Sheet
+1. **Q: You are building a high-traffic API endpoint that returns a list of products with their categories. The query joins 3 tables. You get the same performance with Dapper and EF Core. What should you consider?**
+   A: For simple queries, EF Core's overhead (~50-200µs) may be negligible at low concurrency. As traffic scales, Dapper's lower per-query overhead (~2-10µs) and 4-10x lower memory allocation become significant. Consider CQRS: use EF Core for writes (change tracking is valuable) and Dapper for reads. Also consider: EF Core's query plan cache can cause memory pressure with many unique queries; Dapper's cache is purely column-based and bounded in practice.
 
+2. **Q: You need to import 1M rows from a CSV into SQL Server daily. Using Dapper's `ExecuteAsync` with individual INSERTs takes 30 minutes. How do you optimize?**
+   A: Use table-valued parameters (TVP): define a user-defined table type in SQL, create a `DataTable` in C#, populate it, and execute a single `conn.ExecuteAsync("INSERT ... SELECT * FROM @tvp", new { tvp = dt.AsTableValuedParameter("..."))`. This reduces 1M round trips to 1. For even faster bulk operations, use `SqlBulkCopy` directly (which is what Dapper does not wrap). TVP via Dapper typically achieves 100K+ rows/second vs ~1K rows/second with individual inserts.
+
+3. **Q: You have a Dapper query that returns 500K rows for a reporting export. The server's memory spikes to 2GB. How do you fix it?**
+   A: Use `buffered: false` in `QueryAsync` — this returns a streaming `IEnumerable<T>` that reads one row at a time from the `IDataReader`. Materialize only what you need. For CSV export, write each row to the response stream as it's read. Example: `await conn.QueryAsync<Product>(sql, buffered: false).SelectAwait(async p => await writer.WriteLineAsync(p.ToCsv()))`. This keeps memory at O(1) regardless of result set size.
+
+4. **Q: Your Dapper multi-mapping query isn't populating child objects correctly. The `splitOn` column appears in multiple tables. What's happening?**
+   A: With `splitOn: "Id"`, Dapper splits on the FIRST `Id` column in the result set. If both `Orders` and `Customers` have an `Id` column, the customer's `Id` gets mapped as part of the `Order` object (wrong). Fix: use column aliases in SQL (e.g., `SELECT o.Id AS OrderId, o.*, c.Id AS CustomerId, c.* ...`) and set `splitOn: "CustomerId"`. This ensures each split point is unambiguous.
+
+5. **Q: You are using Dapper in a multitenant SaaS application. Each tenant has a separate database. How do you manage connections efficiently?**
+   A: Use a connection string provider that maps tenant IDs to connection strings (from a secure config or key vault). Create a new `SqlConnection` per request — ADO.NET connection pooling makes this cheap (pool hit is ~1µs). Never reuse connections across requests. Use `IHttpContextAccessor` to resolve the tenant ID and pass it to a factory method. For multi-tenant single database with row-level security, pass `TenantId` as a parameter to every query.
+
+6. **Q: You are debugging a thread-pool starvation issue caused by Dapper queries. The pattern is `Task.Run(() => conn.Query(sql)).Result`. What's wrong and how do you fix it?**
+   A: This blocks the thread pool thread with `.Result` AND uses `Task.Run` to push sync work to another thread pool thread. The blocked thread can't process other work items, causing starvation. Fix: use async Dapper methods (`QueryAsync`) and `await` them all the way up. If you must call sync Dapper from an async context (rare), offload to a dedicated thread, not the thread pool. For console apps, use `.GetAwaiter().GetResult()`. In ASP.NET Core, never block on async.
+
+7. **Q: You need to implement a paginated search with dynamic filters and sorting. Dapper queries are raw SQL. How do you build the SQL without SQL injection?**
+   A: Build the WHERE clause dynamically using a `List<string>` conditions and `DynamicParameters`. Never concatenate user input into SQL. Example:
+```csharp
+var sql = "SELECT * FROM Products WHERE 1=1";
+var parameters = new DynamicParameters();
+if (!string.IsNullOrEmpty(name)) { sql += " AND Name LIKE @Name"; parameters.Add("Name", $"%{name}%"); }
+if (minPrice.HasValue) { sql += " AND Price >= @MinPrice"; parameters.Add("MinPrice", minPrice.Value); }
+sql += " ORDER BY Id OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY";
+parameters.Add("Offset", page * pageSize);
+parameters.Add("PageSize", pageSize);
 ```
-+------------------------------------------------------------------+
-|                    DAPPER CHEAT SHEET                             |
-+------------------------------------------------------------------+
-| QUERYING                                                          |
-|  Query<T>(sql)                    - returns IEnumerable<T>       |
-|  QueryAsync<T>(sql)               - async version                |
-|  QueryFirst<T>(sql)               - first row, throws if none    |
-|  QueryFirstOrDefault<T>(sql)      - first row or default(T)      |
-|  QuerySingle<T>(sql)              - exactly one, throws          |
-|  QuerySingleOrDefault<T>(sql)     - exactly one or default       |
-|  QueryMultiple(sql)               - multiple result sets         |
-+------------------------------------------------------------------+
-| EXECUTION                                                         |
-|  Execute(sql)                     - returns rows affected        |
-|  ExecuteAsync(sql)                - async version                |
-|  ExecuteScalar(sql)               - single value                 |
-|  ExecuteReader(sql)               - raw IDataReader              |
-+------------------------------------------------------------------+
-| PARAMETERS                                                        |
-|  new { Id = 1, Name = "foo" }    - anonymous type parameters    |
-|  DynamicParameters               - dynamic parameter bag         |
-|    .Add("@name", value, dbType)   - typed parameter              |
-|    .Add("@out", dbType, dir: Output) - output parameter          |
-+------------------------------------------------------------------+
-| MULTI-MAPPING                                                     |
-|  Query<T1,T2,TR>(sql, map, "splitOn") - 1:1 or 1:N              |
-|  Query<T1,T2,T3,TR>(sql, map, "splitOn") - up to 7 types        |
-+------------------------------------------------------------------+
-| MISC                                                              |
-|  buffered: false                  - streaming (non-materialized) |
-|  commandType: CommandType.SP      - stored procedure             |
-|  commandTimeout: 30               - timeout in seconds           |
-|  transaction: tx                  - enlist in transaction        |
-+------------------------------------------------------------------+
-| DAPPER.CONTRIB                                                    |
-|  conn.Get<T>(id)                  - get by primary key           |
-|  conn.Insert<T>(entity)           - insert, returns identity    |
-|  conn.Update<T>(entity)           - update by primary key        |
-|  conn.Delete<T>(entity)           - delete by primary key        |
-|  conn.GetAll<T>()                 - select all                   |
-+------------------------------------------------------------------+
-| BEST PRACTICES                                                    |
-|  await using var conn = new SqlConnection(connStr);              |
-|  Always parameterize queries (no string concat)                  |
-|  Use Async variants in async contexts                            |
-|  Set commandTimeout for long-running queries                     |
-|  Use buffered: false for large result sets                       |
-|  Add type handlers for custom SQL column types                   |
-|  Use MiniProfiler to trace Dapper queries in dev                 |
-|  Combine with EF Core: EF for writes, Dapper for reads (CQRS)   |
-+------------------------------------------------------------------+
+For sorting, use a whitelist of allowed column names — never concatenate user-provided column names directly.
+
+8. **Q: You have a query that uses `QueryMultiple` to fetch an order and its items in one round trip. The `Read<Order>()` succeeds but `Read<OrderItem>()` returns empty. Why?**
+   A: Most likely the SQL has `SELECT ... FROM Orders; SELECT ... FROM OrderItems;` without a semicolon or the second result set isn't producing rows. Debug by capturing the `GridReader` and checking `reader.IsConsumed`. Also ensure the SQL is valid when executed as a batch. Common mistake: forgetting the semicolon between SELECT statements in some providers (SQL Server requires it; PostgreSQL doesn't but it's good practice). Also verify that `Read<OrderItem>()` is called BEFORE disposing the `GridReader`.
+
+9. **Q: You are migrating from ADO.NET to Dapper. A stored procedure returns multiple result sets with complex mappings. How do you structure the Dapper code?**
+   A: Use `QueryMultiple` with `CommandType.StoredProcedure`. Read each result set sequentially:
+```csharp
+using var multi = await conn.QueryMultipleAsync("usp_GetFullOrder", new { OrderId = id },
+    commandType: CommandType.StoredProcedure);
+var order = await multi.ReadSingleAsync<Order>();
+var items = await multi.ReadAsync<OrderItem>();
+var payments = await multi.ReadAsync<Payment>();
+var notes = await multi.ReadAsync<Note>();
+```
+Each `Read` call advances the reader to the next result set. Maintain the same order as the stored procedure's SELECT statements. Use `ReadSingleAsync` for exactly-one-row result sets.
+
+10. **Q: Your Dapper queries are 3x slower than raw ADO.NET. You suspect the deserialization delegate generation is the bottleneck. What do you do?**
+    A: Dapper generates IL delegates on first use per `<T, column-set>`. This is expensive (~5-20ms). Warm up the cache at startup by executing a representative query for each entity type. For dynamic queries with varying column sets (SELECT *), the cache grows and each unique column set triggers a new IL generation. Fix: use explicit column lists (`SELECT Id, Name, ...`) to keep column sets stable. Also consider: Dapper's overhead vs ADO.NET is only ~2-5µs after cache warmup — if you're seeing 3x slower, profile to check if the issue is elsewhere (connection management, parameter sniffing, indexing).
+
+---
+
+## Interview Questions
+
+1. **What is Dapper?**
+   A: A lightweight micro-ORM by Stack Overflow that extends `IDbConnection` with extension methods for querying, executing, and mapping results to objects. Provides near-ADO.NET performance (~2-10µs overhead per query after cache warmup).
+
+2. **What is the difference between Dapper and EF Core?**
+   A: Dapper is a micro-ORM — raw SQL, no change tracking, no LINQ provider, no migrations. EF Core is a full ORM — LINQ-to-SQL, change tracking, migrations, and multiple database providers. Dapper is faster (~2-10µs vs ~50-500µs) but requires writing SQL manually.
+
+3. **What does `buffered: false` do in Dapper?**
+   A: By default (`buffered: true`), Dapper materializes all results into a `List<T>` before returning. With `buffered: false`, it returns a streaming `IEnumerable<T>` that reads rows lazily from the `IDataReader`, keeping memory at O(1). Use for large result sets to avoid memory pressure.
+
+4. **How does Dapper's type deserialization cache work?**
+   A: On first `Query<T>` for a given `<T, column-set>` combination, Dapper inspects `T`'s properties and the result set columns, emits an IL delegate for fast deserialization, and caches it in a `ConcurrentDictionary`. Subsequent calls are fast delegate invocations. First call is slower (IL emit).
+
+5. **What is `splitOn` in multi-mapping?**
+   A: The parameter that specifies the column name where Dapper splits the result set between mapped types. Default is `"Id"`. All columns before (but not including) the `splitOn` column map to the first type; the `splitOn` column and everything after map to the second type.
+
+6. **What is `QueryMultiple` used for?**
+   A: Executes a SQL batch with multiple SELECT statements and returns a `GridReader`. Each `Read<T>()` reads the current result set into objects and advances to the next result set via `NextResult()` on the `IDataReader`. Enables fetching related data in one round trip.
+
+7. **What are Dapper type handlers?**
+   A: Custom mappings for types that Dapper can't handle natively (JSON columns, spatial types, enums). Implement `SqlMapper.TypeHandler<T>` with `Parse` and `SetValue` methods, then register via `SqlMapper.AddTypeHandler<T>()` at startup.
+
+8. **How does Dapper handle SQL injection?**
+   A: Dapper fully parameterizes all queries. Values passed via anonymous types or `DynamicParameters` are sent as `SqlParameter` objects, preventing SQL injection. Never concatenate user input into SQL strings — always use Dapper's parameter syntax (`@ParamName`).
+
+9. **What is `Dapper.Contrib`?**
+   A: A NuGet package adding `Get<T>`, `Insert<T>`, `Update<T>`, `Delete<T>` methods for simple CRUD without writing SQL. Uses conventions (`[Key]`, `[Table]` attributes). Best for simple entity operations where writing SQL is repetitive.
+
+10. **How does Dapper manage connections?**
+    A: Dapper does NOT manage connections. It opens the connection if closed (on first command) and closes it after if it opened it. If you open the connection manually, you must close it. For transactions, you must open the connection before calling `BeginTransaction`.
+
+---
+
+## Developer Recommendations
+
+- **Use `buffered: false` for large result sets** — Without it, Dapper materializes all rows into a `List<T>` before returning. For 500K rows, that's ~500MB of allocations. With `buffered: false`, rows are streamed from the `IDataReader`, keeping memory at O(1). Always use for reporting exports and batch processing.
+
+- **Always use `await using` for Dapper connections** — Forgetting to dispose a `SqlConnection` leaks the connection back to the pool. The finalizer eventually returns it, but this delays resource reclamation and can cause pool exhaustion under load. Use `await using var conn = new SqlConnection(connStr)` for deterministic disposal.
+
+- **Prefer Dapper for read queries and EF Core for writes (CQRS)** — Dapper gives you full SQL control with lower overhead — ideal for complex queries and reporting. EF Core's change tracking is invaluable on the write side. Mixing both in the same project is common and recommended: use EF Core for domain operations, Dapper for optimized read models.
+
+- **Explicitly list columns in SELECT queries instead of `SELECT *`** — `SELECT *` causes different column sets when tables are altered, invalidating Dapper's deserialization cache and forcing re-compilation of IL delegates. Explicit column lists keep the cache stable and document exactly what data is needed. `SELECT *` also transfers unnecessary network data.
+
+- **Use `DynamicParameters` over anonymous types for complex queries** — Anonymous types work well for simple parameters. `DynamicParameters` supports output parameters, table-valued parameters, and DbType specification. For stored procedures with output parameters or TVP, always use `DynamicParameters`.
+
+- **Use `CommandDefinition` for fine-grained control** — The `CommandDefinition` object lets you set `commandTimeout`, `commandType`, `cancellationToken`, and transaction in a single parameter. Pass it as the last parameter to any Dapper method. This avoids repetitive boilerplate and ensures consistent timeout/cancellation across all queries.
+
+- **Warm up Dapper's type cache at application startup** — The first query for each `<T, column-set>` combination is slow due to IL emit. Execute representative queries during startup to warm the cache and avoid latency spikes on production traffic. This is especially important in serverless environments where cold starts matter.
+
+---
+
+## Dapper vs EF Core vs ADO.NET
+
+| Feature | Dapper | EF Core | ADO.NET |
+|---|---|---|---|
+| ORM type | Micro-ORM | Full ORM | None |
+| SQL abstraction | Raw SQL | LINQ + SQL | Raw SQL |
+| Object mapping | Automatic | Automatic | Manual |
+| Change tracking | No | Yes | No |
+| Migration support | No | Yes | No |
+| Overhead per query | ~2-10µs | ~50-500µs | ~1-5µs |
+| Best for | Performance queries | Complex domain | Lowest level |
+
+## Dapper Sync vs Async
+
+| Aspect | Dapper sync | Dapper async |
+|---|---|---|
+| Overhead | ~2µs | ~5µs |
+| Thread usage | Blocks | Non-blocking |
+| Memory | Low | Low |
+| Cancellation | No | Yes |
+| Scalability | Good | Excellent |

@@ -1,323 +1,102 @@
 # Message Queues
 
-## 1. Executive Summary
+---
 
-Message queues are asynchronous communication mechanisms that enable decoupled, reliable, and scalable message exchange between distributed system components. Producers send messages to a queue, and consumers process them independently. Message queues provide buffering, load leveling, fault tolerance, and guaranteed delivery. They are fundamental to building resilient microservices, event-driven architectures, and distributed systems.
+## Overview
 
-## 2. Core Theory
+- **Definition:** Message queues are asynchronous communication mechanisms where producers send messages to a queue and consumers process them independently, enabling decoupled, reliable, and scalable message exchange.
+- **Why It Exists:** Synchronous communication tightly couples services, limits scalability, and is vulnerable to cascading failures. Queues provide buffering, load leveling, fault tolerance, and guaranteed delivery.
+- **Key Concepts:** **Producer** (sends messages), **Consumer** (processes messages), **Queue** (buffer that stores messages until consumed), **Exchange** (routes messages based on rules), **Broker** (server managing queues and routing), **Binding** (link between exchange and queue), **DLQ** (dead letter queue for failed messages).
 
-### Key Concepts
+---
 
-- **Producer**: Application that sends messages.
-- **Consumer**: Application that receives and processes messages.
-- **Queue**: Buffer that stores messages until consumed.
-- **Exchange**: Routes messages to queues based on rules.
-- **Binding**: Link between an exchange and a queue.
-- **Message**: Unit of data transmitted between services.
-- **Broker**: Server that manages queues and routing.
+## Core Concepts
 
 ### Message Delivery Semantics
 
-- **At-Most-Once**: Message may be lost but never duplicated.
-- **At-Least-Once**: Message is never lost but may be duplicated.
-- **Exactly-Once**: Message is delivered precisely once (most complex).
+- **At-Most-Once:** Message may be lost but never duplicated — fire and forget, no ACK.
+- **At-Least-Once:** Message is never lost but may be duplicated — ACK after processing, retry on failure.
+- **Exactly-Once:** Message is delivered precisely once — ACK + deduplication + idempotent consumers.
 
 ### Message Patterns
 
 ```
-Point-to-Point: One producer -> Queue -> One consumer
+Point-to-Point:  One producer -> Queue -> One consumer
 Publish-Subscribe: One producer -> Topic -> Multiple consumers
-Request-Reply: Producer requests, consumer replies via callback queue
-Dead Letter Queue: Failed messages are routed to a DLQ
+Request-Reply:   Producer sends request, consumer replies via callback queue
+Dead Letter:     Failed messages routed to DLQ for analysis/replay
 ```
-
-## 3. Under-the-Hood Deep Dive
 
 ### Message Lifecycle
 
-1. **Producer** creates a message and publishes to the broker.
-2. **Broker** receives the message, validates it, and persists it.
+1. **Producer** creates and publishes a message to the broker.
+2. **Broker** receives, validates, and persists the message.
 3. **Broker** routes the message to the appropriate queue(s).
 4. **Consumer** polls the queue or receives a push notification.
-5. **Consumer** processes the message.
-6. **Consumer** acknowledges successful processing (ACK).
-7. **Broker** removes the acknowledged message from the queue.
-8. If the consumer fails (NACK), the message is requeued or sent to DLQ.
+5. **Consumer** processes the message and sends an ACK.
+6. **Broker** removes the acknowledged message from the queue.
+7. On NACK, the message is requeued or sent to DLQ.
 
-### Delivery Guarantees in Practice
-
-```
-At-Most-Once:  Fire and forget, no ACK
-At-Least-Once: ACK after processing, retry on failure
-Exactly-Once:  ACK + deduplication + idempotent consumers
-```
-
-### Message Acknowledgment
-
-```java
-// Auto ACK (at-most-once)
-channel.basicConsume(queue, true, consumer);
-
-// Manual ACK (at-least-once)
-channel.basicConsume(queue, false, consumer);
-// ... process message ...
-channel.basicAck(envelope.getDeliveryTag(), false);
-```
-
-## 4. Production Code Examples
-
-### Spring Boot JMS with ActiveMQ
-
-```xml
-<dependency>
-    <groupId>org.springframework.boot</groupId>
-    <artifactId>spring-boot-starter-activemq</artifactId>
-</dependency>
-```
+### Spring Boot JMS Configuration
 
 ```java
 @Configuration
 @EnableJms
 public class JmsConfig {
-
     @Bean
     public JmsListenerContainerFactory<?> jmsListenerContainerFactory(
             ConnectionFactory connectionFactory) {
-        DefaultJmsListenerContainerFactory factory =
-            new DefaultJmsListenerContainerFactory();
+        DefaultJmsListenerContainerFactory factory = new DefaultJmsListenerContainerFactory();
         factory.setConnectionFactory(connectionFactory);
         factory.setConcurrency("3-10");
         factory.setSessionAcknowledgeMode(Session.CLIENT_ACKNOWLEDGE);
-        factory.setErrorHandler(t -> {
-            log.error("JMS error", t);
-        });
         return factory;
     }
 }
 ```
 
-### Producer
+### Producer & Consumer
 
 ```java
 @Component
 public class OrderMessageProducer {
-
     private final JmsTemplate jmsTemplate;
-
-    public OrderMessageProducer(JmsTemplate jmsTemplate) {
-        this.jmsTemplate = jmsTemplate;
-    }
 
     public void sendOrderCreated(OrderEvent event) {
         jmsTemplate.convertAndSend("order.created.queue", event,
             message -> {
                 message.setStringProperty("eventType", event.getType());
-                message.setStringProperty("version", "1.0");
                 message.setJMSCorrelationID(UUID.randomUUID().toString());
                 message.setJMSExpiration(TimeUnit.HOURS.toMillis(24));
                 return message;
             });
     }
-
-    public void sendOrderShipped(OrderEvent event) {
-        jmsTemplate.convertAndSend("order.shipped.topic", event);
-    }
 }
-```
 
-### Consumer
-
-```java
 @Component
 public class OrderMessageConsumer {
-
-    private final OrderService orderService;
-
-    public OrderMessageConsumer(OrderService orderService) {
-        this.orderService = orderService;
-    }
-
     @JmsListener(destination = "order.created.queue",
                  containerFactory = "jmsListenerContainerFactory")
     public void handleOrderCreated(OrderEvent event) {
-        log.info("Processing order created event: {}", event.getOrderId());
-        try {
-            orderService.processNewOrder(event.getOrderId());
-        } catch (Exception e) {
-            log.error("Failed to process order: {}", event.getOrderId(), e);
-            throw new RuntimeException("Processing failed", e);
-        }
-    }
-
-    @JmsListener(destination = "order.shipped.topic")
-    public void handleOrderShipped(OrderEvent event) {
-        log.info("Order shipped: {}", event.getOrderId());
-        notificationService.notifyCustomer(event.getOrderId(), "Your order has shipped");
+        orderService.processNewOrder(event.getOrderId());
     }
 }
 ```
 
-### Idempotent Consumer Pattern
+### Idempotent Consumer
 
 ```java
 @Component
 public class IdempotentConsumer {
-
     private final Set<String> processedIds = ConcurrentHashMap.newKeySet();
-    private final OrderService orderService;
 
     @JmsListener(destination = "payment.events")
     public void handlePaymentEvent(PaymentEvent event) {
-        // Deduplication based on event ID
         if (!processedIds.add(event.getEventId())) {
-            log.info("Duplicate event ignored: {}", event.getEventId());
+            log.info("Duplicate ignored: {}", event.getEventId());
             return;
         }
-
         orderService.processPayment(event.getOrderId(), event.getAmount());
-    }
-}
-```
-
-### Request-Reply Pattern
-
-```java
-@Component
-public class RequestReplyProducer {
-
-    private final JmsTemplate jmsTemplate;
-
-    public RequestReplyProducer(JmsTemplate jmsTemplate) {
-        this.jmsTemplate = jmsTemplate;
-    }
-
-    public OrderStatus requestOrderStatus(String orderId) {
-        return jmsTemplate.convertSendAndReceive(
-            "order.status.request.queue",
-            new OrderStatusRequest(orderId),
-            OrderStatus.class);
-    }
-}
-
-@Component
-public class RequestReplyConsumer {
-
-    @JmsListener(destination = "order.status.request.queue")
-    public OrderStatus handleStatusRequest(OrderStatusRequest request) {
-        return orderService.getStatus(request.getOrderId());
-    }
-}
-```
-
-### Dead Letter Queue Configuration
-
-```java
-@Configuration
-public class DeadLetterConfig {
-
-    @Bean
-    public ActiveMQQueue deadLetterQueue() {
-        return new ActiveMQQueue("DLQ");
-    }
-
-    @Bean
-    public JmsListenerContainerFactory<?> dlqFactory(
-            ConnectionFactory connectionFactory) {
-        DefaultJmsListenerContainerFactory factory =
-            new DefaultJmsListenerContainerFactory();
-        factory.setConnectionFactory(connectionFactory);
-        factory.setConcurrency("1-3");
-        factory.setSessionAcknowledgeMode(Session.CLIENT_ACKNOWLEDGE);
-        return factory;
-    }
-}
-
-@Component
-public class DeadLetterConsumer {
-
-    @JmsListener(destination = "DLQ", containerFactory = "dlqFactory")
-    public void handleDeadLetter(Message message) {
-        log.error("Message moved to DLQ: {}", message);
-
-        // Analyze and alert
-        if (message.propertyExists("originalDestination")) {
-            String originalDestination = message
-                .getStringProperty("originalDestination");
-            alertService.notifyAdmin("Message failed processing",
-                "Destination: " + originalDestination);
-        }
-    }
-}
-```
-
-### Message Serialization with JSON
-
-```java
-@Configuration
-public class MessageConverterConfig {
-
-    @Bean
-    public MessageConverter jacksonJmsMessageConverter() {
-        MappingJackson2MessageConverter converter =
-            new MappingJackson2MessageConverter();
-        converter.setTargetType(MessageType.TEXT);
-        converter.setTypeIdPropertyName("_type");
-        return converter;
-    }
-}
-
-// Event POJO
-@Data
-@NoArgsConstructor
-@AllArgsConstructor
-public class OrderEvent {
-    private String eventId;
-    private String orderId;
-    private String type;
-    private BigDecimal amount;
-    private Instant timestamp;
-
-    public OrderEvent(String orderId, String type) {
-        this.eventId = UUID.randomUUID().toString();
-        this.orderId = orderId;
-        this.type = type;
-        this.timestamp = Instant.now();
-    }
-}
-```
-
-### Batch Message Processing
-
-```java
-@Component
-public class BatchMessageProcessor {
-
-    private final List<OrderEvent> batch = new ArrayList<>();
-    private final Object lock = new Object();
-    private ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
-
-    public BatchMessageProcessor() {
-        scheduler.scheduleAtFixedRate(this::flush, 1, 1, TimeUnit.SECONDS);
-    }
-
-    @JmsListener(destination = "order.events.batch")
-    public void handleMessage(OrderEvent event) {
-        synchronized (lock) {
-            batch.add(event);
-            if (batch.size() >= 100) {
-                flush();
-            }
-        }
-    }
-
-    private void flush() {
-        List<OrderEvent> toProcess;
-        synchronized (lock) {
-            if (batch.isEmpty()) return;
-            toProcess = new ArrayList<>(batch);
-            batch.clear();
-        }
-        orderService.batchProcessOrders(toProcess);
     }
 }
 ```
@@ -327,19 +106,7 @@ public class BatchMessageProcessor {
 ```java
 @Component
 public class RetryMessageConsumer {
-
-    private final RetryTemplate retryTemplate;
-
-    public RetryMessageConsumer() {
-        this.retryTemplate = new RetryTemplate();
-        this.retryTemplate.setRetryOperationsMap(Map.of(
-            "default", new SimpleRetryPolicy(
-                3,
-                Collections.singletonMap(Exception.class, true))
-        ));
-        this.retryTemplate.setBackOffPolicy(
-            new ExponentialBackOffPolicy());
-    }
+    private final RetryTemplate retryTemplate = new RetryTemplate();
 
     @JmsListener(destination = "critical.events")
     public void handleCriticalEvent(Message message) {
@@ -349,400 +116,188 @@ public class RetryMessageConsumer {
                 return null;
             } catch (Exception e) {
                 if (context.getRetryCount() >= 2) {
-                    // Send to DLQ after max retries
                     deadLetterQueue.send(message);
                 }
                 throw e;
             }
         });
     }
-
-    private void processMessage(Message message) {
-        // Business logic
-    }
 }
 ```
 
-## 5. Real-World Scenarios
+---
 
-### Scenario 1: E-Commerce Order Processing
+## Common Mistakes
 
-```
-Order Service -> order.placed.queue -> Inventory Service
-                                    -> Payment Service
-                                    -> Notification Service
-                                    -> Analytics Service
-```
+- **Not handling poison messages** — messages that consistently fail block the queue
+- **Forgetting idempotency** — duplicate messages are inevitable; consumers must be idempotent
+- **Tight coupling** — using RPC-style request-reply instead of async messaging
+- **Ignoring message size limits** — large messages consume memory and network
+- **No monitoring** — not tracking queue depth, consumer lag, or processing times
+- **Blocking consumer threads** — never block in message listeners
+- **Swallowing exceptions** — always ACK or NACK; don't silently eat errors
+- **No dead letter queue** — failed messages accumulate forever
 
-### Scenario 2: User Registration Pipeline
+---
 
-```java
-@Component
-public class UserRegistrationProducer {
+## Key Design Considerations
 
-    public void onUserRegistered(User user) {
-        // Fire multiple events for parallel processing
-        jmsTemplate.convertAndSend("user.welcome.email", user);
-        jmsTemplate.convertAndSend("user.profile.initialize", user);
-        jmsTemplate.convertAndSend("user.analytics.track", user);
-        jmsTemplate.convertAndSend("user.onboarding.queue", user);
-    }
-}
-
-@Component
-public class UserOnboardingConsumer {
-
-    @JmsListener(destination = "user.onboarding.queue")
-    public void handleOnboarding(User user) {
-        // Sequential onboarding steps
-        createWorkspace(user);
-        assignDefaultPermissions(user);
-        sendWelcomeKit(user);
-        scheduleFollowUp(user);
-    }
-}
-```
-
-### Scenario 3: Distributed Saga
-
-```java
-@Component
-public class OrderSagaOrchestrator {
-
-    @JmsListener(destination = "saga.order.create")
-    public void startCreateOrderSaga(CreateOrderSagaEvent event) {
-        // Step 1: Reserve inventory
-        jmsTemplate.convertAndSend("saga.inventory.reserve", event);
-
-        // Compensation: if any step fails, cancel previous steps
-    }
-
-    @JmsListener(destination = "saga.inventory.reserved")
-    public void onInventoryReserved(CreateOrderSagaEvent event) {
-        // Step 2: Process payment
-        jmsTemplate.convertAndSend("saga.payment.process", event);
-    }
-
-    @JmsListener(destination = "saga.payment.completed")
-    public void onPaymentCompleted(CreateOrderSagaEvent event) {
-        // Step 3: Confirm order
-        jmsTemplate.convertAndSend("saga.order.confirm", event);
-    }
-
-    @JmsListener(destination = "saga.inventory.failed")
-    public void onInventoryFailed(CreateOrderSagaEvent event) {
-        // Compensation: notify user about unavailable items
-        jmsTemplate.convertAndSend("saga.order.cancel", event);
-    }
-
-    @JmsListener(destination = "saga.payment.failed")
-    public void onPaymentFailed(CreateOrderSagaEvent event) {
-        // Compensation: release inventory reservation
-        jmsTemplate.convertAndSend("saga.inventory.release", event);
-    }
-}
-```
-
-## 6. Performance
-
-### Performance Optimization
-
-- **Connection Pooling**: Reuse JMS connections.
-- **Batch Processing**: Process messages in batches.
-- **Concurrent Consumers**: Increase consumer concurrency.
-- **Prefetch Limit**: Control how many messages are prefetched.
-- **Message Size**: Keep messages small; pass references to large data.
-- **Persistent vs Non-Persistent**: Use non-persistent for non-critical messages.
-- **Async Sends**: Use async sends for higher throughput.
-
-### Optimized Configuration
+- **When to Use:** Decoupling microservices, load leveling, async processing, event-driven architectures, reliable delivery
+- **When NOT to Use:** Real-time request-response (use gRPC/REST), simple CRUD, small/trivial applications
+- **Patterns:** **Event Sourcing**, **CQRS**, **Saga** (distributed transaction coordination), **Transactional Outbox** (reliably publish from DB changes), **Competing Consumers**
+- **Monitoring:** Queue depth, consumer lag, processing time, error rates, and backlog alerting thresholds
+- **Capacity Planning:** Expected throughput, retention period, cross-region failover
+- **Versioning:** Message schema evolution — use serialization with type headers
+- **Security:** SSL/TLS in transit, encryption at rest, role-based authorization, message signing, audit logging
 
 ```yaml
 spring:
   activemq:
     broker-url: tcp://localhost:61616
-    user: admin
-    password: admin
     pool:
       enabled: true
       max-connections: 50
-      expiry-timeout: 10000
-      idle-timeout: 30000
   jms:
     listener:
       concurrency: 5-20
       max-messages-per-task: 10
-      receive-timeout: 2000
 ```
 
-### Async Producer
+---
+
+## Real-World Scenarios
+
+### Scenario 1: Order Processing with Competing Consumers
+**Context:** An e-commerce platform needs to process 10,000 orders per minute during Black Friday. Each order requires inventory check, payment validation, fraud detection, and analytics recording. Processing must be reliable — no orders lost.
+
+**Resolution:** Use a message queue with competing consumers. The order service publishes an `OrderPlaced` message to a queue. Multiple consumer instances (10-20) subscribe to the same queue — each picks up messages as capacity allows. The queue buffers traffic spikes. If all consumers are busy, messages wait in the queue. Each consumer ACKs after successful processing. Failed messages go to a DLQ after 3 retries.
 
 ```java
+// Producer
 @Component
-public class AsyncProducer {
-
+public class OrderEventProducer {
     private final JmsTemplate jmsTemplate;
-    private final ExecutorService executor = Executors.newFixedThreadPool(10);
 
-    public void sendAsync(String destination, Object message) {
-        executor.submit(() -> {
-            jmsTemplate.convertAndSend(destination, message);
-        });
+    public void sendOrder(OrderEvent event) {
+        jmsTemplate.convertAndSend("order.processing.queue", event,
+            msg -> {
+                msg.setJMSCorrelationID(event.getOrderId());
+                msg.setJMSPriority(event.isPremiumCustomer() ? 9 : 4);
+                msg.setJMSExpiration(TimeUnit.HOURS.toMillis(24));
+                return msg;
+            });
     }
 }
-```
 
-## 7. Security
-
-### Securing Message Queues
-
-- **Authentication**: Username/password or certificate-based.
-- **Authorization**: Role-based permissions for queues/topics.
-- **Encryption in Transit**: Use SSL/TLS for broker connections.
-- **Encryption at Rest**: Encrypt persisted messages.
-- **Message Signing**: Ensure message integrity with digital signatures.
-- **Audit Logging**: Log all message operations.
-
-### SSL Configuration
-
-```yaml
-spring:
-  activemq:
-    broker-url: ssl://localhost:61617
-    ssl:
-      trust-store: classpath:truststore.jks
-      trust-store-password: changeit
-      key-store: classpath:keystore.jks
-      key-store-password: changeit
-```
-
-## 8. Common Mistakes
-
-- **Not handling poison messages**: Messages that consistently fail processing will block the queue.
-- **Forgetting idempotency**: Duplicate messages are inevitable; consumers must be idempotent.
-- **Tight coupling**: Using RPC-style request-reply instead of async messaging.
-- **Ignoring message size limits**: Large messages consume memory and network.
-- **No monitoring**: Not tracking queue depth, consumer lag, or processing times.
-- **Blocking consumer threads**: Never block in message listeners.
-- **Swallowing exceptions**: Always ACK or NACK; don't silently eat errors.
-- **No dead letter queue**: Failed messages will accumulate forever.
-
-## 9. Senior Engineer Perspective
-
-### When to Use Message Queues
-
-**Good fit:**
-- Decoupling microservices.
-- Load leveling (handle traffic spikes).
-- Asynchronous processing.
-- Event-driven architectures.
-- Reliable delivery guarantees.
-
-**Bad fit:**
-- Real-time request-response (use gRPC or REST).
-- Simple CRUD operations.
-- Small, simple applications.
-
-### Architectural Patterns
-
-```
-Event Sourcing: Store events as the source of truth.
-CQRS: Separate command and query models.
-Saga: Distributed transaction coordination.
-Event Carried State Transfer: Include relevant data in events.
-Transactional Outbox: Reliably publish events from DB changes.
-```
-
-### Operational Considerations
-
-- **Monitoring**: Queue depth, consumer lag, processing time, error rates.
-- **Alerting**: Thresholds for backlog, consumer failures.
-- **Capacity Planning**: Expected throughput, retention period.
-- **Disaster Recovery**: Cross-region replication, failover.
-- **Versioning**: Message schema evolution.
-
-## 10. Interview Questions (Easy)
-
-1. What is a message queue and why is it used?
-2. What is the difference between a queue and a topic?
-3. What is a producer and a consumer?
-4. What is message acknowledgment?
-5. What is a dead letter queue?
-6. What is the difference between point-to-point and publish-subscribe?
-7. What is message persistence?
-8. What is the purpose of message ordering?
-9. What is the difference between push and pull models?
-10. What is a broker in messaging systems?
-
-## Medium
-
-1. What are the three message delivery semantics?
-2. What is the idempotent consumer pattern?
-3. How do you implement request-reply with message queues?
-4. What is the transactional outbox pattern?
-5. How do you handle poison messages?
-6. What is the difference between at-least-once and exactly-once delivery?
-7. How do you implement retry with exponential backoff?
-8. What is message batching and why is it useful?
-9. How do you monitor message queue health?
-10. What is the saga pattern in messaging?
-
-## 11. Advanced Interview Questions (Hard)
-
-1. Design a distributed saga orchestration using message queues.
-2. How would you implement exactly-once delivery in a message queue system?
-3. Design a system that guarantees message ordering across partitions.
-4. How do you handle schema evolution in a message queue system?
-5. Implement a priority queue using standard message queue features.
-6. Design a message compression and batching strategy for high throughput.
-7. How would you migrate from one message broker to another without downtime?
-8. Design a multi-region message replication system.
-9. How do you implement backpressure in a message queue consumer?
-10. Design a message tracing system for debugging distributed flows.
-
-## System Design
-
-1. Design an order processing system using message queues.
-2. Design a real-time notification system with message queues.
-3. Design a distributed event sourcing system.
-4. Design a message queue-based ETL pipeline.
-5. Design a high-throughput log aggregation system.
-6. Design a message queue for IoT device communication.
-7. Design a distributed job scheduler using message queues.
-8. Design a payment processing system with message queues.
-9. Design a real-time analytics pipeline using queues.
-10. Design a message queue-based cache invalidation system.
-
-## 12. Expert-Level Interview Questions (Architect-Level)
-
-1. Design a globally distributed message queue system that supports multi-region replication, exactly-once delivery, and automatic failover with zero data loss.
-2. How would you build a message queue that supports both at-least-once and exactly-once semantics for different message streams simultaneously?
-3. Design a system that uses message queues to implement a distributed transaction coordinator for a microservices architecture.
-4. How would you implement a message queue with dynamic partitioning that can rebalance partitions across brokers without message loss?
-5. Design a message schema evolution strategy that supports both forward and backward compatibility across 100+ microservices.
-6. How would you build a message broker that transparently encrypts messages at rest and in transit without impacting throughput?
-7. Design a system that uses message queues to implement a distributed rate limiter across multiple services.
-8. How would you implement a message queue with support for exactly-once delivery and exactly-once processing, handling deduplication at the broker level?
-9. Design a message queue monitoring and auto-scaling system that predicts capacity needs and scales consumers dynamically.
-10. How would you build a message queue that supports transactional messaging with local transactions for the exactly-once processing pattern?
-
-## 13. Debugging & Troubleshooting
-
-### Common Issues
-
-- **Messages not being consumed**: Check queue binding, consumer connection, prefetch settings.
-- **Duplicate messages**: Implement idempotent consumers, check ACK settings.
-- **Message order violations**: Verify single-consumer queues or partition keys.
-- **High latency**: Check network, broker load, consumer processing speed.
-- **Message loss**: Check persistence settings, ACK mode, broker durability.
-- **Broker out of memory**: Check message TTL, queue limits, producer speed.
-
-### Monitoring Queue Depth
-
-```java
+// Consumer with competing consumer pattern
 @Component
-public class QueueMonitor {
-
-    private final JmsTemplate jmsTemplate;
-    private final MeterRegistry meterRegistry;
-
-    @Scheduled(fixedRate = 30000)
-    public void monitorQueues() {
-        String[] queues = {"order.created.queue", "payment.events", "notification.queue"};
-
-        for (String queue : queues) {
-            try {
-                int queueSize = jmsTemplate.browse(queue, (s, q) -> {
-                    int count = 0;
-                    Enumeration<?> messages = q.getEnumeration();
-                    while (messages.hasMoreElements()) {
-                        messages.nextElement();
-                        count++;
-                    }
-                    return count;
-                });
-
-                meterRegistry.gauge("queue.depth",
-                    Tags.of("queue", queue), queueSize);
-            } catch (Exception e) {
-                log.error("Failed to monitor queue: {}", queue, e);
-            }
+public class OrderProcessingConsumer {
+    @JmsListener(destination = "order.processing.queue",
+                 containerFactory = "jmsListenerContainerFactory",
+                 concurrency = "5-10")
+    public void processOrder(OrderEvent event) {
+        try {
+            inventoryService.reserve(event.getProductId(), event.getQuantity());
+            paymentService.charge(event.getCustomerId(), event.getTotal());
+            fraudDetectionService.analyze(event);
+            analyticsService.record(event);
+        } catch (Exception e) {
+            throw new RuntimeException("Processing failed", e); // Triggers rollback/retry
         }
     }
 }
 ```
 
-## 14. Comparison Section
+### Scenario 2: Dead Letter Queue for Failed Payments
+**Context:** A payment processing system receives 50K messages/day. 2% fail due to invalid credit cards, insufficient funds, or expired cards. Without proper handling, these poison messages block the queue and stop processing.
 
-### Message Queue vs Event Stream
+**Resolution:** Implement a DLQ. After 3 failed processing attempts (with exponential backoff), the message is routed to a dead letter queue. A monitoring tool alerts when the DLQ grows. Operations analyzes failed messages, contacts customers for updated payment info, and replays fixed messages.
 
-| Aspect | Message Queue | Event Stream |
-|--------|---------------|--------------|
-| Consumption | Destructive read (removed after ACK) | Non-destructive (replayable) |
-| Retention | Deleted after consumption | Persistent (configurable retention) |
-| Ordering | FIFO per queue | Ordered per partition |
-| Replay | Not supported | Full replay support |
-| Use Case | Task distribution | Event sourcing, analytics |
+### Scenario 3: Transactional Outbox for Reliable Events
+**Context:** A user service updates a user's email address and must publish a `UserEmailChanged` event. If the database update succeeds but the message publish fails, downstream services have stale data.
 
-### ActiveMQ vs RabbitMQ vs Kafka
+**Resolution:** Implement the transactional outbox pattern. Within the same database transaction, both the user email update and an outbox record are written. A scheduled `OutboxRelay` polls for unprocessed outbox records and publishes them reliably. This ensures exactly-once publication of the event.
 
-| Aspect | ActiveMQ | RabbitMQ | Kafka |
-|--------|----------|----------|-------|
-| Protocol | JMS, AMQP, MQTT | AMQP, MQTT, STOMP | Custom protocol |
-| Message Model | JMS (queue/topic) | AMQP (exchange/queue) | Log-based (topic/partition) |
-| Performance | ~10K msg/s | ~50K msg/s | ~1M msg/s |
-| Persistence | KahaDB, JDBC | Mnesia, lazy queues | Distributed commit log |
-| Routing | Selectors, virtual topics | Flexible exchanges | Topic-based |
-| Use Case | Enterprise JMS | General purpose | High-throughput streaming |
+---
 
-## 15. Revision Notes
+## Scenario-Based Questions
 
-- Message queues enable async, decoupled communication
-- Three delivery semantics: at-most-once, at-least-once, exactly-once
-- Point-to-Point: queue | Publish-Subscribe: topic
-- ACK modes: AUTO_ACKNOWLEDGE, CLIENT_ACKNOWLEDGE, DUPS_OK_ACKNOWLEDGE
-- Use DLQ for failed messages, idempotent consumers for duplicates
-- Patterns: request-reply, transactional outbox, saga, CQRS
-- Spring Boot: `@JmsListener`, `JmsTemplate`, `@EnableJms`
+1. **Q: You're building an order processing system that must handle 100x traffic spikes during flash sales. Orders must not be lost. How do you design the messaging infrastructure?**
+   - A: Use a message queue with persistent messages and at-least-once delivery. The queue buffers traffic spikes — producers publish freely, consumers process at their own pace. Set queue depth alerts at 80% capacity. Pre-scale consumers during known sale events. Use dead letter queues for failed messages. For the database, batch writes from the consumer to handle the burst. The queue acts as a shock absorber.
 
-## 16. Cheat Sheet
+2. **Q: During a deployment, a bug causes your consumer to crash-loop on every message. Messages are constantly requeued and reprocessed, blocking the queue. The downstream system is never updated. How do you fix this?**
+   - A: Implement a poison message handler. After N failed attempts (e.g., 3), move the message to a DLQ instead of requeuing. Use a retry count header or broker-specific dead letter feature. The consumer continues processing other messages. Analyze DLQ messages to identify the bug, deploy the fix, and replay affected messages. Without DLQ, one bad message can block all processing.
 
-```
-+------------------------------------------------------------------+
-| MESSAGE QUEUE CHEAT SHEET                                        |
-+------------------------------------------------------------------+
-| MESSAGING MODELS                                                 |
-|   Point-to-Point:  Queue  -> 1 consumer                          |
-|   Pub-Sub:         Topic  -> N consumers                         |
-|   Request-Reply:   Queue  -> Process -> Reply Queue              |
-+------------------------------------------------------------------+
-| DELIVERY SEMANTICS                                               |
-|   At-Most-Once:   May lose, no dups (fire & forget)              |
-|   At-Least-Once:  No loss, may have dups (ACK after process)     |
-|   Exactly-Once:   No loss, no dups (dedup + idempotent)          |
-+------------------------------------------------------------------+
-| SPRING BOOT / JMS                                                |
-|   @EnableJms              -- Enable JMS support                   |
-|   @JmsListener(dest)      -- Message listener                    |
-|   JmsTemplate             -- Send messages                       |
-|   MessageConverter        -- Serialization                       |
-+------------------------------------------------------------------+
-| PATTERNS                                                         |
-|   Idempotent Consumer  -- Dedup by message ID                    |
-|   Dead Letter Queue    -- Failed message storage                 |
-|   Transactional Outbox -- Reliable event publication             |
-|   Saga                -- Distributed transaction                 |
-|   Competing Consumers  -- Multiple consumers on one queue        |
-+------------------------------------------------------------------+
-| ACKNOWLEDGMENT MODES                                             |
-|   AUTO_ACKNOWLEDGE       -- Auto ACK on receive                  |
-|   CLIENT_ACKNOWLEDGE     -- Manual ACK                           |
-|   DUPS_OK_ACKNOWLEDGE    -- Lazy ACK (may dupe)                  |
-|   SESSION_TRANSACTED     -- Transactional session                |
-+------------------------------------------------------------------+
-| BROKER COMPARISON                                                |
-|   ActiveMQ:  JMS-compliant, Java-focused, moderate throughput    |
-|   RabbitMQ:  Flexible routing, Erlang, wide protocol support     |
-|   Kafka:     High throughput, log-based, replayable              |
-+------------------------------------------------------------------+
-```
+3. **Q: Your event-driven system processes user registrations. A duplicate message causes the same user to be registered twice (duplicate email, username). How do you prevent this?**
+   - A: Idempotent consumers. Each message carries a unique event ID (UUID). Before processing, the consumer checks a deduplication store (Redis `SETNX` with TTL of 7 days, or a database unique constraint on `event_id`). If the event was already processed, skip it. Additionally, make the business operation idempotent — the user registration uses `INSERT ... ON CONFLICT (email) DO NOTHING`.
+
+4. **Q: Your queue consumers process messages but one consumer is much slower than others. Messages pile up on that consumer while others sit idle. How do you balance the load?**
+   - A: Use competing consumers with appropriate prefetch settings. Set prefetch to 1 (or a low number) so each consumer picks one message, processes it, ACKs it, then picks another. This ensures faster consumers process more messages than slower ones. Avoid setting prefetch too high (100+), which lets fast consumers grab all messages and starve slower ones.
+
+5. **Q: You need to process high-priority orders (premium customers) before standard orders. Your queue is FIFO. How do you implement priority processing?**
+   - A: Multiple approaches: (1) Use message priority headers (JMS priority 0-9) — higher priority messages are delivered first. (2) Use separate queues per priority tier (`order.high`, `order.normal`, `order.low`) with dedicated consumers. (3) Use a weighted round-robin consumer that polls high-priority queue 3x more often than normal. For strict priority, separate queues with dedicated consumers is the most reliable.
+
+6. **Q: Your message broker goes down for 10 minutes. When it comes back, messages published during the outage are lost. Producers didn't get errors because they used fire-and-forget. How do you prevent this?**
+   - A: Use publisher confirms (ack from broker) instead of fire-and-forget. Configure synchronous sends or async confirms with a callback. On failure, retry with exponential backoff. For critical messages, use the transactional outbox pattern — write the message to a database first, then have a relay publish it. The database survives the broker outage.
+
+7. **Q: You're migrating from ActiveMQ to RabbitMQ. How do you do this without any message loss and zero downtime?**
+   - A: Dual-publish strategy: (1) Configure the application to publish to both ActiveMQ and RabbitMQ simultaneously. (2) Gradually migrate consumers from ActiveMQ to RabbitMQ. (3) Monitor both queues to ensure no message loss. (4) Once all consumers are migrated, stop publishing to ActiveMQ. (5) Use a bridge for any messages still in the old queue. This allows rollback at any step.
+
+8. **Q: Your consumer processes messages from a queue, but when it calls an external API that's slow, all consumer threads block, and no messages are processed. How do you implement backpressure?**
+   - A: Use prefetch limits — set prefetch to 1-3 so the consumer holds only a few unacknowledged messages. If downstream is slow, the consumer doesn't prefetch more. Monitor queue depth growth as a signal of downstream issues. Implement a circuit breaker on the external API call — if the API is slow, fail fast and NACK the message (sending to DLQ or retry queue). Use separate thread pools for external calls to avoid blocking consumer threads.
+
+9. **Q: Your queue has messages with different processing times: some take 10ms, some take 10 seconds. The slow messages block the fast ones because the queue is FIFO. How do you design around this?**
+   - A: Use separate queues for fast and slow operations. Process fast operations in one queue with high concurrency and slow operations in another with fewer, longer-running consumers. Alternatively, use message grouping with a TTL — if a slow message exists, other messages in the same group wait, but messages in different groups proceed independently. For truly independent messages, the slow ones shouldn't block fast ones.
+
+10. **Q: Your application runs in three regions (US, EU, APAC). A message published in the US must be processed in all three regions. How do you design cross-region message replication?**
+    - A: Use a hub-and-spoke topology. The US region publishes to a local queue. A replication bridge (ActiveMQ network of brokers, RabbitMQ shovel/federation) copies the message to EU and APAC regions asynchronously. Each region's consumers process independently. For active-active, configure bidirectional replication with conflict resolution (last-writer-wins). Monitor replication lag as a critical metric.
+
+---
+
+## Interview Questions
+
+1. **What is a message queue and why use one?**
+   - A: A message queue is a buffer that stores messages between producers and consumers, enabling asynchronous, decoupled communication. Benefits: load leveling (buffers traffic spikes), fault tolerance (messages persisted until consumed), independent scaling (producers and consumers scale separately), and reliable delivery.
+
+2. **What are the three message delivery semantics?**
+   - A: At-most-once (message may be lost, never duplicated — fire and forget), At-least-once (message never lost, may be duplicated — ACK after processing), Exactly-once (message delivered precisely once — requires idempotent consumers + transactional broker support).
+
+3. **What is a dead letter queue (DLQ)?**
+   - A: A queue where messages that failed processing after all retry attempts are routed. Prevents poison messages from blocking the main queue. Operations analyzes DLQ messages, fixes underlying issues, and replays them. Essential for any production messaging system.
+
+4. **What is the competing consumers pattern?**
+   - A: Multiple consumer instances subscribe to the same queue. Each message is delivered to exactly one consumer. As consumers finish processing, they pick up the next message. Scales linearly with consumer count. Best for parallelizable workloads where message order doesn't matter.
+
+5. **What is the transactional outbox pattern?**
+   - A: A solution to the dual-write problem. Business data and outbox event are written in the same database transaction. A separate process (outbox relay) polls the outbox table and publishes events to the message broker. Ensures atomicity between DB write and message publication.
+
+6. **How do you handle poison messages?**
+   - A: Implement a retry counter (either in message headers or via broker DLQ feature). After N failed attempts (typically 3), route to a DLQ instead of requeuing. Set a TTL on retry queues. Monitor DLQ and alert on growth. Provide tools for operators to analyze and replay DLQ messages.
+
+7. **What is the difference between point-to-point and publish-subscribe?**
+   - A: Point-to-point (queue): one message consumed by one consumer — competing consumers share the load. Publish-subscribe (topic): one message consumed by all subscribers independently — each subscriber gets a copy. Choose based on whether you need fan-out or load balancing.
+
+8. **How do you implement message ordering?**
+   - A: Use a single partition/queue per entity (e.g., all messages for order 123 go to the same partition). Use a consistent partition key (order ID). Single consumer per partition processes messages sequentially. For global ordering, use a single partition (limits throughput).
+
+9. **How do you implement idempotent consumers?**
+   - A: Store processed message IDs in a deduplication store (Redis with TTL, database unique constraint). Before processing, check if the ID was already processed. Make business operations idempotent (upserts, not inserts). Test idempotency by replaying messages.
+
+10. **How do you migrate between message brokers without downtime?**
+    - A: Dual-publish strategy: publish to both old and new brokers. Gradually migrate consumers. Monitor both for message loss. Once migration is complete, stop publishing to the old broker. Use a bridge for remaining messages. Each step is revertable.
+
+---
+
+## Developer Recommendations
+
+- **Always configure a dead letter queue** — Without a DLQ, a single poison message can block your entire queue. The message is requeued repeatedly, consuming resources and preventing other messages from being processed. Configure DLQ with TTL and max delivery count. Monitor DLQ depth and alert on growth — a growing DLQ indicates bugs or configuration issues that need attention.
+
+- **Make consumers idempotent even with at-most-once delivery** — "At-most-once" sounds like you don't need idempotency, but network retries, consumer crashes, and broker failovers can still cause duplicates. The safest approach is to always make your consumer processing idempotent. Use upsert operations, check-then-act patterns within database transactions, and store deduplication keys.
+
+- **Use prefetch limits to control consumer behavior** — High prefetch (100+) causes fast consumers to grab all messages, preventing fair distribution. Low prefetch (1-3) ensures each consumer picks one message at a time, distributing work fairly. For long-running processing tasks, use low prefetch. For high-throughput, short tasks, higher prefetch is acceptable. Rule of thumb: prefetch = 2 × desired concurrency × processing time (seconds).
+
+- **Never use sync sends in hot paths** — Synchronous message publishing blocks the producer thread until the broker acknowledges. For high-throughput applications, this kills performance. Use async sends with callbacks (correlation IDs) or batch sends. The only exception is critical messages where you need immediate confirmation that the broker accepted the message.
+
+- **Implement backpressure to prevent consumer overload** — A consumer that reads messages faster than it can process creates an ever-growing backlog in the consumer's memory. Use prefetch limits, monitor queue depth, and implement dynamic concurrency adjustment. If the downstream system is saturated, the consumer should stop pulling messages, not buffer them indefinitely.
+
+- **Monitor queue depth, consumer lag, and processing time** — Queue depth tells you if producers are outpacing consumers. Consumer lag (time since the last message was published to the oldest unprocessed message) is your operational health metric. Processing time (P50/P95/P99) per message helps identify slow operations. Set up dashboards and alerts for all three.

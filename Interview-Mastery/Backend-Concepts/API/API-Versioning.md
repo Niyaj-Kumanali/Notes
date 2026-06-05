@@ -1,101 +1,95 @@
 # API Versioning
 
-## 1. Executive Summary
+---
 
-API versioning is the practice of managing changes to an API over time while maintaining backward compatibility for existing clients. As APIs evolve, endpoints, request formats, and response structures change. Versioning provides a structured way to introduce breaking changes, deprecate old functionality, and allow clients to migrate at their own pace. Common strategies include URI versioning, header versioning, query parameter versioning, and content negotiation.
+## Overview
 
-## 2. Core Theory
+- **Definition:** API versioning is the practice of managing changes to an API over time while maintaining backward compatibility for existing clients. It provides a structured way to introduce breaking changes, deprecate old functionality, and allow clients to migrate at their own pace.
 
-### Why Versioning Matters
+- **Why It Exists:** APIs evolve — endpoints change, request/response formats shift, and fields are added or removed. Without versioning, every change risks breaking existing clients, making it impossible to iterate safely.
 
-- **Backward Compatibility**: Existing clients continue working after changes.
-- **Gradual Migration**: Clients can upgrade on their own schedule.
-- **Experimentation**: New features can be tested without affecting production.
-- **Contract Stability**: Clients depend on a stable API contract.
-- **Deprecation Path**: Old versions can be sunsetted methodically.
+- **Key Goals:**
+  - **Backward Compatibility** — existing clients continue working after changes
+  - **Gradual Migration** — clients upgrade on their own schedule
+  - **Contract Stability** — clients depend on a stable API contract
+  - **Clear Deprecation Path** — old versions are sunsetted methodically
 
-### Types of API Changes
+---
 
-- **Backward-Compatible Changes**: Adding new fields, adding new endpoints, adding optional parameters.
-- **Breaking Changes**: Removing fields, changing field types, renaming endpoints, changing request/response structure, removing endpoints, changing error formats.
+## Change Types
 
-### Semantic Versioning for APIs
+- **Backward-Compatible Changes:**
+  - Adding new fields to responses
+  - Adding new endpoints
+  - Adding optional parameters
+  - Extending enumerations
 
-```
-Major.Minor.Patch (e.g., 2.1.0)
-- Major: Breaking changes
-- Minor: Backward-compatible additions
-- Patch: Backward-compatible bug fixes
-```
+- **Breaking Changes:**
+  - Removing fields from responses
+  - Changing field types
+  - Renaming endpoints or fields
+  - Changing request/response structure
+  - Removing endpoints
+  - Changing error formats
 
-## 3. Under-the-Hood Deep Dive
+- **Semantic Versioning for APIs:**
+  - `Major.Minor.Patch` (e.g., 2.1.0)
+  - **Major** — breaking changes
+  - **Minor** — backward-compatible additions
+  - **Patch** — backward-compatible bug fixes
 
-### Versioning Strategy Comparison
+---
 
-| Strategy | Example | Pros | Cons |
-|----------|---------|------|------|
-| URI Path | `/api/v1/users` | Simple, discoverable, cacheable | URI pollution |
-| Query Param | `/api/users?version=1` | Single base URI | Less discoverable, caching issues |
-| Header | `Accept: application/vnd.myapp.v1+json` | Clean URLs, standards-based | Harder to test, hidden complexity |
-| Content Type | `Content-Type: application/vnd.myapp.v1+json` | Media type negotiation | Complex client setup |
+## Versioning Strategies
 
-### Custom Versioning Annotations in Spring Boot
+- **URI Path Versioning:**
+  - Example: `/api/v1/users`, `/api/v2/users`
+  - **Pros:** simple, discoverable, CDN-cacheable
+  - **Cons:** URI pollution, less RESTful
+
+- **Header Versioning:**
+  - Example: `Accept: application/vnd.myapp.v1+json`
+  - **Pros:** clean URLs, standards-based
+  - **Cons:** harder to test, hidden complexity
+
+- **Query Parameter Versioning:**
+  - Example: `/api/users?version=1`
+  - **Pros:** single base URI
+  - **Cons:** caching issues, less discoverable
+
+- **Content Negotiation Versioning:**
+  - Example: `Content-Type: application/vnd.myapp.v1+json`
+  - **Pros:** media type negotiation
+  - **Cons:** complex client setup
+
+---
+
+## Production Code Examples
+
+### URI Versioning with Multiple Controllers
 
 ```java
-@Target({ElementType.TYPE, ElementType.METHOD})
-@Retention(RetentionPolicy.RUNTIME)
-public @interface ApiVersion {
-    String value() default "v1";
-}
-```
-
-## 4. Production Code Examples
-
-### URI Versioning with Multiple Controller Versions
-
-```java
-// Version 1 Controller
 @RestController
 @RequestMapping("/api/v1/users")
 public class UserControllerV1 {
-
     private final UserService userService;
-
-    public UserControllerV1(UserService userService) {
-        this.userService = userService;
-    }
+    public UserControllerV1(UserService userService) { this.userService = userService; }
 
     @GetMapping("/{id}")
     public ResponseEntity<UserResponseV1> getUser(@PathVariable Long id) {
-        User user = userService.findById(id);
-        return ResponseEntity.ok(UserMapperV1.toResponse(user));
-    }
-
-    @GetMapping
-    public ResponseEntity<List<UserResponseV1>> getAllUsers() {
-        return ResponseEntity.ok(
-            userService.findAll().stream()
-                .map(UserMapperV1::toResponse)
-                .collect(Collectors.toList())
-        );
+        return ResponseEntity.ok(UserMapperV1.toResponse(userService.findById(id)));
     }
 }
 
-// Version 2 Controller (with breaking changes)
 @RestController
 @RequestMapping("/api/v2/users")
 public class UserControllerV2 {
-
     private final UserService userService;
-
-    public UserControllerV2(UserService userService) {
-        this.userService = userService;
-    }
+    public UserControllerV2(UserService userService) { this.userService = userService; }
 
     @GetMapping("/{id}")
     public ResponseEntity<UserResponseV2> getUser(@PathVariable Long id) {
-        User user = userService.findById(id);
-        return ResponseEntity.ok(UserMapperV2.toResponse(user));
+        return ResponseEntity.ok(UserMapperV2.toResponse(userService.findById(id)));
     }
 
     @GetMapping
@@ -103,25 +97,18 @@ public class UserControllerV2 {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         Page<User> users = userService.findAll(PageRequest.of(page, size));
-        return ResponseEntity.ok(
-            PagedResponse.from(users.map(UserMapperV2::toResponse))
-        );
+        return ResponseEntity.ok(PagedResponse.from(users.map(UserMapperV2::toResponse)));
     }
 }
 ```
 
-### Versioned Response DTOs
+### Versioned DTOs
 
 ```java
-// V1 Response - flat structure
-public record UserResponseV1(
-    Long id,
-    String name,
-    String email,
-    String role
-) {}
+// V1 - flat structure
+public record UserResponseV1(Long id, String name, String email, String role) {}
 
-// V2 Response - nested structure with additional fields
+// V2 - nested structure with breaking changes
 public record UserResponseV2(
     String userId,          // Changed from Long to String
     String fullName,        // Renamed from "name"
@@ -129,55 +116,14 @@ public record UserResponseV2(
     ProfileResponse profile // Nested structure
 ) {}
 
-public record ProfileResponse(
-    String role,
-    String department,
-    Instant joinedAt,
-    String status
-) {}
+public record ProfileResponse(String role, String department, Instant joinedAt, String status) {}
 ```
 
-### Mapping Between Versions
-
-```java
-@Component
-public class UserMapperV1 {
-
-    public static UserResponseV1 toResponse(User user) {
-        return new UserResponseV1(
-            user.getId(),
-            user.getName(),
-            user.getEmail(),
-            user.getRole().getName()
-        );
-    }
-}
-
-@Component
-public class UserMapperV2 {
-
-    public static UserResponseV2 toResponse(User user) {
-        return new UserResponseV2(
-            user.getUuid(),               // UUID string instead of numeric ID
-            user.getName(),
-            user.getEmail(),
-            new ProfileResponse(
-                user.getRole().getName(),
-                user.getDepartment(),
-                user.getCreatedAt(),
-                user.getStatus().name()
-            )
-        );
-    }
-}
-```
-
-### Header Versioning Strategy
+### Header Versioning Configuration
 
 ```java
 @Configuration
 public class HeaderVersioningConfig implements WebMvcConfigurer {
-
     @Override
     public void configureContentNegotiation(ContentNegotiationConfigurer configurer) {
         configurer
@@ -188,97 +134,6 @@ public class HeaderVersioningConfig implements WebMvcConfigurer {
             .mediaType("application/vnd.myapp.v2+json", MediaType.APPLICATION_JSON);
     }
 }
-
-// Custom handler mapping for versioned controllers
-@Component
-public class VersionRequestMappingHandlerMapping extends RequestMappingHandlerMapping {
-
-    @Override
-    protected HandlerMethod lookupHandlerMethod(String lookupPath,
-                                               HttpServletRequest request) throws Exception {
-        String version = request.getHeader("Accept");
-        if (version != null) {
-            request.setAttribute("apiVersion", extractVersion(version));
-        }
-        return super.lookupHandlerMethod(lookupPath, request);
-    }
-
-    private String extractVersion(String acceptHeader) {
-        Pattern pattern = Pattern.compile("application/vnd\\.myapp\\.(v\\d+)\\+json");
-        Matcher matcher = pattern.matcher(acceptHeader);
-        return matcher.find() ? matcher.group(1) : "v1";
-    }
-}
-```
-
-### Query Parameter Versioning
-
-```java
-@RestController
-@RequestMapping("/api/users")
-public class UserQueryVersionController {
-
-    private final UserService userService;
-
-    @GetMapping("/{id}")
-    public ResponseEntity<?> getUser(
-            @PathVariable Long id,
-            @RequestParam(defaultValue = "1") int version) {
-
-        User user = userService.findById(id);
-
-        return switch (version) {
-            case 1 -> ResponseEntity.ok(UserMapperV1.toResponse(user));
-            case 2 -> ResponseEntity.ok(UserMapperV2.toResponse(user));
-            default -> throw new UnsupportedApiVersionException(version);
-        };
-    }
-}
-```
-
-### Interceptor-Based Versioning
-
-```java
-@Component
-public class VersionInterceptor implements HandlerInterceptor {
-
-    @Override
-    public boolean preHandle(HttpServletRequest request,
-                           HttpServletResponse response,
-                           Object handler) throws Exception {
-
-        if (handler instanceof HandlerMethod handlerMethod) {
-            ApiVersion apiVersion = handlerMethod
-                .getMethodAnnotation(ApiVersion.class);
-            if (apiVersion == null) {
-                apiVersion = handlerMethod
-                    .getBeanType().getAnnotation(ApiVersion.class);
-            }
-
-            if (apiVersion != null) {
-                String requestedVersion = resolveVersion(request);
-                if (!apiVersion.value().equals(requestedVersion)) {
-                    response.setStatus(404);
-                    response.getWriter()
-                        .write("{\"error\":\"Version not found\"}");
-                    return false;
-                }
-            }
-        }
-        return true;
-    }
-
-    private String resolveVersion(HttpServletRequest request) {
-        // Extract from header, URI, or query param
-        String fromHeader = request.getHeader("X-API-Version");
-        if (fromHeader != null) return fromHeader;
-
-        String path = request.getRequestURI();
-        Pattern pattern = Pattern.compile("/api/(v\\d+)/");
-        Matcher matcher = pattern.matcher(path);
-        return matcher.find() ? matcher.group(1) : "v1";
-    }
-}
 ```
 
 ### Content Negotiation Versioning
@@ -287,75 +142,18 @@ public class VersionInterceptor implements HandlerInterceptor {
 @RestController
 @RequestMapping("/api/users")
 public class ContentNegotiationController {
-
     @GetMapping(produces = "application/vnd.myapp.v1+json")
     public ResponseEntity<List<UserResponseV1>> getAllUsersV1() {
-        return ResponseEntity.ok(
-            userService.findAll().stream()
-                .map(UserMapperV1::toResponse)
-                .collect(Collectors.toList())
-        );
+        return ResponseEntity.ok(userService.findAll().stream()
+            .map(UserMapperV1::toResponse).collect(Collectors.toList()));
     }
 
     @GetMapping(produces = "application/vnd.myapp.v2+json")
     public ResponseEntity<PagedResponse<UserResponseV2>> getAllUsersV2(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return ResponseEntity.ok(
-            PagedResponse.from(
-                userService.findAll(PageRequest.of(page, size))
-                    .map(UserMapperV2::toResponse)
-            )
-        );
-    }
-}
-```
-
-### Abstract Versioned Controller Pattern
-
-```java
-public abstract class AbstractVersionedController<T, R> {
-
-    protected final UserService userService;
-
-    protected AbstractVersionedController(UserService userService) {
-        this.userService = userService;
-    }
-
-    @GetMapping("/{id}")
-    public ResponseEntity<R> getUser(@PathVariable Long id) {
-        User user = userService.findById(id);
-        return ResponseEntity.ok(toResponse(user));
-    }
-
-    protected abstract R toResponse(User user);
-}
-
-@RestController
-@RequestMapping("/api/v1/users")
-public class UserV1Controller extends AbstractVersionedController<User, UserResponseV1> {
-
-    public UserV1Controller(UserService userService) {
-        super(userService);
-    }
-
-    @Override
-    protected UserResponseV1 toResponse(User user) {
-        return UserMapperV1.toResponse(user);
-    }
-}
-
-@RestController
-@RequestMapping("/api/v2/users")
-public class UserV2Controller extends AbstractVersionedController<User, UserResponseV2> {
-
-    public UserV2Controller(UserService userService) {
-        super(userService);
-    }
-
-    @Override
-    protected UserResponseV2 toResponse(User user) {
-        return UserMapperV2.toResponse(user);
+        return ResponseEntity.ok(PagedResponse.from(
+            userService.findAll(PageRequest.of(page, size)).map(UserMapperV2::toResponse)));
     }
 }
 ```
@@ -366,414 +164,166 @@ public class UserV2Controller extends AbstractVersionedController<User, UserResp
 @RestController
 @RequestMapping("/api/v1/users")
 public class DeprecatedUserController {
-
     @GetMapping("/{id}")
     public ResponseEntity<UserResponseV1> getUser(@PathVariable Long id) {
-        User user = userService.findById(id);
         return ResponseEntity.ok()
             .header("X-API-Deprecated", "true")
             .header("X-API-Sunset", "2026-12-31")
             .header("X-API-Migration", "/api/v2/users/" + id)
-            .body(UserMapperV1.toResponse(user));
+            .body(UserMapperV1.toResponse(userService.findById(id)));
     }
 }
 ```
 
-### Versioning with a Custom Filter
+---
+
+## Common Mistakes
+
+- **Not versioning from day one** — much harder to add later
+- **Breaking changes without version bump** — always bump major for breaking changes
+- **Supporting too many versions** — limit active versions to 2-3
+- **Inconsistent versioning strategy** — pick one strategy and stick with it
+- **Forgetting to sunset old versions** — have a clear deprecation and sunset policy
+- **Not documenting version differences** — maintain clear migration guides
+- **Removing fields without notice** — deprecate first, remove later
+
+---
+
+## Key Design Considerations
+
+- **Maximum 3 active versions:** v1 (deprecated), v2 (current), v3 (preview)
+- **Minimum 18-month deprecation period** — give clients time to migrate
+- **Automated version sunset** — reject requests to sunset versions
+- **Version at API level**, not individual endpoints
+- **Internal vs External APIs** — may use different versioning strategies
+- **Version Lifecycle:** Development → Preview → Active → Deprecated → Sunset
+
+---
+
+## Real-World Scenarios
+
+### Scenario 1: Breaking Change Migration with 100+ Clients
+**Context:** Your e-commerce API has a `GET /orders` endpoint returning `{ "order_id": 123, "items": [...] }`. The business requires renaming `order_id` to `id` and moving items to a nested `order_items` structure. Over 100 active clients depend on this endpoint — mobile apps, web apps, and third-party integrations. Any breaking change will immediately break production.
+
+**Resolution:** Create `/api/v2/orders` with the new structure. Keep v1 running unchanged. Add deprecation headers to v1 responses: `X-API-Deprecated: true`, `X-API-Sunset: Fri, 31 Dec 2026 23:59:59 GMT`, `X-API-Migration: /api/v2/orders`. Announce the change 18 months in advance. Contact all API key owners with migration guides. Monitor v1 usage via analytics. After the sunset date, return `410 Gone` with a link to v2 migration docs. Meanwhile, v2 also handles new features so clients have incentive to migrate.
+
+### Scenario 2: Multiple Database Schemas for Different API Versions
+**Context:** Your API evolves from v1 (flat user object with `name`, `email`) to v2 (nested `profile` object with `firstName`, `lastName`, `emailAddress`). The database already migrated to the new schema. V1 clients still expect the flat format. You cannot force all clients to upgrade immediately.
+
+**Resolution:** Keep a canonical database schema (the current v2 structure). Create version-specific mappers that transform between the canonical model and each API version's DTO.
 
 ```java
-@Component
-public class VersionRoutingFilter implements Filter {
-
-    @Override
-    public void doFilter(ServletRequest request, ServletResponse response,
-                        FilterChain chain) throws IOException, ServletException {
-        HttpServletRequest httpRequest = (HttpServletRequest) request;
-        HttpServletResponse httpResponse = (HttpServletResponse) response;
-
-        String requestURI = httpRequest.getRequestURI();
-        String version = extractVersion(requestURI);
-
-        if (version == null) {
-            version = httpRequest.getHeader("X-API-Version");
-        }
-
-        if (version == null) {
-            version = "v1";
-        }
-
-        // Forward to appropriate version path
-        String versionedPath = "/api/" + version +
-            requestURI.replaceFirst("/api/v?\\d*", "");
-
-        httpRequest.getRequestDispatcher(versionedPath)
-            .forward(httpRequest, httpResponse);
-    }
-
-    private String extractVersion(String uri) {
-        Pattern pattern = Pattern.compile("/api/v?(\\d+)");
-        Matcher matcher = pattern.matcher(uri);
-        return matcher.find() ? "v" + matcher.group(1) : null;
+public class UserMapperV1 {
+    public static UserResponseV1 toResponse(User user) {
+        return new UserResponseV1(
+            user.getId(),
+            user.getProfile().getFirstName() + " " + user.getProfile().getLastName(), // flatten
+            user.getProfile().getEmailAddress()
+        );
     }
 }
-```
 
-## 5. Real-World Scenarios
-
-### Scenario 1: Social Media API Evolution
-
-```
-v1 (2020):
-  GET /api/v1/posts/{id} -> { id, title, body, author_id }
-
-v2 (2022) - Breaking changes:
-  GET /api/v2/posts/{id} -> { id, title, body, author: { id, name, avatar }, stats: { likes, shares, comments } }
-
-Migration:
-  - Added author detail object instead of flat author_id
-  - Added stats sub-object
-  - Maintained v1 endpoint for legacy clients
-  - Deprecation header on v1 responses
-  - v1 sunset after 2 years
-```
-
-### Scenario 2: E-Commerce Checkout API
-
-```java
-// V1 Checkout - simple flow
-@PostMapping("/api/v1/checkout")
-public ResponseEntity<OrderResponseV1> checkoutV1(@Valid @RequestBody CheckoutRequestV1 request) {
-    Order order = orderService.createOrder(request.getItems(), request.getShippingAddressId());
-    return ResponseEntity.status(201).body(new OrderResponseV1(order.getId(), "CREATED"));
-}
-
-// V2 Checkout - with payment method selection and promotions
-@PostMapping("/api/v2/checkout")
-public ResponseEntity<OrderResponseV2> checkoutV2(@Valid @RequestBody CheckoutRequestV2 request) {
-    Order order = orderService.createOrder(
-        CheckoutMapper.toOrderRequest(request));
-    PaymentIntent paymentIntent = paymentService.createPaymentIntent(order);
-    return ResponseEntity.status(201).body(
-        new OrderResponseV2(order.getId(), "PENDING_PAYMENT", paymentIntent.getClientSecret()));
-}
-```
-
-### Scenario 3: Coexistence Strategy
-
-```yaml
-# application.yml
-api:
-  versions:
-    active:
-      - v1
-      - v2
-      - v3
-    deprecated:
-      v1:
-        sunset-date: 2026-12-31
-        migration-path: /api/v2/users
-      v2:
-        sunset-date: 2027-06-30
-        migration-path: /api/v3/users
-```
-
-## 6. Performance
-
-### Versioning Performance Considerations
-
-- **URI Versioning**: Fastest (no parsing required), cached by CDN.
-- **Header Versioning**: Slightly slower (header parsing), less CDN-friendly.
-- **Query Parameter Versioning**: Caching issues (same URI different version).
-- **Multiple Controller Instances**: Memory overhead per version.
-- **Version Routing Logic**: Minimize branching in request path.
-
-### Optimized Version Routing
-
-```java
-@Component
-public class VersionRouter {
-
-    private final Map<String, HandlerFunction> versionHandlers = new HashMap<>();
-
-    public VersionRouter() {
-        versionHandlers.put("v1", this::handleV1);
-        versionHandlers.put("v2", this::handleV2);
-        versionHandlers.put("v3", this::handleV3);
-    }
-
-    public ResponseEntity<?> route(String version, Long id) {
-        HandlerFunction handler = versionHandlers.get(version);
-        if (handler == null) {
-            return ResponseEntity.status(404).body(
-                new ErrorResponse("UNSUPPORTED_VERSION",
-                    "API version " + version + " is not supported"));
-        }
-        return handler.handle(id);
-    }
-
-    private ResponseEntity<?> handleV1(Long id) {
-        return ResponseEntity.ok(UserMapperV1.toResponse(userService.findById(id)));
-    }
-
-    private ResponseEntity<?> handleV2(Long id) {
-        return ResponseEntity.ok(UserMapperV2.toResponse(userService.findById(id)));
-    }
-
-    private ResponseEntity<?> handleV3(Long id) {
-        return ResponseEntity.ok(UserMapperV3.toResponse(userService.findById(id)));
-    }
-
-    @FunctionalInterface
-    interface HandlerFunction {
-        ResponseEntity<?> handle(Long id);
-    }
-}
-```
-
-## 7. Security
-
-### Version-Specific Security
-
-```java
-@Configuration
-@EnableWebSecurity
-public class VersionSecurityConfig {
-
-    @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-        return http
-            .authorizeHttpRequests(auth -> auth
-                // V1 endpoints require only basic auth
-                .requestMatchers("/api/v1/**").authenticated()
-                // V2 endpoints require specific scope
-                .requestMatchers("/api/v2/**")
-                    .hasAuthority("SCOPE_api:read")
-                // V3 endpoints require elevated permissions
-                .requestMatchers("/api/v3/**")
-                    .hasAuthority("SCOPE_api:admin")
+public class UserMapperV2 {
+    public static UserResponseV2 toResponse(User user) {
+        return new UserResponseV2(
+            user.getId(),
+            new ProfileResponse(
+                user.getProfile().getFirstName(),
+                user.getProfile().getLastName(),
+                user.getProfile().getEmailAddress()
             )
-            .build();
+        );
     }
 }
 ```
 
-## 8. Common Mistakes
+The database never needs to know about API versions. New versions can add fields — V1 mapper silently omits them.
 
-- **Not versioning from day one**: Harder to add later.
-- **Breaking changes without version bump**: Always bump major version for breaking changes.
-- **Supporting too many versions**: Limit active versions to 2-3.
-- **Inconsistent versioning strategy**: Pick one strategy and stick with it.
-- **Forgetting to sunset old versions**: Have a clear deprecation and sunset policy.
-- **Versioning at the wrong level**: Version at API level, not individual endpoints.
-- **Not documenting version differences**: Maintain clear migration guides.
-- **Removing fields without notice**: Deprecate fields first, remove later.
+### Scenario 3: Accidental Breaking Change Deployment
+**Context:** A developer deploys a change to `GET /api/v1/users/{id}` that removes the `phone` field from the response. The change was meant for v2 but was incorrectly deployed to v1. Within minutes, support tickets flood in from clients whose parsing logic breaks because the expected field is missing.
 
-## 9. Senior Engineer Perspective
+**Resolution:** (1) Roll back immediately to the previous deployment. (2) If rollback is impossible (e.g., database migration already ran), add the `phone` field back as deprecated with a null value and deploy a hotfix. (3) Audit the deployment pipeline: add version compatibility checks in CI/CD that compare the new response schema against the previous version's contract. (4) Implement automated backward compatibility tests using OpenAPI diff tools — every PR compares the generated OpenAPI spec against the previous version.
 
-### API Evolution Strategy
+---
 
-```mermaid
-Flow:
-1. Add field to response (backward-compatible)
-2. Mark old field as deprecated with sunset header
-3. Add new endpoint structure alongside old one
-4. Migrate internal services and clients
-5. Remove deprecated features after sunset date
-```
+## Scenario-Based Questions
 
-### Best Practices
+1. **Q: You need to add a breaking change to an endpoint with 100+ clients. The change is critical (security fix) and cannot wait 18 months. How do you balance security with backward compatibility?**
+   - A: (1) Create an immediate v2 with the fix. (2) Backport the security fix to v1 if possible (additive change). (3) Communicate urgency: email all API key owners, add prominent deprecation headers, set a shorter sunset window (3-6 months). (4) Offer migration assistance: provide code examples, migration scripts, and direct support for large clients. (5) For extreme cases, block old clients after a grace period and return `426 Upgrade Required` with a link to the new version. Security-critical changes justify breaking compatibility — but minimize the blast radius.
 
-- **Maximum 3 active versions**: v1 (deprecated), v2 (current), v3 (preview).
-- **Minimum 18-month deprecation period**: Give clients time to migrate.
-- **Automated version sunset**: Automatically reject requests to sunset versions.
-- **Versioning in the contract**: OpenAPI specs should document all versions.
-- **Internal vs External APIs**: Use different versioning strategies.
-- **Graceful degradation**: Old versions get basic support, new versions get full features.
+2. **Q: Your team maintains 5 active API versions (v1 through v5). Each new developer adds a new version instead of evolving existing ones. The maintenance burden is crushing. How do you fix this?**
+   - A: (1) Set a hard limit of 3 active versions (e.g., v3 deprecated, v4 current, v5 preview). (2) Immediately sunset the oldest versions: announce that v1 and v2 will be deprecated in 3 months. Migrate remaining clients. (3) Enforce a policy: no new versions without leadership approval. First attempt additive changes to the current version. (4) Implement automated sunset: reject requests to versions past their sunset date. (5) Use capability-based versioning for minor differences instead of creating new versions.
 
-### Version Lifecycle
+3. **Q: Your API uses URI path versioning (`/api/v1/users`). A client accidentally hardcodes `/api/v1/` and refuses to update. How do you migrate them without breaking their integration?**
+   - A: (1) Run a redirect service: `/api/v1/users` returns a `301 Moved Permanently` to `/api/users` (unversioned — latest version). (2) The redirect response includes the new URI. (3) Over time, the client's library may follow redirects (HTTP clients often do). (4) For clients that don't follow redirects, offer a dedicated proxy endpoint that maps their requests to the latest version. (5) Eventually, the redirect responds with `410 Gone` after a reasonable grace period.
 
-```
-Development -> Preview -> Active -> Deprecated -> Sunset
-```
+4. **Q: Your database schema changed (column renamed from `email` to `email_address`). V1 expects `email`, V2 expects `email_address`. How do you design the version mapping layer?**
+   - A: (1) Database keeps the new canonical schema (`email_address`). (2) V1 mapper queries `email_address` and maps it to `email` in the response DTO. (3) V2 mapper passes it through as `email_address`. (4) For writes: V1 accepts `email`, V1 mapper converts it to `email_address` before saving. (5) Use an adapter pattern: `UserRepository` always works with canonical entities; `UserMapperV1` and `UserMapperV2` handle the transformation. The database never stores version-specific data.
 
-## 10. Interview Questions (Easy)
+5. **Q: You need to support enterprise clients with custom API requirements (different fields, different auth, different rate limits). How do you avoid creating 50 API versions?**
+   - A: (1) Use capability-based versioning: clients declare capabilities in headers (`X-API-Capabilities: fields=v2,auth=oauth2,rate=enterprise`). The server selects response format based on capabilities, not version numbers. (2) Feature flags per client: each enterprise client gets a configuration profile. (3) GraphQL-style field selection: allow clients to request specific fields. (4) For auth and rate limits, use configuration per API key rather than per version. This keeps the version count at 2-3 while supporting diverse needs.
 
-1. What is API versioning and why is it needed?
-2. Name four common API versioning strategies.
-3. What is the difference between backward-compatible and breaking changes?
-4. What is semantic versioning for APIs?
-5. How does URI path versioning work?
-6. What is the purpose of a deprecation header?
-7. What is query parameter versioning?
-8. What are the pros and cons of URI versioning?
-9. What is header versioning?
-10. How many active API versions should you typically support?
+6. **Q: A new API version changes response field types (e.g., `id` from `Long` to `String`). This breaks clients with strict typing. How do you communicate and handle the migration?**
+   - A: (1) Add a `X-API-Type-Change` header to v1 responses warning clients. (2) Release v2 with the `String` type. (3) Provide a migration tool: `MigrateClient -source=v1 -target=v2` that automatically updates client code. (4) In the API documentation, clearly mark the type change and provide code examples in multiple languages showing the migration. (5) Run both types in parallel: v2 returns `String`, but also include the `Long` version as a deprecated field (`legacy_id`) for 6 months.
 
-## Medium
+7. **Q: How do you test backward compatibility in CI/CD when deploying a new API version?**
+   - A: (1) Record the OpenAPI spec of the current version. (2) When deploying the new version, generate the new OpenAPI spec. (3) Use OpenAPI diff tools (e.g., `openapi-diff`) to compare: flag any breaking changes (removed fields, type changes, new required fields). (4) Run contract tests: replay recorded requests from the current version against the new version and verify backward-compatible responses. (5) Use consumer-driven contract tests (Pact) — each client defines their expected contract; CI verifies no client is broken.
 
-1. Compare URI path versioning vs header versioning.
-2. How do you handle versioning in Spring Boot?
-3. What is content negotiation versioning?
-4. How do you implement API deprecation with sunset dates?
-5. What is the strangler fig pattern and how does it apply to API versioning?
-6. How would you handle simultaneous version support in a database?
-7. How do you manage version-specific request validation?
-8. What is the difference between versioning at the API vs resource level?
-9. How do you test multiple API versions?
-10. How do you document versioned APIs?
+8. **Q: Your mobile app cannot update frequently (some users on versions 2+ years old). You need to make breaking API changes. How do you support ancient mobile clients?**
+   - A: (1) Support multiple API versions for as long as the oldest mobile version is active. (2) When a mobile version falls below 1% of active users, send in-app update prompts. (3) Use feature detection: the mobile app sends its version in a header (`X-Client-Version: 3.2.1`). The server adapts responses based on client capabilities. (4) Plan for API versions to live 2-3 years. This means careful additive-only development for long periods. (5) When sunsetting a version, block the oldest app versions and show a "Please update" screen.
 
-## 11. Advanced Interview Questions (Hard)
+9. **Q: How do you handle versioning for internal event-driven communication (Kafka/RabbitMQ) between microservices?**
+   - A: (1) Use a schema registry (Confluent Schema Registry, Apicurio) to manage event schemas. (2) Define compatibility modes: backward (new consumers read old events), forward (old consumers read new events), or full (both directions). (3) Set backward compatibility as default — new event versions can add optional fields but cannot remove or change existing required fields. (4) Each event includes a schema version ID or `event_version` field. (5) Services handle multiple event versions in their deserialization logic — always read the version field first.
 
-1. Design a versioning system that supports both URI and header versioning simultaneously.
-2. How would you implement a gradual migration from v1 to v2 without downtime?
-3. Design an API that supports both JSON and Protocol Buffers across versions.
-4. How do you handle database schema changes when supporting multiple API versions?
-5. Implement a request transformer that converts v1 requests to v2 internally.
-6. Design a canary deployment strategy for API version rollouts.
-7. How would you implement version-specific rate limiting and throttling?
-8. Design an automated version backwards compatibility testing framework.
-9. How do you handle versioning in an event-driven microservices architecture?
-10. Implement a version-aware API gateway.
+10. **Q: Your public API has 1M+ daily active clients. You need to deprecate v1 of an endpoint. How do you execute the deprecation plan?**
+    - A: (1) Announce deprecation 18+ months in advance via email, blog post, and API changelog. (2) Add `X-API-Deprecated: true` and `X-API-Sunset: <date>` headers to all v1 responses from day one. (3) Send quarterly reminders to API key owners with migration stats. (4) Provide a migration dashboard showing v1 vs v2 usage per client. (5) 6 months before sunset, add a warning message in the response body. (6) On sunset date, return `410 Gone` with a JSON body containing the v2 endpoint URL and migration guide.
 
-## System Design
+---
 
-1. Design an API versioning system for a SaaS platform with 1000+ customers.
-2. Design a version management system for a public API with millions of consumers.
-3. Design a multi-version API gateway with request routing and transformation.
-4. Design an API deprecation notification system.
-5. Design a version-aware documentation system.
-6. Design a backward compatibility testing pipeline for CI/CD.
-7. Design an API version analytics and monitoring system.
-8. Design a version negotiation protocol for real-time APIs.
-9. Design a schema evolution system for gRPC APIs.
-10. Design a versioned webhook delivery system.
+## Interview Questions
 
-## 12. Expert-Level Interview Questions (Architect-Level)
+1. **What is API versioning and why is it needed?**
+   - A: API versioning manages changes to an API over time while maintaining backward compatibility. It allows introducing breaking changes, deprecating old functionality, and letting clients migrate at their own pace. Without versioning, every change risks breaking existing clients.
 
-1. Design a versionless API strategy where all changes are backward-compatible by default using extensible schemas, and breaking changes are handled through capability negotiation rather than version numbers.
-2. How would you implement a polyglot API versioning system across multiple microservices written in different languages, with a unified versioning contract?
-3. Design an API versioning strategy for an event-sourced system where the event schema evolves over time independently of the API schema.
-4. How do you handle versioning in a CQRS architecture where commands and queries evolve at different rates?
-5. Design a system that automatically generates version migration code and documentation from schema diffs between API versions.
-6. How would you implement versioning for a real-time streaming API (WebSocket/gRPC) where the protocol itself evolves?
-7. Design a distributed API version registry that allows clients to discover available versions and their capabilities dynamically.
-8. How do you handle versioning in a BFF (Backend for Frontend) pattern where each client type may need different API evolution paths?
-9. Design an API versioning strategy for a regulatory compliance system where historical data must be accessible via older API versions indefinitely.
-10. How would you implement a self-healing API version migration system that detects client usage patterns and automatically adapts version support?
+2. **What are the common API versioning strategies?**
+   - A: URI path versioning (`/api/v1/users`), header versioning (`Accept: application/vnd.myapp.v1+json`), query parameter versioning (`?version=1`), and content negotiation. URI path is the most common and CDN-friendly.
 
-## 13. Debugging & Troubleshooting
+3. **What counts as a breaking change?**
+   - A: Removing fields, changing field types, renaming endpoints or fields, changing request/response structures, removing endpoints, changing error formats, adding new required fields. Adding fields, adding endpoints, and adding optional parameters are backward-compatible.
 
-### Common Issues
+4. **How many API versions should you support simultaneously?**
+   - A: Maximum 3: one deprecated (migration in progress), one current, one preview. Supporting more creates unsustainable maintenance burden. Sunset old versions methodically.
 
-- **404 Not Found for valid paths**: Check version prefix and routing configuration.
-- **Wrong version returned**: Verify header parsing and routing logic.
-- **Deprecated version still in use**: Monitor usage and communicate sunset dates.
-- **Version mismatch between services**: Align version contracts across all services.
-- **Caching returns wrong version**: Ensure caching keys include version.
+5. **How do you deprecate an API version?**
+   - A: Announce 18+ months in advance. Add `X-API-Deprecated` and `X-API-Sunset` headers. Send periodic notifications. Provide migration guides. After sunset, return `410 Gone`.
 
-### Version Metrics
+6. **What is the difference between URI path versioning and header versioning?**
+   - A: URI path (`/api/v1/users`) is simple, cacheable, and discoverable. Header versioning (`Accept: application/vnd.myapp.v1+json`) keeps URLs clean but is harder to test and debug. URI path is recommended for most APIs.
 
-```java
-@Component
-public class VersionMetrics {
+7. **How do you handle database schema changes across API versions?**
+   - A: Use a canonical database schema (the latest version). Create version-specific mappers that transform between canonical entities and versioned DTOs. Old versions simply ignore fields they don't understand.
 
-    private final MeterRegistry meterRegistry;
+8. **What is capability-based versioning?**
+   - A: Instead of version numbers, clients declare capabilities via headers. The server selects the appropriate response format. This supports diverse client needs without version proliferation.
 
-    public VersionMetrics(MeterRegistry meterRegistry) {
-        this.meterRegistry = meterRegistry;
-    }
+9. **How do you test backward compatibility?**
+   - A: Use contract testing (Pact), OpenAPI diff tools in CI/CD, and consumer-driven contracts. Record current version responses and verify new versions don't break them.
 
-    public void recordVersionUsage(HttpServletRequest request) {
-        String version = extractVersion(request.getRequestURI());
-        if (version == null) {
-            version = request.getHeader("X-API-Version");
-        }
-        meterRegistry.counter("api.requests", "version", version).increment();
-    }
+10. **How do you version events in event-driven architectures?**
+    - A: Use a schema registry (Confluent, Apicurio) with compatibility modes. Include schema version in the event envelope. Use backward-compatible changes (add optional fields only). Services handle multiple event versions.
 
-    public void recordDeprecatedCall(String version) {
-        meterRegistry.counter("api.deprecated.calls", "version", version).increment();
-    }
-}
-```
+---
 
-## 14. Comparison Section
+## Developer Recommendations
 
-### URI Versioning vs Header Versioning
+- **Version from day one** — Adding versioning after launch is painful: you must retroactively decide what "no version" means, migrate clients, or break them. Prefix your API with `/api/v1/` from the first commit. The cost is one extra URI segment. The benefit is the ability to make breaking changes later without ceremony. Even if you never need it, the insurance is worth the zero cost.
 
-| Aspect | URI Versioning | Header Versioning |
-|--------|---------------|-------------------|
-| Simplicity | Very simple | Complex |
-| Discoverability | High (visible in URL) | Low (hidden in headers) |
-| Caching | CDN-friendly | CDN-unfriendly |
-| RESTful Purity | Less pure (URLs change) | More pure (same URL) |
-| Default Version | Easy (v1 implied) | Harder to determine |
-| Browser Testing | Easy (type in URL) | Requires tools |
-| API Documentation | Clear version separation | Version logic needed |
+- **Use additive changes as long as possible** — Before creating v2, ask: can the change be made backward-compatible? Add the new field alongside the old one. Mark old fields as deprecated. Support both input formats. Only create a new version when additive changes are impossible (type changes, removed fields, fundamental contract changes). This delays the versioning tax and keeps your API surface manageable.
 
-### Versioning Strategy Decision Matrix
+- **Keep maximum 3 active versions** — Each version doubles your maintenance burden: request mapping, DTOs, mappers, tests, documentation. Support at most 3 versions (deprecated, current, preview). Set hard sunset dates. Automate version sunset — reject requests after the deadline. Don't negotiate exceptions; document the timeline clearly.
 
-```
-                    URI    Header    Query    Content-Type
-Simple               Y       N         Y          N
-Cacheable            Y       N         N          Y
-Standards-based      N       Y         N          Y
-Discoverable         Y       N         Y          N
-Easy to test         Y       N         Y          N
-```
+- **Use a version mapping layer, not separate databases** — Never fork your database per API version. Keep a canonical schema in the database. Create version-specific mappers (V1Mapper, V2Mapper) that transform between canonical entities and versioned DTOs. This keeps your data layer clean and allows adding new API fields without database changes.
 
-## 15. Revision Notes
+- **Add deprecation headers from the moment you announce** — `X-API-Deprecated: true` and `X-API-Sunset: <date>` tell clients programmatically that a version is going away. Don't just blog about it — embed the information in every response. Clients can build monitoring around these headers and proactively migrate. Add `X-API-Migration` header pointing to the replacement. After sunset, return `410 Gone` with a JSON body containing the migration URL.
 
-- Four main strategies: URI, Header, Query Param, Content-Type
-- Semantic versioning: Major.Minor.Patch
-- Backward-compatible: adding fields, endpoints, optional params
-- Breaking: removing/renaming fields, changing types, removing endpoints
-- Support max 3 versions: deprecated, active, preview
-- Minimum 18-month deprecation period
-- Use deprecation headers: `X-API-Deprecated`, `X-API-Sunset`, `X-API-Migration`
-- Spring Boot: separate controllers per version or routing logic
-- Strangler fig pattern for gradual migration
-- Always version from day one
-
-## 16. Cheat Sheet
-
-```
-+------------------------------------------------------------------+
-| API VERSIONING CHEAT SHEET                                       |
-+------------------------------------------------------------------+
-| VERSIONING STRATEGIES                                            |
-|   URI Path  : /api/v1/resource  /api/v2/resource                |
-|   Header    : Accept: application/vnd.myapp.v1+json             |
-|   Query     : /api/resource?version=1                            |
-|   Content   : Content-Type: application/vnd.myapp.v1+json        |
-+------------------------------------------------------------------+
-| CHANGE TYPES                                                     |
-|   Backward-Compatible: Add fields, add endpoints, add optional   |
-|   Breaking          : Remove/rename fields, change types,        |
-|                       remove endpoints, change error format      |
-+------------------------------------------------------------------+
-| DEPRECATION HEADERS                                              |
-|   X-API-Deprecated: true                                        |
-|   X-API-Sunset    : 2026-12-31                                  |
-|   X-API-Migration : /api/v2/resource/{id}                       |
-+------------------------------------------------------------------+
-| SPRING BOOT - URI VERSIONING                                     |
-|   @RestController                                                |
-|   @RequestMapping("/api/v1/users")  public class V1Controller   |
-|   @RequestMapping("/api/v2/users")  public class V2Controller   |
-+------------------------------------------------------------------+
-| SPRING BOOT - CONTENT NEGOTIATION                                |
-|   @GetMapping(produces = "application/vnd.myapp.v1+json")       |
-+------------------------------------------------------------------+
-| VERSION LIFECYCLE                                                |
-|   Dev -> Preview -> Active -> Deprecated -> Sunset              |
-+------------------------------------------------------------------+
-| BEST PRACTICES                                                   |
-|   1. Version from day one                                        |
-|   2. Max 3 active versions                                       |
-|   3. Min 18-month deprecation period                             |
-|   4. Use deprecation headers                                     |
-|   5. Monitor version usage                                       |
-|   6. Automate sunset enforcement                                 |
-+------------------------------------------------------------------+
-```
+- **Automate backward compatibility checks in CI/CD** — Use OpenAPI diff tools that compare the generated spec against the previous version's spec. Fail the build if a breaking change is detected without a version bump. This prevents accidental breaking changes (the most common versioning mistake) and enforces discipline across the team.

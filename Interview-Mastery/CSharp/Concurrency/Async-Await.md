@@ -1,673 +1,310 @@
 # Async-Await
 
-## 1. Executive Summary
+---
 
-Async/await is C#'s language-level asynchronous programming model introduced in C# 5.0 and .NET Framework 4.5. It enables non-blocking I/O operations using a synchronous-looking code pattern while the runtime manages continuations via a state machine. Async/await is not about parallelism — it's about freeing threads during I/O wait, improving scalability (especially for server applications) and UI responsiveness.
+## Overview
 
-## 2. Core Theory
+- **Definition:** C#'s language-level asynchronous programming model (C# 5.0+) that enables non-blocking I/O using a synchronous-looking code pattern with compiler-generated state machines.
+- **Why It Exists:** Frees threads during I/O wait, improving scalability for server applications and UI responsiveness. Async/await is about freeing threads, not parallelism.
+- **Key Concepts:** **`async`** keyword marks methods as asynchronous; **`await`** suspends execution until the task completes; **`Task<T>`** / **`ValueTask<T>`** represent async operations; **`IAsyncEnumerable<T>`** enables async streaming; **`ConfigureAwait`** controls continuation context.
 
-### Key Concepts
+---
 
-- **`async` keyword**: Marks a method as asynchronous. Enables `await` inside it. Does NOT create a new thread.
-- **`await` keyword**: Suspends execution of the method until the awaited task completes. Returns control to the caller.
-- **`Task` / `Task<T>`**: Represent an asynchronous operation. The "promise" of a future value.
-- **`ValueTask<T>`**: Value-type variant to reduce allocation in hot paths.
-- **`IAsyncEnumerable<T>`**: Async streaming (C# 8.0+), supports `await foreach`.
+## Core Concepts
 
-### Control Flow
+- **async Keyword:** Marks a method as asynchronous, enables `await` inside it, and does NOT create a new thread. The compiler rewrites the method into a state machine struct implementing `IAsyncStateMachine`.
+- **await Keyword:** Suspends execution of the method until the awaited task completes. If the task is already complete, execution continues synchronously; otherwise, control returns to the caller and a continuation is scheduled.
+- **Task and Task\<T\>:** Represent the "promise" of a future value. `Task` is a reference type (~80 bytes heap allocated). Tasks can be composed via `Task.WhenAll`, `Task.WhenAny`, and `Task.Run`.
+- **ValueTask\<T\>:** A value-type variant that avoids heap allocation when the result is often synchronous. Can only be awaited once. Backed by `IValueTaskSource<T>` for pooling scenarios.
 
 ```csharp
 async Task<string> ReadFileAsync(string path)
 {
-    // Thread A (synchronous part)
-    byte[] buffer = ArrayPool<byte>.Shared.Rent(4096);
-
     using var fs = new FileStream(path, FileMode.Open, FileAccess.Read,
         FileShare.Read, 4096, FileOptions.Asynchronous);
-
-    // Thread A: starts async I/O, returns Task (not yet completed)
-    // If I/O completes synchronously (data in cache), continues on Thread A
-    // Otherwise, Thread A returns to caller; continuation runs on ThreadPool
+    byte[] buffer = ArrayPool<byte>.Shared.Rent(4096);
     int bytesRead = await fs.ReadAsync(buffer, 0, buffer.Length);
-
-    // Continuation: could be on ThreadPool, or synchronized with SynchronizationContext
     string result = Encoding.UTF8.GetString(buffer, 0, bytesRead);
     ArrayPool<byte>.Shared.Return(buffer);
     return result;
 }
 ```
 
-### Async Method Signatures
+- **State Machine Transformation:** The compiler generates a struct with fields for captured locals, a `TaskAwaiter`, and a `_state` field tracking progress. The `MoveNext()` method uses a `switch` statement to resume at the correct await point. Exceptions are caught and set on the `TaskCompletionSource`.
+- **SynchronizationContext and ConfigureAwait:** By default, after `await`, the continuation runs on the original `SynchronizationContext` (e.g., UI thread in WPF). `ConfigureAwait(false)` skips this post-back, providing ~20% faster execution and preventing deadlocks in blocking calls. ASP.NET Core has no `SynchronizationContext`, so `ConfigureAwait(false)` is effectively the default.
+- **AsyncLocal\<T\>:** Flows ambient data (like request IDs) across async continuations. Copies logical call context on every await. Useful for distributed tracing and correlation IDs.
 
 ```csharp
-// Valid return types:
-async Task MyMethodAsync();           // Fire-and-forget (void equivalent)
-async Task<int> MyMethodAsync();      // Returns a value
-async ValueTask<int> MyMethodAsync(); // Hot-path, avoid allocation
-async IAsyncEnumerable<int> MyMethodAsync(); // Stream items (C# 8+)
-async void MyMethodAsync();           // ONLY for event handlers (dangerous otherwise)
-
-// Pattern: Task-like types (custom awaitables)
-// Any type with GetAwaiter()/IsCompleted/GetResult() can be awaited
-```
-
-## 3. Under-the-Hood Deep Dive
-
-### State Machine Transformation
-
-```csharp
-// Source:
-async Task<int> ExampleAsync(int a, int b)
-{
-    int result = await Task.Run(() => a + b);
-    return result * 2;
-}
-
-// Compiler generates (simplified):
-[StructLayout(LayoutKind.Auto)]
-internal struct ExampleAsyncStateMachine : IAsyncStateMachine
-{
-    public int _a;
-    public int _b;
-    public int _result;
-    public int _localResult;
-    public TaskAwaiter<int> _awaiter;
-    public int _state;
-
-    void IAsyncStateMachine.MoveNext()
-    {
-        try
-        {
-            switch (_state)
-            {
-                case 0:
-                    _awaiter = Task.Run(() => _a + _b).GetAwaiter();
-                    if (!_awaiter.IsCompleted)
-                    {
-                        _state = 1;
-                        _awaiter.UnsafeOnCompleted(this.MoveNext);
-                        return; // Yield to caller
-                    }
-                    goto case 1;
-                case 1:
-                    _result = _awaiter.GetResult();
-                    _localResult = _result * 2;
-                    break;
-            }
-        }
-        catch (Exception ex)
-        {
-            _taskCompletionSource.TrySetException(ex);
-            return;
-        }
-        _taskCompletionSource.TrySetResult(_localResult);
-    }
-}
-```
-
-### SynchronizationContext and ConfigureAwait
-
-```csharp
-// By default, after await, the continuation runs on the original SynchronizationContext
-// (e.g., UI thread in WPF/WinForms, ASP.NET request context)
-
-// Every await has an implicit "post back" to SynchronizationContext:
-await SomeAsyncMethod();  // continuation on original context
-
-// ConfigureAwait(false) says "I don't need to resume on the original context"
-await SomeAsyncMethod().ConfigureAwait(false);
-// ~20% faster (no context switch), prevents deadlocks in blocking calls
-
-// Which contexts exist:
-// - WindowsFormsSynchronizationContext (UI thread)
-// - DispatcherSynchronizationContext (WPF)
-// - AspNetSynchronizationContext (ASP.NET Classic, .NET Framework)
-// - ASP.NET Core: no context (ConfigureAwait(false) is default behavior)
-// - Default: ThreadPool (TaskScheduler.Default)
-```
-
-### Task Allocation Optimization
-
-```csharp
-// Task.CompletedTask: cached completed task for void returns
-// Task.FromResult<T>(value): cached for common results (bool true/false, 0, 1, etc.)
-// ValueTask<T>: avoids Task allocation when result is often synchronous
-
-// Example:
-public ValueTask<int> GetCachedValueAsync(string key)
-{
-    if (_cache.TryGetValue(key, out int value))
-        return new ValueTask<int>(value); // No Task allocation!
-
-    return new ValueTask<int>(LoadFromDbAsync(key)); // Falls back to Task
-}
-```
-
-### AsyncLocal<T>
-
-```csharp
-// Flows ambient data across async continuations (like CallContext)
-AsyncLocal<Guid> _requestId = new();
-
-async Task ProcessAsync()
-{
-    _requestId.Value = Guid.NewGuid();
-    await Step1Async(); // _requestId.Value flows to Step1
-    await Step2Async(); // still has the same value
-}
-
-// Implementation: copies the LogicalCallContext across async continuations
-```
-
-## 4. Production Code Examples
-
-```csharp
-// Async retry with exponential backoff
-public async Task<T> RetryAsync<T>(
-    Func<Task<T>> operation,
-    int maxRetries = 3,
-    CancellationToken ct = default)
+public async Task<T> RetryAsync<T>(Func<Task<T>> operation, int maxRetries = 3, CancellationToken ct = default)
 {
     for (int attempt = 1; attempt <= maxRetries; attempt++)
     {
-        try
-        {
-            return await operation().ConfigureAwait(false);
-        }
+        try { return await operation().ConfigureAwait(false); }
         catch (Exception ex) when (attempt < maxRetries && IsTransient(ex))
         {
-            var delay = TimeSpan.FromMilliseconds(Math.Pow(2, attempt) * 100);
-            await Task.Delay(delay, ct).ConfigureAwait(false);
+            await Task.Delay(TimeSpan.FromMilliseconds(Math.Pow(2, attempt) * 100), ct).ConfigureAwait(false);
         }
     }
-    return await operation().ConfigureAwait(false); // Last attempt
+    return await operation().ConfigureAwait(false);
 }
 ```
 
+---
+
+## Common Mistakes
+
+- **`async void` (except for event handlers)** — Exceptions thrown crash the process because there's no `Task` to observe the error. Always use `async Task` instead.
+- **Blocking on async code** — Using `.Result` or `.Wait()` causes deadlocks when a `SynchronizationContext` is involved. Always await all the way up.
+- **Missing `ConfigureAwait(false)` in library code** — Captures context unnecessarily, causing performance overhead and potential deadlocks.
+- **Sequential when parallel** — Awaiting tasks one after another instead of using `Task.WhenAll` for independent operations.
+- **No cancellation support** — Methods that don't accept `CancellationToken` cannot be cancelled, causing resource leaks and poor user experience.
+- **Forgetting to dispose `CancellationTokenSource`** — Can cause memory leaks if not disposed properly. Use `using` or `cts.Dispose()`.
+- **Async in synchronous wrapper** — Writing `public async Task<int> ComputeAsync() { return ComputeSync(); }` adds state machine overhead for no benefit. Return `Task.FromResult` directly.
+
 ```csharp
-// Concurrent async operations with throttling
-public async Task<List<TResult>> ProcessConcurrentlyAsync<T, TResult>(
-    IEnumerable<T> items,
-    Func<T, CancellationToken, Task<TResult>> processor,
-    int maxConcurrency,
-    CancellationToken ct = default)
+// Problem: async over sync
+public async Task<int> ComputeAsync() { return ComputeSync(); } // Bad
+// Fix: Task.FromResult
+public Task<int> ComputeAsync() { return Task.FromResult(ComputeSync()); }
+```
+
+- **Not observing task exceptions** — Fire-and-forget tasks can throw unobserved exceptions, triggering `TaskScheduler.UnobservedTaskException`. Always attach continuations or await tasks.
+
+---
+
+## Key Design Considerations
+
+- **Async all the way up** — Never block on async code. The `Task` returned from an async method propagates up the call stack. Blocking defeats the purpose of async.
+- **Avoid `async` when not needed** — Use `Task.FromResult`, `Task.CompletedTask`, `Task.FromException` for synchronous implementations of async interfaces.
+- **`ConfigureAwait(false)` in library code, rarely in application code** — Library code should not need to resume on a specific context; application code (UI) needs the context.
+- **Pooling patterns** — Use `ValueTask<T>` with `IValueTaskSource<T>` for high-throughput scenarios to minimize allocations. Consider `ObjectPool<T>` for reusable buffers.
+- **Async stream processing** — Use `Channel<T>` with `IAsyncEnumerable<T>` for producer-consumer pipelines with backpressure.
+- **Exception handling** — `AggregateException` is thrown only with `Task.Wait`, not `await` (which unwraps the first exception). Use `try/catch` naturally.
+- **Cooperative cancellation** — Pass `CancellationToken` to all async methods. Register cleanup callbacks via `ct.Register()`.
+
+```csharp
+await using var registration = ct.Register(() => _connection.Close());
+```
+
+---
+
+## Real-World Scenarios
+
+### Scenario 1: High-Throughput API Gateway with Rate Limiting
+**Context:** An API gateway processing 50K requests/second needs per-tenant rate limiting without blocking threads.
+
+```csharp
+public class RateLimitingMiddleware
 {
-    var semaphore = new SemaphoreSlim(maxConcurrency);
-    var tasks = items.Select(async item =>
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _rateLimiters = new();
+    private readonly int _maxConcurrent;
+    private readonly TimeSpan _timeout;
+
+    public async Task<T> ExecuteAsync<T>(string tenantId, Func<Task<T>> operation, CancellationToken ct)
     {
-        await semaphore.WaitAsync(ct).ConfigureAwait(false);
+        var semaphore = _rateLimiters.GetOrAdd(tenantId, _ => new SemaphoreSlim(_maxConcurrent));
+        
+        if (!await semaphore.WaitAsync(_timeout, ct).ConfigureAwait(false))
+            throw new RateLimitExceededException($"Tenant {tenantId} exceeded rate limit");
+        
         try
         {
-            return await processor(item, ct).ConfigureAwait(false);
+            return await operation().ConfigureAwait(false);
         }
         finally
         {
             semaphore.Release();
         }
-    });
-
-    return (await Task.WhenAll(tasks).ConfigureAwait(false)).ToList();
+    }
 }
 ```
 
+### Scenario 2: Async Producer-Consumer Pipeline with Backpressure
+**Context:** A log processing system reads from a high-volume source, transforms data, and writes to a database. Need backpressure to prevent memory overflow.
+
 ```csharp
-// Async producer-consumer with Channel<T>
-public class AsyncEventBus
+public class LogPipeline
 {
-    private readonly Channel<Event> _channel = Channel.CreateBounded<Event>(
-        new BoundedChannelOptions(1000)
+    private readonly Channel<LogEntry> _channel = Channel.CreateBounded<LogEntry>(
+        new BoundedChannelOptions(10_000) { FullMode = BoundedChannelFullMode.Wait });
+
+    public async Task ProduceAsync(IAsyncEnumerable<LogEntry> source, CancellationToken ct)
+    {
+        await foreach (var entry in source.WithCancellation(ct))
+            await _channel.Writer.WriteAsync(entry, ct);
+        _channel.Writer.Complete();
+    }
+
+    public async Task ConsumeAsync(CancellationToken ct)
+    {
+        var batch = new List<LogEntry>(100);
+        await foreach (var entry in _channel.Reader.ReadAllAsync(ct))
         {
-            FullMode = BoundedChannelFullMode.Wait,
-            SingleReader = false
-        });
-
-    public async Task PublishAsync(Event e, CancellationToken ct)
-    {
-        await _channel.Writer.WriteAsync(e, ct);
+            batch.Add(entry);
+            if (batch.Count >= 100)
+            {
+                await BulkInsertAsync(batch, ct);
+                batch.Clear();
+            }
+        }
+        if (batch.Count > 0) await BulkInsertAsync(batch, ct);
     }
 
-    public async IAsyncEnumerable<Event> SubscribeAsync(
-        [EnumeratorCancellation] CancellationToken ct)
+    private async Task BulkInsertAsync(List<LogEntry> batch, CancellationToken ct)
     {
-        await foreach (var e in _channel.Reader.ReadAllAsync(ct))
-            yield return e;
-    }
-}
-```
-
-```csharp
-// Async factory pattern
-public class AsyncResource : IAsyncDisposable
-{
-    private readonly FileStream _stream;
-
-    private AsyncResource(FileStream stream)
-    {
-        _stream = stream;
-    }
-
-    public static async Task<AsyncResource> CreateAsync(string path)
-    {
-        var stream = await File.OpenReadAsync(path);
-        return new AsyncResource(stream);
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_stream != null)
-            await _stream.DisposeAsync();
-    }
-}
-
-// Usage:
-await using var resource = await AsyncResource.CreateAsync("data.bin");
-```
-
-```csharp
-// Async LINQ operators
-public static class AsyncEnumerableExtensions
-{
-    public static async IAsyncEnumerable<TResult> SelectAwait<T, TResult>(
-        this IAsyncEnumerable<T> source,
-        Func<T, Task<TResult>> selector)
-    {
-        await foreach (var item in source)
-            yield return await selector(item);
-    }
-
-    public static async IAsyncEnumerable<T> WhereAwait<T>(
-        this IAsyncEnumerable<T> source,
-        Func<T, Task<bool>> predicate)
-    {
-        await foreach (var item in source)
-            if (await predicate(item))
-                yield return item;
+        using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync(ct);
+        // Bulk insert logic
     }
 }
 ```
 
-## 5. Real-World Scenarios
-
-**Scenario 1: ASP.NET Core Web API**
-- Every controller action is `async Task<IActionResult>`.
-- Use `IAsyncEnumerable<T>` for streaming large responses.
-- DB queries via `EF Core` async methods.
-
-**Scenario 2: File Processing Pipeline**
-- `await foreach` over lines of a large file.
-- Process in batches with `Channel<T>`.
-- Write results asynchronously.
-
-**Scenario 3: Microservice Orchestration**
-- `Task.WhenAll` to call multiple downstream services.
-- `Task.WhenAny` for race patterns (fastest response wins).
-- Circuit breaker with async retry.
-
-**Scenario 4: Real-Time UI (WPF/WinForms)**
-- `async void` for event handlers (button clicks).
-- `Progress<T>` and `IProgress<T>` for reporting progress to UI.
-- `ConfigureAwait(true)` (default) to resume on UI thread.
-
-## 6. Performance
+### Scenario 3: Graceful Shutdown with Cancellation Propagation
+**Context:** A microservice must shut down within 5 seconds when Kubernetes sends SIGTERM, preserving in-flight work.
 
 ```csharp
-// Task allocation cost:
-// - Task<T> : ~80 bytes (heap allocated)
-// - ValueTask<T> : struct (stack, usually)
-// - Task completion source with result: Task<T> + TCS (~200 bytes)
-
-// Benchmark: 1M async calls
-//   Task:       ~80ms, 80MB allocated
-//   ValueTask:  ~40ms, 20MB allocated (when synchronous)
-
-// Avoid async overhead on hot synchronous paths:
-public Task<int> GetCountAsync()
+public class GracefulShutdownHostedService : IHostedService
 {
-    if (_cache.TryGetValue("count", out int count))
-        return Task.FromResult(count); // Fast path: cached Task
-    return GetCountFromDbAsync(); // Slow path: real async
-}
+    private readonly ILogger _logger;
+    private CancellationTokenSource _shutdownCts = new();
 
-// Or with ValueTask:
-public ValueTask<int> GetCountAsync()
-{
-    if (_cache.TryGetValue("count", out int count))
-        return new ValueTask<int>(count);
-    return new ValueTask<int>(GetCountFromDbAsync());
-}
-```
+    public async Task StartAsync(CancellationToken ct)
+    {
+        _ = RunMainLoopAsync(_shutdownCts.Token);
+        await Task.CompletedTask;
+    }
 
-### Async Method Inlining
+    private async Task RunMainLoopAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                var workItem = await _workQueue.DequeueAsync(ct);
+                await ProcessAsync(workItem, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                _logger.LogInformation("Shutdown requested, draining remaining items...");
+                await DrainRemainingWorkAsync(TimeSpan.FromSeconds(3));
+                break;
+            }
+        }
+    }
 
-```csharp
-// .NET 6+: the runtime can inline async methods and elide state machine allocation
-// Requires: method must be simple and frequently called
-// Use NoInline attribute to prevent if problematic
-```
-
-### Avoiding Async Allocations
-
-```csharp
-// 1. Use ValueTask<T> for hot paths
-// 2. Cache completed tasks: Task.CompletedTask, Task.FromResult(0)
-// 3. Use IValueTaskSource<T> for pooling (advanced)
-// 4. Avoid async void (creates Task, but exceptions crash process)
-// 5. Use ConfigureAwait(false) in library code
-```
-
-## 7. Security
-
-```csharp
-// AsyncLocal information disclosure
-AsyncLocal<string> _ambientUser = new();
-_ambientUser.Value = GetSensitiveData();
-
-async Task LeakAsync()
-{
-    // If the continuation runs on a different thread (ConfigureAwait(false)),
-    // AsyncLocal data might flow to unexpected places
-    await Task.Yield();
-    string leaked = _ambientUser.Value; // Still accessible
-}
-// FIX: Always scope AsyncLocal carefully
-
-// Cancel async operations to avoid resource leaks
-using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-try
-{
-    await ProcessAsync(cts.Token);
-}
-catch (OperationCanceledException)
-{
-    // Handle cancellation gracefully
-}
-
-// Avoid TaskCompletionSource.SetResult race conditions
-// if (!tcs.TrySetResult(value)) { /* already completed */ }
-```
-
-## 8. Common Mistakes
-
-```csharp
-// MISTAKE 1: async void (except for event handlers)
-async void FireAndForget()
-{
-    await Task.Delay(1000);
-    throw new Exception("This crashes the process!"); // Unhandled!
-}
-// FIX: async Task, and handle errors
-
-// MISTAKE 2: Blocking on async code
-var result = GetDataAsync().Result; // Deadlock (if single-threaded context)
-var result = GetDataAsync().GetAwaiter().GetResult(); // Still blocks thread
-// FIX: await all the way up; or use .ConfigureAwait(false) if you must block
-
-// MISTAKE 3: Missing ConfigureAwait(false) in library code
-public async Task<string> ReadAsync()
-{
-    using var fs = File.OpenRead("data.txt");
-    using var sr = new StreamReader(fs);
-    return await sr.ReadToEndAsync(); // Captures context unnecessarily
-}
-// FIX: return await sr.ReadToEndAsync().ConfigureAwait(false);
-
-// MISTAKE 4: Combining async with Wait/Result
-Task t = DoWorkAsync();
-t.Wait(); // Thread pool thread blocked!
-// FIX: use await
-
-// MISTAKE 5: No cancellation support
-public async Task ProcessAsync() // Can't cancel!
-{
-    while (true) { await Task.Delay(1000); }
-}
-// FIX: accept CancellationToken
-
-// MISTAKE 6: async in a using block
-using var fs = File.OpenRead(path);
-var data = await fs.ReadAsync(buffer); // fs might be disposed before continuation
-// FIX: it's actually safe (using disposes on original context after await completes)
-
-// MISTAKE 7: Sequential when you could parallelize
-var r1 = await GetData1Async();  // Waits for this
-var r2 = await GetData2Async();  // Then starts this
-// FIX: Task.WhenAll(GetData1Async(), GetData2Async())
-
-// MISTAKE 8: Capturing SynchronizationContext unnecessarily
-// Especially in ASP.NET Core (no context), ConfigureAwait doesn't matter
-
-// MISTAKE 9: Forgetting to dispose CancellationTokenSource
-var cts = new CancellationTokenSource();
-// ... use cts.Token
-// FIX: using var cts = new CancellationTokenSource();
-
-// MISTAKE 10: Mixing sync and async in custom Task-returning methods
-public async Task<int> ComputeAsync()
-{
-    return ComputeSync(); // No await needed; the async keyword wraps in Task
-}
-// FIX: return Task.FromResult(ComputeSync()) without async
-```
-
-## 9. Senior Engineer Perspective
-
-**1. Async ALL the way up.** The `Task` returned from an async method propagates up. Never block.
-
-**2. Avoid `async` when not needed.** `Task.FromResult`, `Task.CompletedTask` for sync implementations:
-
-```csharp
-public Task SaveAsync(Data data)
-{
-    if (data is null) return Task.FromException(new ArgumentNullException());
-    return SaveCoreAsync(data);
+    public async Task StopAsync(CancellationToken ct)
+    {
+        _logger.LogInformation("Initiating graceful shutdown...");
+        _shutdownCts.Cancel();
+        
+        // Give in-flight work 5 seconds to complete
+        await Task.Delay(TimeSpan.FromSeconds(5), ct).ContinueWith(_ => { });
+        _shutdownCts.Dispose();
+    }
 }
 ```
 
-**3. Use `ConfigureAwait(false)` in library code, rarely in application code** (where context matters).
+---
 
-**4. Pooling patterns:** `ObjectPool<ValueTask>` or `IValueTaskSource<T>` for high-throughput scenarios.
+## Scenario-Based Questions
 
-**5. Async stream processing** via `IAsyncEnumerable<T>` with `Channel<T>` for producer-consumer.
+1. **Q: You are building a web API that calls three external services. Each service is independent and fails ~5% of the time. How do you handle this efficiently and resiliently?**
+   A: Use `Task.WhenAll` to parallelize the three calls. Wrap each in a try/catch that returns a fallback value on failure. Apply a timeout per call via `CancellationTokenSource.CreateLinkedTokenSource` with a per-task timeout. Use a circuit breaker pattern (e.g., `Polly`) for each service to avoid hammering failing services. Consider `ConfigureAwait(false)` to avoid context capture. Edge case: one service timeout should not cancel the others — use independent CTS per service.
 
-**6. Exception handling:** AggregateException is thrown only on `Task.Wait`, not `await` (which unwraps the first exception).
+2. **Q: You have an ASP.NET Core endpoint that uploads large files (500MB+). How do you avoid memory exhaustion and thread starvation?**
+   A: Stream the request body directly to disk using `Request.Body.CopyToAsync(fileStream)` without buffering in memory. Disable request body buffering. Use `Stream.PipeReader` for zero-copy processing. Set `IISClientMaxRequestBodySize` and `KestrelLimits.MaxRequestBodySize`. For antivirus scanning, chain `Stream` decorators. Never read the entire file into a `byte[]` — this causes LOH fragmentation and GC pressure.
 
-**7. Cooperative cancellation** via `CancellationToken.Registration` for cleanup:
+3. **Q: You are designing a background job processor that handles 1000 jobs/second. Each job does I/O with some CPU work. How do you maximize throughput?**
+   A: Use `Channel<T>` as a bounded producer-consumer with multiple concurrent consumers. Set `BoundedChannelFullMode.Wait` for backpressure. Use `ValueTask` for frequently synchronous operations (cache checks). Pin consumer count to `Environment.ProcessorCount * 2` for I/O-heavy workloads. Use `ConfigureAwait(false)` throughout. Monitor channel count and apply dynamic scaling. For CPU-bound portions, offload to `Task.Run` sparingly.
 
-```csharp
-await using var registration = ct.Register(() =>
-{
-    // Cleanup on cancellation
-    _connection.Close();
-});
-```
+4. **Q: You are implementing an async cache-aside pattern. How do you prevent the thundering herd problem when a popular cache key expires?**
+   A: Use `AsyncLazy<T>` or `SemaphoreSlim(1,1)` per key to serialize cache regeneration. When the cache misses, the first caller acquires the semaphore and regenerates; subsequent callers await the same operation. Use `ConcurrentDictionary<string, SemaphoreSlim>` for per-key locking. Consider `IDistributedCache` with `GetOrCreateAsync` pattern. Trade-off: complexity vs. reduced database load. Edge case: handle semaphore disposal on key eviction.
 
-## 10. Interview Questions (Easy)
+5. **Q: You need to call a paginated REST API that returns 10K pages. How do you process results concurrently with bounded parallelism?**
+   A: Use `Parallel.ForEachAsync` (.NET 6+) with `MaxDegreeOfParallelism` set to a sensible concurrency limit (e.g., 10). Alternatively, use a `SemaphoreSlim` to throttle `Task.WhenAll`. Implement page enumeration as an `IAsyncEnumerable<int>` yielding page numbers. Each page fetch and processing is independent. Handle retries per page with exponential backoff. Cancel remaining fetches on first unrecoverable error.
 
-1. What does the `async` keyword do?
-2. What does the `await` keyword do?
-3. What is the difference between `Task` and `Task<T>`?
-4. What return types can an async method have?
-5. What is `ConfigureAwait(false)` used for?
-6. What is the difference between `Task.Run` and `async`/`await`?
-7. How do you run multiple async operations in parallel?
-8. What is `Task.WhenAll`?
-9. What is `Task.WhenAny`?
-10. What is `CancellationToken` used for?
+6. **Q: You are building a real-time dashboard that polls 10 data sources every 5 seconds. How do you implement the polling loop without drift?**
+   A: Use a `PeriodicTimer` (.NET 6+) which avoids drift (unlike `Task.Delay` in a loop — drift accumulates). Start all 10 polls concurrently with `Task.WhenAll`. Use a `CancellationTokenSource` tied to the application lifetime. If a poll takes longer than 5 seconds, log a warning but don't skip the next interval — `PeriodicTimer` handles this naturally. For time-sensitive data, consider `IAsyncEnumerable<T>` with `Channel<T>`.
 
-## 11. Interview Questions (Medium)
+7. **Q: You are implementing an async lock for a distributed system. How does it differ from a single-process `SemaphoreSlim`?**
+   A: Single-process `SemaphoreSlim` is per-instance — two servers cannot coordinate. For distributed locking, use `Redis` (`RedLock` algorithm via `StackExchange.Redis`), Azure Blob lease, or database `sp_getapplock`. Distributed locks need lease expiration (to handle crashed holders), fencing tokens (to prevent delayed requests), and clock drift tolerance. Never assume a distributed lock is perfectly reliable — design for the case where two nodes both believe they hold the lock.
 
-1. Explain how the compiler transforms an async method (state machine).
-2. What is `SynchronizationContext` and how does it affect async continuations?
-3. When should you use `ValueTask<T>` instead of `Task<T>`?
-4. Explain the difference between `Task.Delay` and `Thread.Sleep`.
-5. Why is `async void` dangerous?
-6. What is `AsyncLocal<T>` and when would you use it?
-7. How does `await foreach` work (what interfaces are needed)?
-8. What happens when an exception is thrown in an async method?
-9. Explain the difference between `TaskCreationOptions.LongRunning` and a regular task.
-10. What is `Yield()` and when would you use it?
+8. **Q: You are processing a stream of 1M events from Kafka. Each event requires an async DB write. How do you batch efficiently?**
+   A: Accumulate events into a channel or buffer. When the buffer reaches a threshold (e.g., 100 events) or a time window elapses (e.g., 100ms), flush as a batch using `SqlBulkCopy` or `EF Core ExecuteUpdate`. Use `Channel<T>` with a `BatchAsync` extension that yields batches. For exactly-once semantics, use idempotency keys. For at-least-once, track offsets and commit after successful batch. Handle partial batch failures by retrying individual items.
 
-## 12. Advanced Interview Questions (Hard)
+9. **Q: You have a legacy synchronous library that can't be made async. How do you integrate it into an async codebase without thread pool starvation?**
+   A: Offload synchronous calls to a dedicated thread (not the thread pool) using `Task.Run` with a custom `TaskScheduler` that has a limited number of dedicated threads. Use `SemaphoreSlim` to cap concurrency. Never call `.Result` or `.Wait()` — this ties up a thread pool thread AND blocks, doubling the damage. Consider `IOPriority` hints on Windows. Measure: if the library calls are short (< 50ms), they may be acceptable on the thread pool with limited parallelism.
 
-1. Implement a custom awaitable type that pools its continuation state.
-2. Explain the `IValueTaskSource<T>` interface and design a pooled `ValueTask<T>` source.
-3. Design an async-friendly lock (AsyncLock) using `SemaphoreSlim` or channel.
-4. How does the `ConfigureAwait` decision impact deadlock potential?
-5. Implement an async `Lazy<T>` that prevents multiple simultaneous initializations.
-6. Explain `ExecutionContext` flow vs `SynchronizationContext` flow.
-7. Design an async-friendly producer-consumer pipeline with backpressure.
-8. Implement `WhenAll` with concurrency limit from scratch.
-9. Explain why `Task<T>` cannot be made a value type (history and constraints).
-10. Design an async polling mechanism that doubles interval on failure (exponential backoff).
+10. **Q: You are debugging an ASP.NET app that hangs under load. Deadlock is suspected. How do you diagnose and fix it?**
+    A: Capture a memory dump (or use `dotnet-dump`), load in WinDbg or `dotnet-dump analyze`, and run `!syncblk` to find blocked threads. Look for threads waiting on `Monitor.Enter` while holding another lock. Common pattern: blocking on async code (`.Result`/`.Wait()`) in a UI context. Fix: use `ConfigureAwait(false)` in library code, avoid blocking calls entirely, and ensure async-all-the-way-up. Also check `ThreadPool` starvation via `ThreadPool.GetAvailableThreads` metrics.
 
-## 13. Interview Questions (System Design)
+---
 
-1. Design an async-first web server request pipeline.
-2. Design a distributed async job queue with persistence and retry.
-3. Design an async-first in-memory cache with background refresh.
-4. Design an async file watcher that processes new files in order.
-5. Design a message broker with async publish/subscribe guarantees.
-6. Design an async circuit breaker for microservice calls.
-7. Design an async rate limiter using token bucket algorithm.
-8. Design a real-time chat system using async streams.
-9. Design a streaming ETL pipeline using `IAsyncEnumerable` and channels.
-10. Design an async health check aggregation system for microservices.
+## Interview Questions
 
-## 14. Expert-Level Interview Questions (Architect)
+1. **What is the difference between `Task` and `ValueTask<T>`?** 
+   A: `Task<T>` is a reference type (~80 bytes heap allocated) that can be awaited multiple times. `ValueTask<T>` is a value type that avoids allocation when the result is synchronous. `ValueTask<T>` can only be awaited once and cannot be used with `WhenAll`/`WhenAny` without calling `.AsTask()`.
 
-1. Design a fully async query execution engine for a database that uses `IValueTaskSource<T>` pooling to serve 100K queries/second with zero allocation.
-2. Architect a distributed tracing system that flows trace context through `AsyncLocal<T>` across process boundaries via gRPC headers, handling nested spans correctly.
-3. Design a cooperative async scheduler that implements priority scheduling and work stealing for a game engine's task system.
-4. Architect a high-throughput async RPC framework that avoids all synchronous blocking in the hot path, using pipes and channels for zero-copy serialization.
-5. Design an actor framework where actor mailboxes are fully async, with backpressure and supervision, using `Channel<T>` and `Task` composition.
-6. Architect an async stream processing engine with exactly-once semantics, checkpointing, and state persistence.
-7. Design a deadlock-detection and recovery system for async code that uses timeout-based locks with escalation.
-8. Architect an async-first ORM that supports lazy loading, batching, and concurrent query execution without blocking.
-9. Design a reactive system following the Reactive Manifesto using `IObservable<T>` and async pipelines with backpressure.
-10. Architect a language-extended async profiler that tracks state machine allocations and synchronization context switches using diagnostic sources.
+2. **What does `ConfigureAwait(false)` do?**
+   A: It tells the runtime not to marshal the continuation back to the original `SynchronizationContext` or `TaskScheduler`. This avoids context switch overhead and prevents deadlocks when blocking on async code. Library code should use it; UI application code should not.
 
-## 15. Debugging & Troubleshooting
+3. **How does the compiler transform an `async` method?**
+   A: The compiler generates a struct implementing `IAsyncStateMachine` with a `_state` field, captured locals as fields, and a `MoveNext()` method using a `switch` statement. The state machine is boxed only when an incomplete task is awaited.
 
-```csharp
-// Enable async diagnostics for stack traces:
-// <AppContextSwitchOverrides value="Switch.System.Runtime.Serialization.UseNewAsyncSerialization=true"/>
+4. **What is `AsyncLocal<T>` used for?**
+   A: It stores ambient data that flows across async continuations via `ExecutionContext.Copy()`. Common uses: correlation IDs for distributed tracing, transaction scopes, and `ILogger` scopes.
 
-// Look for "async" in call stacks:
-// - State machine types: <MethodName>d__0
-// - "MoveNext" frames indicate async state machine
+5. **Explain the difference between `Task.WhenAll` and `Task.WhenAny`.**
+   A: `WhenAll` returns a task that completes when ALL provided tasks complete — the result is an array of all results. `WhenAny` returns when ANY task completes — the result is the first completed task. Use `WhenAll` for fan-out parallelism; use `WhenAny` for timeouts or first-response-wins patterns.
 
-// Common issues:
-// - Deadlock: sync context blocked waiting for async result
-//   -> Use ConfigureAwait(false) in library code
-// - Task not observed: TaskScheduler.UnobservedTaskException
-//   -> Always await tasks or attach continuations
-// - Fire-and-forget with exceptions:
-//   -> Use a "safe fire-and-forget" extension with logging
+6. **What causes an `async void` method to crash the process?**
+   A: Exceptions thrown in `async void` methods cannot be caught because there is no `Task` to observe the exception. The exception is re-thrown on the `SynchronizationContext`, which typically crashes the process. Always use `async Task` except for event handlers.
 
-// Tools:
-// - dotnet-trace: captures async activity
-// - PerfView: "Async" group in "Thread Time" stacks
-// - Visual Studio: Task Debugger (Parallel Tasks, Threads windows)
-```
+7. **How does `IAsyncEnumerable<T>` differ from `IEnumerable<T>`?**
+   A: `IAsyncEnumerable<T>` supports asynchronous iteration with `await foreach`. Each element can be fetched asynchronously via `MoveNextAsync()` returning `ValueTask<bool>`. It supports cancellation via `WithCancellation()` and integrates with `Channel<T>`.
 
-## 16. Comparison Section
+8. **What is the `TaskCompletionSource<T>` pattern?**
+   A: It creates a `Task<T>` that you manually control by calling `SetResult()`, `SetException()`, or `SetCanceled()`. Used for bridging legacy async patterns (APM/EAP) to TAP and for implementing custom async primitives like `AsyncLock` or `ValueTask<T>` sources.
 
-```
-+------------------------+------------------------+------------------------+
-| Feature                | async/await            | BackgroundWorker       |
-+------------------------+------------------------+------------------------+
-| Pattern                | Continuation (state m) | Event-based            |
-| Return value           | Task<T>                | RunWorkerCompleted     |
-| Cancellation           | CancellationToken      | CancellationPending    |
-| Progress reporting     | IProgress<T>           | ProgressChanged        |
-| Composition            | await, WhenAll, WhenAny| Manual chaining        |
-| Error handling         | try/catch (natural)    | RunWorkerCompleted     |
-| Allocation             | State machine + Task   | Events + args          |
-+------------------------+------------------------+------------------------+
+9. **How does `SemaphoreSlim.WaitAsync` prevent thread pool starvation?**
+   A: Unlike `Monitor.Enter` (which blocks the thread), `WaitAsync` returns a `Task` that completes when the semaphore is acquired. The calling thread is freed to process other work items during the wait, preventing thread pool exhaustion.
 
-+------------------------+------------------------+------------------------+
-| Feature                | Task<T>                | ValueTask<T>           |
-+------------------------+------------------------+------------------------+
-| Type                   | Reference (class)      | Value (struct)         |
-| Allocation             | Always (~80 bytes)     | None if sync result    |
-| Multiple await         | Yes (cached result)    | No (once only)         |
-| Blocking wait          | .Result, .Wait()      | .Result, .AsTask()     |
-| Pooling                | Not easily             | IValueTaskSource<T>    |
-| Best for               | General async          | Hot paths, sync results|
-+------------------------+------------------------+------------------------+
+10. **What is the async state machine boxing behavior?**
+    A: The state machine struct is boxed (heap allocated) only when `MoveNext()` is called asynchronously — i.e., when an awaited task is incomplete. If all awaited tasks complete synchronously, the struct stays on the stack and no boxing occurs. This is the "fast path" optimization.
 
-+------------------------+------------------------+------------------------+
-| Feature                | IAsyncEnumerable<T>    | IEnumerable<T>         |
-+------------------------+------------------------+------------------------+
-| Enumeration            | await foreach         | foreach                |
-| Async operations       | Per-element async      | Sync only              |
-| Backpressure           | Via CancellationToken  | None                   |
-| Allocation             | State machine per iter | State machine per iter  |
-| DB mapping             | EF Core, Dapper        | Any                    |
-+------------------------+------------------------+------------------------+
-```
+---
 
-## 17. Revision Notes
+## Developer Recommendations
 
-- `async` enables `await`; it does NOT create a new thread.
-- The compiler generates a state machine struct from async methods.
-- `await` yields control to caller if the task is not yet completed.
-- `ConfigureAwait(false)` skips returning to original `SynchronizationContext`.
-- `ValueTask<T>` reduces allocation when result is often synchronous.
-- `async void` is only for event handlers (exceptions crash process).
-- Never block on async code with `.Result` or `.Wait()` (deadlock risk).
-- Use `CancellationToken` for cooperative cancellation.
-- `Task.WhenAll` for concurrency, `Task.WhenAny` for racing.
-- `IAsyncEnumerable<T>` + `await foreach` for async streaming.
+- **Prefer `ConfigureAwait(false)` in library code, omit it in application code** — Library code should not depend on a specific `SynchronizationContext`. Adding `ConfigureAwait(false)` provides ~20% throughput improvement and prevents deadlocks. In UI application code, the context is needed for thread affinity (e.g., updating controls).
 
-## 18. Cheat Sheet
+- **Use `CancellationToken` in all async method signatures** — Without it, callers cannot cancel in-flight operations, leading to resource leaks and poor UX. Always pass `CancellationToken` through the call chain. Use `CancellationToken.None` as a default if the method's callers rarely need cancellation.
 
-```
-+------------------------------------------------------------------+
-|                   ASYNC/AWAIT CHEAT SHEET                         |
-+------------------------------------------------------------------+
-| SYNTAX                                                            |
-|  async Task MethodAsync()         - async void-returning method  |
-|  async Task<T> MethodAsync()      - async returning T            |
-|  async ValueTask<T> MethodAsync() - value-task returning         |
-|  await task;                       - awaits completion           |
-|  await foreach (var x in source)  - async enumeration           |
-|  await using (var r = source)     - async disposal              |
-+------------------------------------------------------------------+
-| CREATING TASKS                                                    |
-|  Task.Run(action)                  - queue work on thread pool  |
-|  Task.FromResult(val)             - completed task with value   |
-|  Task.FromException(ex)           - failed task                 |
-|  Task.CompletedTask               - completed void task         |
-|  Task.Delay(ms)                   - timer task                  |
-|  Task.Yield()                     - force continuation          |
-+------------------------------------------------------------------+
-| COMPOSITION                                                       |
-|  Task.WhenAll(t1, t2)             - wait all                    |
-|  Task.WhenAny(t1, t2)             - wait first                  |
-|  Task t.ContinueWith(cb)          - continuation (avoid)        |
-+------------------------------------------------------------------+
-| CANCELLATION                                                      |
-|  CancellationTokenSource          - creates token               |
-|  CancellationToken                - passed to async methods     |
-|  ct.ThrowIfCancellationRequested() - throws OperationCanceled   |
-|  ct.Register(action)              - callback on cancel          |
-|  cts.CancelAfter(timeout)         - auto-cancel after timeout   |
-+------------------------------------------------------------------+
-| BEST PRACTICES                                                    |
-|  async all the way up (no blocking)                              |
-|  ConfigureAwait(false) in libraries                              |
-|  Use CancellationToken in ALL async methods                      |
-|  Prefer Task.WhenAll over sequential awaits                      |
-|  Use ValueTask for synchronous hot paths                        |
-|  Never use async void (except event handlers)                   |
-|  Catch OperationCanceledException for cancellation              |
-|  Use IAsyncDisposable for async cleanup                         |
-+------------------------------------------------------------------+
-| COMMON PATTERNS                                                   |
-|  Retry:  await RetryAsync(operation, maxRetries)                |
-|  Throttle: await ProcessConcurrentlyAsync(items, maxConc)        |
-|  Timeout: await task.WithCancellation(cts.Token)                |
-|  Fallback: await task.ContinueWith(c => fallback, canceled)     |
-|  Race: await Task.WhenAny(task1, task2)                         |
-+------------------------------------------------------------------+
+- **Avoid `async void` except for event handlers** — `async void` exceptions crash the process. Return `Task` instead so errors are observable. For top-level event handlers (button clicks), wrap the body in a try/catch to log exceptions.
+
+- **Use `Channel<T>` for producer-consumer over `BlockingCollection<T>`** — `Channel<T>` is async-first, supports backpressure via bounded capacity, integrates with `IAsyncEnumerable<T>`, and has lower overhead. `BlockingCollection<T>` blocks threads, which is antithetical to async patterns.
+
+- **Prefer `Parallel.ForEachAsync` over `Task.WhenAll` + manual throttling** — `Parallel.ForEachAsync` (.NET 6+) provides built-in `MaxDegreeOfParallelism` without requiring manual `SemaphoreSlim` management. It handles cancellation and is optimized for async workloads.
+
+- **Measure before optimizing async allocation** — The async state machine allocation (~80-120 bytes) is negligible for most workloads. Prematurely replacing `Task<T>` with `ValueTask<T>` adds complexity and constraints. Profile with BenchmarkDotNet to identify true bottlenecks.
+
+- **Never block on async code with `.Result` or `.Wait()`** — This causes thread pool starvation and deadlocks in contexts with `SynchronizationContext`. Use `await` all the way up. If you absolutely must block (e.g., console app `Main`), use `GetAwaiter().GetResult()` or switch to `await Main` (C# 7.1+).
+
+- **Use `TaskCompletionSource` carefully** — Only one thread should call `SetResult`/`SetException`. Calling it multiple times throws. Use `TrySetResult` for patterns where completion might race. Consider `TaskCompletionSource<T>.RunContinuationsAsynchronously` to avoid running continuations on the completing thread.
+
+---
+
+## Key Design Considerations (Additional)
+
+- **Async method inlining (.NET 6+):** The runtime can elide state machine allocation for simple async methods that are frequently called. Use `[MethodImpl(MethodImplOptions.NoInlining)]` if problematic.
+- **Avoid async void:** Only for event handlers. All other async methods must return `Task`, `Task<T>`, or `ValueTask<T>`.
+- **ValueTask restrictions:** Cannot be awaited multiple times, cannot be used with `Task.WhenAll`/`WhenAny` without calling `.AsTask()`, and cannot block with `.Result`.
+- **Channel\<T\> for producer-consumer:** Async-compatible, bounded with backpressure, supports `IAsyncEnumerable<T>` via `ReadAllAsync()`.
+
+---
+
+## Comparison Summary
+
+- **async/await vs BackgroundWorker:** async/await uses continuation-based state machines (no thread during wait) vs event-based pattern; async/await has natural error handling via try/catch; async/await supports composition via `WhenAll`/`WhenAny`.
+- **Task vs ValueTask:** Reference type (always allocates) vs value type (allocates only when wrapping a Task); multiple await supported only for Task; ValueTask best for synchronous hot paths.
+- **IAsyncEnumerable vs IEnumerable:** Supports per-element async operations, `await foreach`, and cancellation for backpressure.
