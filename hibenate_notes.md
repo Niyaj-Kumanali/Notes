@@ -57,12 +57,12 @@
 -   **SessionFactory:**
 
     -   A factory for `Session` objects.
-        -   It is responsible for creating `Session` instances, which are used for interacting with the database.
+    -   It is responsible for creating `Session` instances, which are used for interacting with the database.
     -   Created once per application lifecycle and is thread-safe.
-        -   Typically created at the start of an application and shared across multiple threads.
+    -   Typically created at the start of an application and shared across multiple threads.
     -   Reads configuration from `hibernate.cfg.xml` or `application.properties`.
-        -   The `SessionFactory` is configured based on the provided configuration file, which includes database connection details and Hibernate properties.
-        -   Example:
+    -   The `SessionFactory` is configured based on the provided configuration file, which includes database connection details and Hibernate properties.
+    -   Example:
             ```java
             SessionFactory factory = new Configuration()
                                        .configure("hibernate.cfg.xml")
@@ -73,9 +73,9 @@
 -   **Session:**
 
     -   A lightweight, non-thread-safe object for database operations.
-        -   Used to interact with the database and manage entity objects.
+    -   Used to interact with the database and manage entity objects.
     -   Represents a single unit of work.
-        -   Operations like save, update, delete, and load are performed within a session.
+    -   Operations like save, update, delete, and load are performed within a session.
     -   Common methods:
         -   `save()`: Inserts a new record into the database.
             ```java
@@ -101,7 +101,7 @@
 -   **Transaction:**
 
     -   Ensures atomicity of database operations.
-        -   Ensures that operations like saving, updating, and deleting are executed as a single transaction and are committed together.
+    -   Ensures that operations like saving, updating, and deleting are executed as a single transaction and are committed together.
     -   Common methods:
         -   `beginTransaction()`: Starts a new transaction.
             ```java
@@ -118,7 +118,7 @@
 
 -   **Query:**
     -   Used to execute both HQL (Hibernate Query Language) and native SQL queries.
-        -   HQL allows querying entity objects, while native SQL can query raw database tables.
+    -   HQL allows querying entity objects, while native SQL can query raw database tables.
     -   Methods:
         -   `createQuery(String hql)`: Creates a query based on HQL.
             ```java
@@ -186,9 +186,8 @@
 -   **Mapping Files:**
 
     -   `*.hbm.xml`: Maps Java classes to database tables.
-
-        -   These files are used to configure object-relational mapping (ORM) outside annotations, though annotations are commonly used now.
-        -   Example (`Employee.hbm.xml`):
+    -   These files are used to configure object-relational mapping (ORM) outside annotations, though annotations are commonly used now.
+    -   Example (`Employee.hbm.xml`):
             ```xml
             <hibernate-mapping>
                 <class name="com.example.Employee" table="employee">
@@ -200,7 +199,6 @@
                 </class>
             </hibernate-mapping>
             ```
-
     -   Contains `<class>` tags with attributes like `<id>` and `<property>`.
         -   `<class>`: Defines a class mapping to a database table.
         -   `<id>`: Specifies the primary key.
@@ -354,13 +352,9 @@
 # 5. Hibernate Query Language (HQL)
 
 -   A database-independent query language.
-
-    -   HQL allows you to write queries in terms of your Java objects (entities), rather than database tables. It is object-oriented and works with Java entity classes.
-
+-   HQL allows you to write queries in terms of your Java objects (entities), rather than database tables. It is object-oriented and works with Java entity classes.
 -   Operates on entity objects, not tables.
-
-    -   Unlike SQL, which works with tables, HQL works directly with entities and their properties.
-
+-   Unlike SQL, which works with tables, HQL works directly with entities and their properties.
 -   Common Examples:
 
     -   **Select**:
