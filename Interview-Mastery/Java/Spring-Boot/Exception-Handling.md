@@ -6,169 +6,160 @@
 
 **Spring Boot Exception Handling** provides a structured approach to managing errors in web applications through **`@ControllerAdvice`** / **`@RestControllerAdvice`**, **`ErrorController`**, and automatic error responses. It ensures consistent, secure, and informative error responses across all endpoints.
 
-### Key Concepts:
+### Why Structured Exception Handling Matters
 
-1. **Why Structured Exception Handling Matters**:
+- Without it, stack traces may leak to production responses, creating **security risks** that expose internal implementation details to potential attackers.
+- Inconsistent error formats across endpoints make API clients harder to build and maintain, increasing integration time for frontend teams.
+- Mixed HTTP status codes for the same error type confuse consumers and make error handling logic on the client side unnecessarily complex.
+- Unhandled exceptions return generic **Whitelabel Error Pages** with no useful information, providing a poor developer experience for API consumers.
 
-   - Without it, stack traces may leak to production responses, creating **security risks**.
-   - Inconsistent error formats across endpoints make API clients harder to build.
-   - Mixed HTTP status codes for the same error type confuse consumers.
-   - Unhandled exceptions return generic **Whitelabel Error Pages** with no useful information.
+### Exception Handling Approaches
 
-2. **Exception Handling Approaches**:
-
-   - **`@ExceptionHandler` in Controller** — Handles exceptions locally within a single controller. Best for endpoint-specific handling.
-   - **`@ControllerAdvice` / `@RestControllerAdvice`** — Global exception handling across all controllers. This is the most common approach.
-   - **`HandlerExceptionResolver`** — Framework-level customization for handling how Spring MVC resolves exceptions.
-   - **`ErrorController` / `ErrorAttributes`** — Catch-all for all unhandled errors including 404s and 500s.
-   - **`ResponseStatusException`** — Thrown inline in service code to return a specific HTTP status and reason.
+- **`@ExceptionHandler` in Controller** — Handles exceptions locally within a single controller. Best for endpoint-specific handling that differs from the global pattern.
+- **`@ControllerAdvice` / `@RestControllerAdvice`** — Global exception handling across all controllers. This is the most common approach for consistent error responses.
+- **`HandlerExceptionResolver`** — Framework-level customization for handling how Spring MVC resolves exceptions. Used for low-level framework integration.
+- **`ErrorController` / `ErrorAttributes`** — Catch-all for all unhandled errors including 404s and 500s that reach the servlet container.
+- **`ResponseStatusException`** — Thrown inline in service code to return a specific HTTP status and reason without creating custom exception classes.
 
 ---
 
 ## Core Concepts
 
-### 1. Global Exception Handler with `@RestControllerAdvice`
+### Global Exception Handler with `@RestControllerAdvice`
 
-   The recommended way to handle exceptions centrally:
+The recommended way to handle exceptions centrally:
 
-   ```java
-   @RestControllerAdvice
-   public class GlobalExceptionHandler {
+```java
+@RestControllerAdvice
+public class GlobalExceptionHandler {
 
-       @ExceptionHandler(ResourceNotFoundException.class)
-       @ResponseStatus(HttpStatus.NOT_FOUND)
-       public ErrorResponse handleNotFound(ResourceNotFoundException ex) {
-           return new ErrorResponse("NOT_FOUND", ex.getMessage());
-       }
+    @ExceptionHandler(ResourceNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public ErrorResponse handleNotFound(ResourceNotFoundException ex) {
+        return new ErrorResponse("NOT_FOUND", ex.getMessage());
+    }
 
-       @ExceptionHandler(MethodArgumentNotValidException.class)
-       @ResponseStatus(HttpStatus.BAD_REQUEST)
-       public ErrorResponse handleValidation(MethodArgumentNotValidException ex) {
-           return new ErrorResponse("VALIDATION_FAILED", "Input validation failed");
-       }
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ErrorResponse handleValidation(MethodArgumentNotValidException ex) {
+        return new ErrorResponse("VALIDATION_FAILED", "Input validation failed");
+    }
 
-       @ExceptionHandler(AccessDeniedException.class)
-       @ResponseStatus(HttpStatus.FORBIDDEN)
-       public ErrorResponse handleAccessDenied(AccessDeniedException ex) {
-           return new ErrorResponse("FORBIDDEN", "Insufficient permissions");
-       }
+    @ExceptionHandler(AccessDeniedException.class)
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    public ErrorResponse handleAccessDenied(AccessDeniedException ex) {
+        return new ErrorResponse("FORBIDDEN", "Insufficient permissions");
+    }
 
-       @ExceptionHandler(Exception.class)
-       @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
-       public ErrorResponse handleUnhandled(Exception ex) {
-           log.error("Unhandled exception", ex);
-           return new ErrorResponse("INTERNAL_ERROR", "An unexpected error occurred");
-       }
-   }
-   ```
+    @ExceptionHandler(Exception.class)
+    @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+    public ErrorResponse handleUnhandled(Exception ex) {
+        log.error("Unhandled exception", ex);
+        return new ErrorResponse("INTERNAL_ERROR", "An unexpected error occurred");
+    }
+}
+```
 
-### 2. `ResponseStatusException` in the Service Layer
+### `ResponseStatusException` in the Service Layer
 
-   For one-off status codes without creating custom exception classes:
+For one-off status codes without creating custom exception classes:
 
-   ```java
-   @Service
-   public class OrderService {
+```java
+@Service
+public class OrderService {
 
-       public Order findById(Long id) {
-           return orderRepository.findById(id)
-               .orElseThrow(() -> new ResponseStatusException(
-                   HttpStatus.NOT_FOUND,
-                   "Order not found: " + id
-               ));
-       }
+    public Order findById(Long id) {
+        return orderRepository.findById(id)
+            .orElseThrow(() -> new ResponseStatusException(
+                HttpStatus.NOT_FOUND,
+                "Order not found: " + id
+            ));
+    }
 
-       public Order create(OrderRequest request) {
-           if (!userRepository.existsById(request.getCustomerId())) {
-               throw new ResponseStatusException(
-                   HttpStatus.BAD_REQUEST,
-                   "Customer does not exist: " + request.getCustomerId()
-               );
-           }
-       }
-   }
-   ```
+    public Order create(OrderRequest request) {
+        if (!userRepository.existsById(request.getCustomerId())) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "Customer does not exist: " + request.getCustomerId()
+            );
+        }
+    }
+}
+```
 
-### 3. Business Exception Classes
+### Business Exception Classes
 
-   For domain-specific errors with consistent error codes:
+For domain-specific errors with consistent error codes:
 
-   ```java
-   public abstract class BusinessException extends RuntimeException {
-       private final String code;
-       private final HttpStatus status;
+```java
+public abstract class BusinessException extends RuntimeException {
+    private final String code;
+    private final HttpStatus status;
 
-       public BusinessException(String code, HttpStatus status, String message) {
-           super(message);
-           this.code = code;
-           this.status = status;
-       }
+    public BusinessException(String code, HttpStatus status, String message) {
+        super(message);
+        this.code = code;
+        this.status = status;
+    }
 
-       public String getCode() { return code; }
-       public HttpStatus getStatus() { return status; }
-   }
+    public String getCode() { return code; }
+    public HttpStatus getStatus() { return status; }
+}
 
-   public class InsufficientFundsException extends BusinessException {
-       public InsufficientFundsException(BigDecimal balance, BigDecimal required) {
-           super("INSUFFICIENT_FUNDS", HttpStatus.CONFLICT,
-               String.format("Insufficient funds: available %s, required %s", balance, required));
-       }
-   }
+public class InsufficientFundsException extends BusinessException {
+    public InsufficientFundsException(BigDecimal balance, BigDecimal required) {
+        super("INSUFFICIENT_FUNDS", HttpStatus.CONFLICT,
+            String.format("Insufficient funds: available %s, required %s", balance, required));
+    }
+}
 
-   public class OrderAlreadyShippedException extends BusinessException {
-       public OrderAlreadyShippedException(Long orderId) {
-           super("ORDER_ALREADY_SHIPPED", HttpStatus.CONFLICT,
-               "Order " + orderId + " has already been shipped");
-       }
-   }
-   ```
+public class OrderAlreadyShippedException extends BusinessException {
+    public OrderAlreadyShippedException(Long orderId) {
+        super("ORDER_ALREADY_SHIPPED", HttpStatus.CONFLICT,
+            "Order " + orderId + " has already been shipped");
+    }
+}
+```
 
-### 4. Structured Error Response DTO
+### Structured Error Response DTO
 
-   Always return a consistent error format to API clients:
+Always return a consistent error format to API clients:
 
-   ```java
-   public record ErrorResponse(
-       String error,
-       String message,
-       Instant timestamp,
-       String path,
-       Map<String, List<String>> details
-   ) {
-       public static ErrorResponse of(String error, String message,
-                                      HttpServletRequest request) {
-           return new ErrorResponse(error, message, Instant.now(),
-               request.getRequestURI(), null);
-       }
+```java
+public record ErrorResponse(
+    String error,
+    String message,
+    Instant timestamp,
+    String path,
+    Map<String, List<String>> details
+) {
+    public static ErrorResponse of(String error, String message,
+                                   HttpServletRequest request) {
+        return new ErrorResponse(error, message, Instant.now(),
+            request.getRequestURI(), null);
+    }
 
-       public static ErrorResponse withDetails(String error, String message,
-                                               HttpServletRequest request,
-                                               Map<String, List<String>> details) {
-           return new ErrorResponse(error, message, Instant.now(),
-               request.getRequestURI(), details);
-       }
-   }
-   ```
+    public static ErrorResponse withDetails(String error, String message,
+                                            HttpServletRequest request,
+                                            Map<String, List<String>> details) {
+        return new ErrorResponse(error, message, Instant.now(),
+            request.getRequestURI(), details);
+    }
+}
+```
 
 ---
 
 ## Common Mistakes
 
-1. **Returning stack traces in API responses** — Exposes internal implementation details, file paths, and potentially sensitive data. Always log the full stack trace server-side and return a sanitized message.
-
-2. **Catching `Exception` and doing nothing** — Silent failures make debugging nearly impossible. Always log the exception or re-throw it.
-
-3. **Single `@ExceptionHandler` for `Exception.class`** — Catches everything and returns the same generic response. Use multiple specific handlers for different exception types.
-
-4. **No global fallback handler** — Unhandled exceptions result in generic Whitelabel error pages. Always include a catch-all handler.
-
-5. **Not logging in `@ExceptionHandler`** — Without logging, you lose debugging information for production issues. Always include logging in catch-all handlers.
-
-6. **Using generic `RuntimeException`** — Provides no structured error information. Create specific business exception classes with meaningful error codes.
-
-7. **Inconsistent error response format** — Makes it harder for API clients to parse errors. Use a standard `ErrorResponse` DTO everywhere.
-
-8. **Not handling validation/binding errors** — Field-level validation errors are lost without handling `MethodArgumentNotValidException`.
+- **Returning stack traces in API responses** — Exposes internal implementation details, file paths, and potentially sensitive data like database queries. Always log the full stack trace server-side and return a sanitized message with a correlation ID.
+- **Catching `Exception` and doing nothing** — Silent failures make debugging nearly impossible and leave the system in an unknown state. Always log the exception or re-throw it wrapped in a meaningful business exception.
+- **Single `@ExceptionHandler` for `Exception.class`** — Catches everything and returns the same generic response, losing specific error information. Use multiple specific handlers for different exception types with appropriate status codes.
+- **No global fallback handler** — Unhandled exceptions result in generic Whitelabel error pages with no structured information. Always include a catch-all `@ExceptionHandler(Exception.class)` to ensure every error returns a consistent format.
+- **Not logging in `@ExceptionHandler`** — Without logging, you lose debugging information for production issues and cannot trace the root cause. Always include logging in catch-all handlers, especially for 500 errors.
+- **Using generic `RuntimeException`** — Provides no structured error information, forcing handlers to parse message strings. Create specific business exception classes with meaningful error codes and contextual data.
+- **Inconsistent error response format** — Makes it harder for API clients to parse errors uniformly across endpoints. Use a standard `ErrorResponse` DTO everywhere and enforce it with code reviews or ArchUnit tests.
+- **Not handling validation/binding errors** — Field-level validation errors are lost without handling `MethodArgumentNotValidException`, leaving API clients guessing which field caused the failure.
 
 ---
 

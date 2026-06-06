@@ -6,160 +6,151 @@
 
 **Spring Boot Caching** provides a declarative caching abstraction that reduces repeated expensive operations by storing results and returning them on subsequent calls. It supports multiple cache providers: **Caffeine**, **Redis**, **EhCache**, **Hazelcast**, and a simple in-memory `ConcurrentHashMap`.
 
-### Key Concepts:
+### Cache Annotations
 
-1. **Cache Annotations**:
+- **`@Cacheable`** — Caches the method's return value. On subsequent calls with the same arguments, the cached value is returned without executing the method body.
+- **`@CachePut`** — Always executes the method and updates the cache with the result. Useful for keeping the cache in sync after update operations.
+- **`@CacheEvict`** — Removes entries from the cache. Used when data is deleted or invalidated to prevent stale data from being served.
+- **`@Caching`** — Groups multiple cache annotations on a single method. Use when you need to combine put, evict, and cache operations together.
+- **`@EnableCaching`** — Enables the caching abstraction. Must be added to a `@Configuration` class for caching annotations to be processed.
 
-   - **`@Cacheable`** — Caches the method's return value. On subsequent calls with the same arguments, the cached value is returned without executing the method.
-   - **`@CachePut`** — Always executes the method and updates the cache with the result. Useful for cache updates on writes.
-   - **`@CacheEvict`** — Removes entries from the cache. Used when data is deleted or invalidated.
-   - **`@Caching`** — Groups multiple cache annotations on a single method.
-   - **`@EnableCaching`** — Enables the caching abstraction. Must be added to a `@Configuration` class.
+### Annotation Usage
 
-2. **Annotation Usage**:
+```java
+@Service
+public class ProductService {
 
-   ```java
-   @Service
-   public class ProductService {
+    @Cacheable(value = "products", key = "#id")
+    public Product findById(Long id) {
+        // Expensive operation — result is cached
+        slowMethod();
+        return productRepository.findById(id).orElseThrow();
+    }
 
-       @Cacheable(value = "products", key = "#id")
-       public Product findById(Long id) {
-           // Expensive operation — result is cached
-           slowMethod();
-           return productRepository.findById(id).orElseThrow();
-       }
+    @Cacheable(value = "products", key = "#category",
+               condition = "#category != 'DISABLED'")
+    public List<Product> findByCategory(String category) {
+        return productRepository.findByCategory(category);
+    }
 
-       @Cacheable(value = "products", key = "#category",
-                  condition = "#category != 'DISABLED'")
-       public List<Product> findByCategory(String category) {
-           return productRepository.findByCategory(category);
-       }
+    @CachePut(value = "products", key = "#product.id")
+    public Product update(Product product) {
+        // Always executes method AND updates cache
+        return productRepository.save(product);
+    }
 
-       @CachePut(value = "products", key = "#product.id")
-       public Product update(Product product) {
-           // Always executes method AND updates cache
-           return productRepository.save(product);
-       }
+    @CacheEvict(value = "products", key = "#id")
+    public void delete(Long id) {
+        // Removes entry from cache
+        productRepository.deleteById(id);
+    }
 
-       @CacheEvict(value = "products", key = "#id")
-       public void delete(Long id) {
-           // Removes entry from cache
-           productRepository.deleteById(id);
-       }
+    @CacheEvict(value = "products", allEntries = true)
+    public void clearCache() {
+        // Removes ALL entries from products cache
+    }
 
-       @CacheEvict(value = "products", allEntries = true)
-       public void clearCache() {
-           // Removes ALL entries from products cache
-       }
+    @Caching(evict = {
+        @CacheEvict(value = "products", key = "#product.id"),
+        @CacheEvict(value = "productLists", allEntries = true)
+    })
+    public void complexUpdate(Product product) {
+        productRepository.save(product);
+    }
+}
+```
 
-       @Caching(evict = {
-           @CacheEvict(value = "products", key = "#product.id"),
-           @CacheEvict(value = "productLists", allEntries = true)
-       })
-       public void complexUpdate(Product product) {
-           productRepository.save(product);
-       }
-   }
-   ```
+### Key Attributes
 
-3. **Key Attributes**:
-
-   - **`key`** — SpEL expression for cache key. Default is derived from method parameters.
-   - **`condition`** — SpEL condition that must be true for caching to occur.
-   - **`unless`** — SpEL condition that prevents caching if true (evaluated after method execution).
-   - **`sync`** — When `true`, only one thread executes the method (others wait for the cached result).
+- **`key`** — SpEL expression for cache key. Default is derived from method parameters using `SimpleKeyGenerator`.
+- **`condition`** — SpEL condition that must be true for caching to occur. Evaluated before method execution.
+- **`unless`** — SpEL condition that prevents caching if true (evaluated after method execution). Useful for not caching null results.
+- **`sync`** — When `true`, only one thread executes the method (others wait for the cached result). Prevents cache stampede under high concurrency.
 
 ---
 
 ## Core Concepts
 
-### 1. Cache Manager Configuration (Caffeine)
+### Cache Manager Configuration (Caffeine)
 
-   Caffeine is the recommended local cache provider:
+Caffeine is the recommended local cache provider:
 
-   ```java
-   @Configuration
-   @EnableCaching
-   public class CacheConfig {
+```java
+@Configuration
+@EnableCaching
+public class CacheConfig {
 
-       @Bean
-       public CacheManager cacheManager() {
-           CaffeineCacheManager manager = new CaffeineCacheManager();
-           manager.setCaffeine(Caffeine.newBuilder()
-               .initialCapacity(100)
-               .maximumSize(10_000)
-               .expireAfterWrite(5, TimeUnit.MINUTES)
-               .recordStats()
-           );
-           manager.setCacheNames(Arrays.asList("products", "users", "orders"));
-           return manager;
-       }
-   }
-   ```
+    @Bean
+    public CacheManager cacheManager() {
+        CaffeineCacheManager manager = new CaffeineCacheManager();
+        manager.setCaffeine(Caffeine.newBuilder()
+            .initialCapacity(100)
+            .maximumSize(10_000)
+            .expireAfterWrite(5, TimeUnit.MINUTES)
+            .recordStats()
+        );
+        manager.setCacheNames(Arrays.asList("products", "users", "orders"));
+        return manager;
+    }
+}
+```
 
-### 2. Per-Cache Configuration
+### Per-Cache Configuration
 
-   Different caches with different TTLs and sizes:
+Different caches with different TTLs and sizes:
 
-   ```java
-   @Configuration
-   public class FineGrainedCacheConfig {
+```java
+@Configuration
+public class FineGrainedCacheConfig {
 
-       @Bean
-       public CacheManager cacheManager() {
-           return new CaffeineCacheManager() {
-               @Override
-               protected Cache createCaffeineCache(String name) {
-                   return switch (name) {
-                       case "products" -> buildCache(name, 1000, 10, TimeUnit.MINUTES);
-                       case "users" -> buildCache(name, 5000, 30, TimeUnit.MINUTES);
-                       case "orders" -> buildCache(name, 500, 2, TimeUnit.MINUTES);
-                       default -> buildCache(name, 100, 5, TimeUnit.MINUTES);
-                   };
-               }
+    @Bean
+    public CacheManager cacheManager() {
+        return new CaffeineCacheManager() {
+            @Override
+            protected Cache createCaffeineCache(String name) {
+                return switch (name) {
+                    case "products" -> buildCache(name, 1000, 10, TimeUnit.MINUTES);
+                    case "users" -> buildCache(name, 5000, 30, TimeUnit.MINUTES);
+                    case "orders" -> buildCache(name, 500, 2, TimeUnit.MINUTES);
+                    default -> buildCache(name, 100, 5, TimeUnit.MINUTES);
+                };
+            }
 
-               private Cache buildCache(String name, int maxSize,
-                                        int duration, TimeUnit unit) {
-                   return new CaffeineCache(name, Caffeine.newBuilder()
-                       .maximumSize(maxSize)
-                       .expireAfterWrite(duration, unit)
-                       .recordStats()
-                       .build());
-               }
-           };
-       }
-   }
-   ```
+            private Cache buildCache(String name, int maxSize,
+                                     int duration, TimeUnit unit) {
+                return new CaffeineCache(name, Caffeine.newBuilder()
+                    .maximumSize(maxSize)
+                    .expireAfterWrite(duration, unit)
+                    .recordStats()
+                    .build());
+            }
+        };
+    }
+}
+```
 
-### 3. Cache Providers Comparison
+### Cache Providers Comparison
 
-   | Provider | Use Case | Pros | Cons |
-   |----------|---------|------|------|
-   | Caffeine | Local caching | Fast, lightweight, feature-rich | Not distributed |
-   | Redis | Distributed caching | Shared across instances, TTL, persistence | Network overhead |
-   | Simple (ConcurrentHashMap) | Dev/test only | No setup needed | No TTL, no eviction, not for production |
-   | EhCache | Legacy | Feature-rich, disk overflow | Older API |
-   | Hazelcast | Distributed | In-memory data grid | Complex setup |
+| Provider | Use Case | Pros | Cons |
+|----------|---------|------|------|
+| Caffeine | Local caching | Fast, lightweight, feature-rich | Not distributed |
+| Redis | Distributed caching | Shared across instances, TTL, persistence | Network overhead |
+| Simple (ConcurrentHashMap) | Dev/test only | No setup needed | No TTL, no eviction, not for production |
+| EhCache | Legacy | Feature-rich, disk overflow | Older API |
+| Hazelcast | Distributed | In-memory data grid | Complex setup |
 
 ---
 
 ## Common Mistakes
 
-1. **Using `@Cacheable` on methods with side effects** — On a cache hit, the method does not execute, so side effects (event publishing, logging, counters) are lost. Use `@CachePut` for methods that modify state.
-
-2. **Self-invocation bypassing the cache** — Calling a `@Cacheable` method from within the same class does not trigger caching. Extract to a separate bean.
-
-3. **No TTL or eviction policy** — Cached data becomes stale. Always set `expireAfterWrite` or use `@CacheEvict` for updates.
-
-4. **Too large cache causing OOM** — Without `maximumSize`, the cache can grow unbounded. Always set a size limit.
-
-5. **Caching mutable objects** — If the cached object is modified after retrieval, the cached copy changes too. Return immutable objects or defensive copies.
-
-6. **`@Cacheable` on private methods** — Ignored because the proxy cannot intercept private methods. Use public methods only.
-
-7. **Forgetting `@EnableCaching`** — Without it, no caching annotations are processed.
-
-8. **Not monitoring cache hit ratio** — Without monitoring, you cannot tune cache sizes and TTLs. Enable `recordStats()` and expose via Actuator.
+- **Using `@Cacheable` on methods with side effects** — On a cache hit, the method does not execute, so side effects (event publishing, logging, counters) are silently skipped. Use `@CachePut` for methods that must always execute and update the cache.
+- **Self-invocation bypassing the cache** — Calling a `@Cacheable` method from within the same class does not trigger caching because the AOP proxy is bypassed. Extract to a separate bean for the cache to work.
+- **No TTL or eviction policy** — Cached data becomes stale over time and returns outdated information to users. Always set `expireAfterWrite` or use `@CacheEvict` on update operations to keep data fresh.
+- **Too large cache causing OOM** — Without `maximumSize`, the cache can grow unbounded and exhaust heap memory. Always set a size limit appropriate for your data volume and available memory.
+- **Caching mutable objects** — If the cached object is modified after retrieval, the cached copy changes too, corrupting the cache for all subsequent callers. Return immutable objects, records, or defensive copies.
+- **`@Cacheable` on private methods** — Ignored because the proxy cannot intercept private methods. Use public methods only for caching annotations to be effective.
+- **Forgetting `@EnableCaching`** — Without it, no caching annotations are processed and all methods execute unconditionally. Always add `@EnableCaching` to a configuration class.
+- **Not monitoring cache hit ratio** — Without monitoring, you cannot tune cache sizes and TTLs effectively. Enable `recordStats()` on Caffeine and expose cache metrics via Micrometer and Actuator.
 
 ---
 

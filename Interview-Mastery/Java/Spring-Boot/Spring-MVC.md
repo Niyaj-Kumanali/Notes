@@ -6,244 +6,235 @@
 
 **Spring MVC** is a web framework built on the Servlet API that implements the **Model-View-Controller** pattern. It provides a clean separation between presentation logic, business logic, and data, and is the foundation for building REST APIs and web applications in Spring.
 
-### Key Concepts:
+### Request Lifecycle
 
-1. **Request Lifecycle**:
+The journey of an HTTP request through Spring MVC follows a well-defined path:
 
-   The journey of an HTTP request through Spring MVC follows a well-defined path:
+```
+HTTP Request
+    ↓
+DispatcherServlet (Front Controller)
+    ↓
+HandlerMapping → determines which controller handles the request
+    ↓
+Controller (handles request, returns response)
+    ↓
+Interceptors → pre/post processing
+    ↓
+HandlerAdapter → executes the controller method
+    ↓
+ViewResolver (if returning view name) → resolves to View
+    ↓
+View → renders response (JSP, Thymeleaf, JSON, etc.)
+    ↓
+HTTP Response
+```
 
-   ```
-   HTTP Request
-       ↓
-   DispatcherServlet (Front Controller)
-       ↓
-   HandlerMapping → determines which controller handles the request
-       ↓
-   Controller (handles request, returns response)
-       ↓
-   Interceptors → pre/post processing
-       ↓
-   HandlerAdapter → executes the controller method
-       ↓
-   ViewResolver (if returning view name) → resolves to View
-       ↓
-   View → renders response (JSP, Thymeleaf, JSON, etc.)
-       ↓
-   HTTP Response
-   ```
+### Core Components
 
-2. **Core Components**:
+- **`DispatcherServlet`** — The front controller that intercepts all incoming requests and delegates them to handlers. It is the entry point for the entire MVC processing flow, coordinating all other components.
+- **`HandlerMapping`** — Maps incoming HTTP requests to appropriate controller methods based on URL patterns, HTTP methods, headers, and parameters. Multiple `HandlerMapping` implementations can be chained.
+- **`Controller`** — Handles the request, executes business logic, and returns a model or response body. Annotated with `@Controller` or `@RestController`.
+- **`HandlerAdapter`** — Adapts different handler types (controllers, `HttpRequestHandler`, etc.) to the framework. It knows how to invoke the specific handler without coupling the framework to handler implementations.
+- **`ViewResolver`** — Resolves logical view names (e.g., `"home"`) to actual view implementations (e.g., `home.jsp` or `home.html`). Supports prefix/suffix configuration.
+- **`View`** — Renders the response, whether as HTML, JSON, XML, or other formats. The final step in the MVC flow.
 
-   - **`DispatcherServlet`** — The front controller that intercepts all incoming requests and delegates them to handlers. It is the entry point for the entire MVC processing flow.
-   - **`HandlerMapping`** — Maps incoming HTTP requests to appropriate controller methods based on URL patterns, HTTP methods, headers, and parameters.
-   - **`Controller`** — Handles the request, executes business logic, and returns a model or response body.
-   - **`HandlerAdapter`** — Adapts different handler types (controllers, `HttpRequestHandler`, etc.) to the framework. It knows how to invoke the specific handler.
-   - **`ViewResolver`** — Resolves logical view names (e.g., `"home"`) to actual view implementations (e.g., `home.jsp` or `home.html`).
-   - **`View`** — Renders the response, whether as HTML, JSON, XML, or other formats.
+### Key Annotations
 
-3. **Key Annotations**:
-
-   - **`@Controller`** — Marks a class as an MVC controller. Methods can return view names or `ModelAndView`.
-   - **`@RestController`** — Combination of `@Controller` and `@ResponseBody`. Every method writes directly to the HTTP response body (typically JSON).
-   - **`@RequestMapping`** — Maps HTTP methods and paths to controller methods. Can be applied at class level (root path) and method level.
-   - **`@GetMapping`**, **`@PostMapping`**, **`@PutMapping`**, **`@DeleteMapping`**, **`@PatchMapping`** — Shortcut annotations for specific HTTP methods.
-   - **`@RequestParam`** — Binds query parameters to method arguments.
-   - **`@PathVariable`** — Binds URL path segments to method arguments.
-   - **`@RequestBody`** — Deserializes the HTTP request body to a Java object.
-   - **`@RequestHeader`** — Binds HTTP headers to method arguments.
-   - **`@ResponseBody`** — Writes method return value directly to the HTTP response body.
-   - **`@ResponseStatus`** — Sets the HTTP status code for the response.
+- **`@Controller`** — Marks a class as an MVC controller. Methods can return view names or `ModelAndView` for server-side rendering.
+- **`@RestController`** — Combination of `@Controller` and `@ResponseBody`. Every method writes directly to the HTTP response body (typically JSON). Use for REST APIs.
+- **`@RequestMapping`** — Maps HTTP methods and paths to controller methods. Can be applied at class level (root path) and method level. Supports narrowing by headers, params, and media types.
+- **`@GetMapping`**, **`@PostMapping`**, **`@PutMapping`**, **`@DeleteMapping`**, **`@PatchMapping`** — Shortcut annotations for specific HTTP methods. More readable than `@RequestMapping`.
+- **`@RequestParam`** — Binds query parameters to method arguments. Supports default values and required flags.
+- **`@PathVariable`** — Binds URL path segments to method arguments. Used for resource identifiers like `/orders/{id}`.
+- **`@RequestBody`** — Deserializes the HTTP request body to a Java object using an `HttpMessageConverter`.
+- **`@RequestHeader`** — Binds HTTP headers to method arguments. Useful for extracting auth tokens, content types, etc.
+- **`@ResponseBody`** — Writes method return value directly to the HTTP response body using an `HttpMessageConverter`.
+- **`@ResponseStatus`** — Sets the HTTP status code for the response. Use for fixed status codes like 201 Created.
 
 ---
 
 ## Core Concepts
 
-### 1. RESTful Controller Example
+### RESTful Controller Example
 
-   A typical REST API controller following best practices:
+A typical REST API controller following best practices:
 
-   ```java
-   @RestController
-   @RequestMapping("/api/v1/orders")
-   public class OrderController {
-       private final OrderService orderService;
+```java
+@RestController
+@RequestMapping("/api/v1/orders")
+public class OrderController {
+    private final OrderService orderService;
 
-       public OrderController(OrderService orderService) {
-           this.orderService = orderService;
-       }
+    public OrderController(OrderService orderService) {
+        this.orderService = orderService;
+    }
 
-       @GetMapping
-       public ResponseEntity<List<Order>> getAll(
-               @RequestParam(defaultValue = "0") int page,
-               @RequestParam(defaultValue = "20") int size) {
-           PageResult<Order> result = orderService.findAll(page, size);
-           return ResponseEntity.ok()
-               .header("X-Total-Count", String.valueOf(result.total()))
-               .body(result.items());
-       }
+    @GetMapping
+    public ResponseEntity<List<Order>> getAll(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        PageResult<Order> result = orderService.findAll(page, size);
+        return ResponseEntity.ok()
+            .header("X-Total-Count", String.valueOf(result.total()))
+            .body(result.items());
+    }
 
-       @GetMapping("/{id}")
-       public ResponseEntity<Order> getById(@PathVariable Long id) {
-           return orderService.findById(id)
-               .map(ResponseEntity::ok)
-               .orElse(ResponseEntity.notFound().build());
-       }
+    @GetMapping("/{id}")
+    public ResponseEntity<Order> getById(@PathVariable Long id) {
+        return orderService.findById(id)
+            .map(ResponseEntity::ok)
+            .orElse(ResponseEntity.notFound().build());
+    }
 
-       @PostMapping
-       @ResponseStatus(HttpStatus.CREATED)
-       public Order create(@Valid @RequestBody CreateOrderRequest request) {
-           return orderService.create(request);
-       }
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    public Order create(@Valid @RequestBody CreateOrderRequest request) {
+        return orderService.create(request);
+    }
 
-       @PutMapping("/{id}")
-       public Order update(@PathVariable Long id,
-                           @Valid @RequestBody UpdateOrderRequest request) {
-           return orderService.update(id, request);
-       }
+    @PutMapping("/{id}")
+    public Order update(@PathVariable Long id,
+                        @Valid @RequestBody UpdateOrderRequest request) {
+        return orderService.update(id, request);
+    }
 
-       @DeleteMapping("/{id}")
-       @ResponseStatus(HttpStatus.NO_CONTENT)
-       public void delete(@PathVariable Long id) {
-           orderService.delete(id);
-       }
-   }
-   ```
+    @DeleteMapping("/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void delete(@PathVariable Long id) {
+        orderService.delete(id);
+    }
+}
+```
 
-### 2. Content Negotiation
+### Content Negotiation
 
-   Spring automatically negotiates the response format based on:
-   - **`Accept` header** — Client specifies the desired content type.
-   - **URL suffix** — e.g., `/users.json`, `/users.xml`.
-   - **Query parameter** — e.g., `?format=json`.
+Spring automatically negotiates the response format based on:
+- **`Accept` header** — Client specifies the desired content type.
+- **URL suffix** — e.g., `/users.json`, `/users.xml`.
+- **Query parameter** — e.g., `?format=json`.
 
-   ```java
-   @GetMapping(value = "/users/{id}", produces = MediaType.APPLICATION_JSON_VALUE)
-   public User getUser(@PathVariable Long id) {
-       return userService.findById(id);
-   }
-   ```
+```java
+@GetMapping(value = "/users/{id}", produces = MediaType.APPLICATION_JSON_VALUE)
+public User getUser(@PathVariable Long id) {
+    return userService.findById(id);
+}
+```
 
-### 3. Global Exception Handler
+### Global Exception Handler
 
-   Handle exceptions consistently across all controllers:
+Handle exceptions consistently across all controllers:
 
-   ```java
-   @RestControllerAdvice
-   public class GlobalExceptionHandler {
+```java
+@RestControllerAdvice
+public class GlobalExceptionHandler {
 
-       @ExceptionHandler(ResourceNotFoundException.class)
-       @ResponseStatus(HttpStatus.NOT_FOUND)
-       public ErrorResponse handleNotFound(ResourceNotFoundException ex) {
-           return new ErrorResponse("NOT_FOUND", ex.getMessage());
-       }
+    @ExceptionHandler(ResourceNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public ErrorResponse handleNotFound(ResourceNotFoundException ex) {
+        return new ErrorResponse("NOT_FOUND", ex.getMessage());
+    }
 
-       @ExceptionHandler(MethodArgumentNotValidException.class)
-       @ResponseStatus(HttpStatus.BAD_REQUEST)
-       public ErrorResponse handleValidation(MethodArgumentNotValidException ex) {
-           List<FieldError> errors = ex.getBindingResult().getFieldErrors().stream()
-               .map(e -> new FieldError(e.getField(), e.getDefaultMessage()))
-               .toList();
-           return new ErrorResponse("VALIDATION_ERROR", "Validation failed", errors);
-       }
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ErrorResponse handleValidation(MethodArgumentNotValidException ex) {
+        List<FieldError> errors = ex.getBindingResult().getFieldErrors().stream()
+            .map(e -> new FieldError(e.getField(), e.getDefaultMessage()))
+            .toList();
+        return new ErrorResponse("VALIDATION_ERROR", "Validation failed", errors);
+    }
 
-       @ExceptionHandler(Exception.class)
-       @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
-       public ErrorResponse handleGeneral(Exception ex) {
-           log.error("Unhandled exception", ex);
-           return new ErrorResponse("INTERNAL_ERROR", "An unexpected error occurred");
-       }
-   }
-   ```
+    @ExceptionHandler(Exception.class)
+    @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+    public ErrorResponse handleGeneral(Exception ex) {
+        log.error("Unhandled exception", ex);
+        return new ErrorResponse("INTERNAL_ERROR", "An unexpected error occurred");
+    }
+}
+```
 
-### 4. CORS Configuration
+### CORS Configuration
 
-   Cross-Origin Resource Sharing configuration for frontend access:
+Cross-Origin Resource Sharing configuration for frontend access:
 
-   ```java
-   @Configuration
-   public class CorsConfig implements WebMvcConfigurer {
-       @Override
-       public void addCorsMappings(CorsRegistry registry) {
-           registry.addMapping("/api/**")
-               .allowedOrigins("https://frontend.example.com")
-               .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
-               .allowedHeaders("*")
-               .allowCredentials(true)
-               .maxAge(3600);
-       }
-   }
-   ```
+```java
+@Configuration
+public class CorsConfig implements WebMvcConfigurer {
+    @Override
+    public void addCorsMappings(CorsRegistry registry) {
+        registry.addMapping("/api/**")
+            .allowedOrigins("https://frontend.example.com")
+            .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
+            .allowedHeaders("*")
+            .allowCredentials(true)
+            .maxAge(3600);
+    }
+}
+```
 
-### 5. Interceptor
+### Interceptor
 
-   Interceptors allow pre/post processing of requests:
+Interceptors allow pre/post processing of requests:
 
-   ```java
-   @Component
-   public class RequestLoggingInterceptor implements HandlerInterceptor {
+```java
+@Component
+public class RequestLoggingInterceptor implements HandlerInterceptor {
 
-       @Override
-       public boolean preHandle(HttpServletRequest request, HttpServletResponse response,
-                                Object handler) {
-           request.setAttribute("startTime", System.currentTimeMillis());
-           MDC.put("requestId", UUID.randomUUID().toString());
-           return true;
-       }
+    @Override
+    public boolean preHandle(HttpServletRequest request, HttpServletResponse response,
+                             Object handler) {
+        request.setAttribute("startTime", System.currentTimeMillis());
+        MDC.put("requestId", UUID.randomUUID().toString());
+        return true;
+    }
 
-       @Override
-       public void postHandle(HttpServletRequest request, HttpServletResponse response,
-                              Object handler, ModelAndView modelAndView) {
-           long startTime = (Long) request.getAttribute("startTime");
-           long duration = System.currentTimeMillis() - startTime;
-           log.info("{} {} completed in {}ms with status {}",
-               request.getMethod(), request.getRequestURI(),
-               duration, response.getStatus());
-       }
-   }
-   ```
+    @Override
+    public void postHandle(HttpServletRequest request, HttpServletResponse response,
+                           Object handler, ModelAndView modelAndView) {
+        long startTime = (Long) request.getAttribute("startTime");
+        long duration = System.currentTimeMillis() - startTime;
+        log.info("{} {} completed in {}ms with status {}",
+            request.getMethod(), request.getRequestURI(),
+            duration, response.getStatus());
+    }
+}
+```
 
-### 6. Async Request Processing
+### Async Request Processing
 
-   For long-running operations without blocking the request thread:
+For long-running operations without blocking the request thread:
 
-   ```java
-   @GetMapping("/async")
-   public DeferredResult<String> asyncProcess() {
-       DeferredResult<String> result = new DeferredResult<>(5000L); // 5s timeout
+```java
+@GetMapping("/async")
+public DeferredResult<String> asyncProcess() {
+    DeferredResult<String> result = new DeferredResult<>(5000L); // 5s timeout
 
-       executor.submit(() -> {
-           try {
-               Thread.sleep(2000);
-               result.setResult("Done!");
-           } catch (Exception e) {
-               result.setErrorResult("Failed");
-           }
-       });
+    executor.submit(() -> {
+        try {
+            Thread.sleep(2000);
+            result.setResult("Done!");
+        } catch (Exception e) {
+            result.setErrorResult("Failed");
+        }
+    });
 
-       result.onTimeout(() -> result.setErrorResult("Timeout"));
-       return result;
-   }
-   ```
+    result.onTimeout(() -> result.setErrorResult("Timeout"));
+    return result;
+}
+```
 
 ---
 
 ## Common Mistakes
 
-1. **Forgetting `@ResponseBody` or not using `@RestController`** — Methods return view names instead of JSON, causing `404` or template resolution errors.
-
-2. **Returning entities directly** — Circular JSON references (`@JsonBackReference` / `@JsonManagedReference` needed) and over-fetching. Use DTOs instead.
-
-3. **Not using `@Valid` or `@Validated` on request bodies** — Invalid input passes through to the service layer. Always validate at the controller boundary.
-
-4. **Exposing internal IDs in URLs** — Sequential IDs in paths are predictable. Consider using UUIDs for public-facing resources.
-
-5. **Inconsistent error handling** — Each controller returns different error formats. Use `@RestControllerAdvice` for consistent error responses.
-
-6. **Not setting response status codes** — All successful responses return 200 by default. Use `@ResponseStatus` or `ResponseEntity` for correct status codes.
-
-7. **Missing CORS configuration for frontend access** — Browser blocks cross-origin requests. Configure `WebMvcConfigurer` with `addCorsMappings`.
-
-8. **Large request bodies without size limits** — Can cause OOM. Set `spring.servlet.multipart.max-request-size` and use `@Size` on request DTOs.
+- **Forgetting `@ResponseBody` or not using `@RestController`** — Methods return view names instead of JSON, causing `404` or template resolution errors. Always use `@RestController` for REST APIs.
+- **Returning entities directly** — Circular JSON references (`@JsonBackReference` / `@JsonManagedReference` needed) and over-fetching cause serialization errors. Use DTOs instead of entities in controller responses.
+- **Not using `@Valid` or `@Validated` on request bodies** — Invalid input passes through to the service layer without validation. Always validate at the controller boundary with `@Valid`.
+- **Exposing internal IDs in URLs** — Sequential IDs in paths are predictable and pose a security risk. Consider using UUIDs for public-facing resources.
+- **Inconsistent error handling** — Each controller returns different error formats, making API clients harder to build. Use `@RestControllerAdvice` for consistent error responses across all endpoints.
+- **Not setting response status codes** — All successful responses return 200 by default. Use `@ResponseStatus` or `ResponseEntity` for correct and meaningful status codes.
+- **Missing CORS configuration for frontend access** — The browser blocks cross-origin requests without proper CORS headers. Configure `WebMvcConfigurer` with `addCorsMappings` for frontend access.
+- **Large request bodies without size limits** — Can cause out-of-memory errors. Set `spring.servlet.multipart.max-request-size` and use `@Size` on request DTOs to enforce limits.
 
 ---
 

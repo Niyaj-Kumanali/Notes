@@ -6,228 +6,220 @@
 
 **Spring Security** is the de-facto security framework for Spring applications. It provides **authentication** (who you are), **authorization** (what you can do), and **protection** against common attacks like CSRF, session fixation, clickjacking, and XSS.
 
-### Key Concepts:
+### Core Features
 
-1. **Core Features**:
+- **Authentication** — Verifies the identity of a user. Supports form login, HTTP Basic, OAuth2, JWT, LDAP, SAML, and Remember-Me across a wide range of authentication mechanisms.
+- **Authorization** — Controls access to resources based on roles, permissions, or custom rules. Supports both URL-based and method-level authorization.
+- **Protection** — Built-in defenses against CSRF, CORS misconfiguration, clickjacking, and header injection. These protections are enabled by default and can be fine-tuned.
+- **Integration** — Seamless integration with OAuth2, JWT, LDAP, SAML, and Spring's method-level security annotations like `@PreAuthorize` and `@PostAuthorize`.
 
-   - **Authentication** — Verifies the identity of a user. Supports form login, HTTP Basic, OAuth2, JWT, LDAP, SAML, and Remember-Me.
-   - **Authorization** — Controls access to resources based on roles, permissions, or custom rules.
-   - **Protection** — Built-in defenses against CSRF, CORS misconfiguration, clickjacking, and header injection.
-   - **Integration** — Seamless integration with OAuth2, JWT, LDAP, SAML, and Spring's method-level security.
+### Security Filter Chain
 
-2. **Security Filter Chain**:
+Spring Security is implemented as a chain of servlet filters. Each filter handles a specific security concern:
 
-   Spring Security is implemented as a chain of servlet filters. Each filter handles a specific security concern:
+```
+Request → SecurityContextPersistenceFilter → LogoutFilter →
+UsernamePasswordAuthenticationFilter → BasicAuthenticationFilter →
+ExceptionTranslationFilter → FilterSecurityInterceptor → Controller
+```
 
-   ```
-   Request → SecurityContextPersistenceFilter → LogoutFilter →
-   UsernamePasswordAuthenticationFilter → BasicAuthenticationFilter →
-   ExceptionTranslationFilter → FilterSecurityInterceptor → Controller
-   ```
+Each filter in the chain either handles the request or passes it to the next filter. The order of filters matters — placing a filter in the wrong position can bypass security checks.
 
-   Each filter in the chain either handles the request or passes it to the next filter. The order of filters matters.
+### Authentication Architecture
 
-3. **Authentication Architecture**:
+```
+AuthenticationProvider ─── UserDetailsService
+       │                         │
+       │                    ┌────┴────┐
+       │                    │  User   │
+       │                    │ Details │
+       │                    └─────────┘
+       ▼
+SecurityContextHolder (ThreadLocal)
+       │
+       ▼
+SecurityContext
+    └─ Authentication (Principal + Credentials + GrantedAuthorities)
+```
 
-   ```
-   AuthenticationProvider ─── UserDetailsService
-          │                         │
-          │                    ┌────┴────┐
-          │                    │  User   │
-          │                    │ Details │
-          │                    └─────────┘
-          ▼
-   SecurityContextHolder (ThreadLocal)
-          │
-          ▼
-   SecurityContext
-       └─ Authentication (Principal + Credentials + GrantedAuthorities)
-   ```
-
-   - **`SecurityContextHolder`** — Stores the current security context in a `ThreadLocal`. Accessible anywhere in the application.
-   - **`SecurityContext`** — Holds the `Authentication` object representing the currently authenticated user.
-   - **`Authentication`** — Contains the principal (user details), credentials (password/token), and granted authorities.
-   - **`GrantedAuthority`** — Represents a permission or role (e.g., `ROLE_ADMIN`, `ORDER_WRITE`).
-   - **`UserDetailsService`** — Loads user-specific data from a database or external system.
-   - **`PasswordEncoder`** — Encodes passwords for storage and validates them during authentication.
+- **`SecurityContextHolder`** — Stores the current security context in a `ThreadLocal`. Accessible anywhere in the application via `SecurityContextHolder.getContext()`.
+- **`SecurityContext`** — Holds the `Authentication` object representing the currently authenticated user and their granted authorities.
+- **`Authentication`** — Contains the principal (user details), credentials (password/token), and granted authorities (roles/permissions).
+- **`GrantedAuthority`** — Represents a permission or role (e.g., `ROLE_ADMIN`, `ORDER_WRITE`). Used by the authorization mechanism.
+- **`UserDetailsService`** — Loads user-specific data from a database or external system during authentication.
+- **`PasswordEncoder`** — Encodes passwords for storage and validates them during authentication. BCrypt is the recommended default.
 
 ---
 
 ## Core Concepts
 
-### 1. Security Configuration (JWT + Role-Based)
+### Security Configuration (JWT + Role-Based)
 
-   Modern Spring Security configuration using the fluent API:
+Modern Spring Security configuration using the fluent API:
 
-   ```java
-   @Configuration
-   @EnableWebSecurity
-   @EnableMethodSecurity
-   public class SecurityConfig {
+```java
+@Configuration
+@EnableWebSecurity
+@EnableMethodSecurity
+public class SecurityConfig {
 
-       @Bean
-       public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
-           http
-               .csrf(AbstractHttpConfigurer::disable)
-               .sessionManagement(session -> session
-                   .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-               .authorizeHttpRequests(auth -> auth
-                   .requestMatchers("/api/v1/auth/**", "/actuator/health").permitAll()
-                   .requestMatchers(HttpMethod.GET, "/api/v1/products/**")
-                       .hasAnyRole("USER", "ADMIN")
-                   .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
-                   .anyRequest().authenticated()
-               )
-               .authenticationProvider(authenticationProvider())
-               .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http
+            .csrf(AbstractHttpConfigurer::disable)
+            .sessionManagement(session -> session
+                .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/api/v1/auth/**", "/actuator/health").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/v1/products/**")
+                    .hasAnyRole("USER", "ADMIN")
+                .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
+                .anyRequest().authenticated()
+            )
+            .authenticationProvider(authenticationProvider())
+            .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
-           return http.build();
-       }
+        return http.build();
+    }
 
-       @Bean
-       public AuthenticationProvider authenticationProvider() {
-           DaoAuthenticationProvider provider = new DaoAuthenticationProvider();
-           provider.setUserDetailsService(userDetailsService);
-           provider.setPasswordEncoder(passwordEncoder());
-           return provider;
-       }
+    @Bean
+    public AuthenticationProvider authenticationProvider() {
+        DaoAuthenticationProvider provider = new DaoAuthenticationProvider();
+        provider.setUserDetailsService(userDetailsService);
+        provider.setPasswordEncoder(passwordEncoder());
+        return provider;
+    }
 
-       @Bean
-       public PasswordEncoder passwordEncoder() {
-           return new BCryptPasswordEncoder();
-       }
-   }
-   ```
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+}
+```
 
-### 2. JWT Authentication Filter
+### JWT Authentication Filter
 
-   A custom filter that extracts and validates JWT tokens from the `Authorization` header:
+A custom filter that extracts and validates JWT tokens from the `Authorization` header:
 
-   ```java
-   @Component
-   public class JwtAuthFilter extends OncePerRequestFilter {
-       private final JwtService jwtService;
-       private final UserDetailsService userDetailsService;
+```java
+@Component
+public class JwtAuthFilter extends OncePerRequestFilter {
+    private final JwtService jwtService;
+    private final UserDetailsService userDetailsService;
 
-       @Override
-       protected void doFilterInternal(HttpServletRequest request,
-                                       HttpServletResponse response,
-                                       FilterChain chain) throws IOException, ServletException {
-           String authHeader = request.getHeader("Authorization");
+    @Override
+    protected void doFilterInternal(HttpServletRequest request,
+                                    HttpServletResponse response,
+                                    FilterChain chain) throws IOException, ServletException {
+        String authHeader = request.getHeader("Authorization");
 
-           if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-               chain.doFilter(request, response);
-               return;
-           }
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            chain.doFilter(request, response);
+            return;
+        }
 
-           try {
-               String jwt = authHeader.substring(7);
-               String userEmail = jwtService.extractUsername(jwt);
+        try {
+            String jwt = authHeader.substring(7);
+            String userEmail = jwtService.extractUsername(jwt);
 
-               if (userEmail != null && SecurityContextHolder.getContext()
-                       .getAuthentication() == null) {
-                   UserDetails user = userDetailsService.loadUserByUsername(userEmail);
+            if (userEmail != null && SecurityContextHolder.getContext()
+                    .getAuthentication() == null) {
+                UserDetails user = userDetailsService.loadUserByUsername(userEmail);
 
-                   if (jwtService.isTokenValid(jwt, user)) {
-                       UsernamePasswordAuthenticationToken authToken =
-                           new UsernamePasswordAuthenticationToken(
-                               user, null, user.getAuthorities());
-                       authToken.setDetails(
-                           new WebAuthenticationDetailsSource().buildDetails(request));
-                       SecurityContextHolder.getContext().setAuthentication(authToken);
-                   }
-               }
-               chain.doFilter(request, response);
-           } catch (JwtException e) {
-               response.setStatus(HttpStatus.UNAUTHORIZED.value());
-               response.getWriter().write("Invalid or expired token");
-           }
-       }
-   }
-   ```
+                if (jwtService.isTokenValid(jwt, user)) {
+                    UsernamePasswordAuthenticationToken authToken =
+                        new UsernamePasswordAuthenticationToken(
+                            user, null, user.getAuthorities());
+                    authToken.setDetails(
+                        new WebAuthenticationDetailsSource().buildDetails(request));
+                    SecurityContextHolder.getContext().setAuthentication(authToken);
+                }
+            }
+            chain.doFilter(request, response);
+        } catch (JwtException e) {
+            response.setStatus(HttpStatus.UNAUTHORIZED.value());
+            response.getWriter().write("Invalid or expired token");
+        }
+    }
+}
+```
 
-### 3. Method-Level Security
+### Method-Level Security
 
-   Fine-grained authorization at the method level:
+Fine-grained authorization at the method level:
 
-   ```java
-   @RestController
-   @RequestMapping("/api/v1/admin")
-   public class AdminController {
+```java
+@RestController
+@RequestMapping("/api/v1/admin")
+public class AdminController {
 
-       @GetMapping("/users")
-       @PreAuthorize("hasRole('ADMIN')")
-       public List<User> getAllUsers() { /* ... */ }
+    @GetMapping("/users")
+    @PreAuthorize("hasRole('ADMIN')")
+    public List<User> getAllUsers() { /* ... */ }
 
-       @PostMapping("/promote")
-       @PreAuthorize("hasAuthority('admin:write')")
-       public void promoteUser(@RequestBody UserId userId) { /* ... */ }
+    @PostMapping("/promote")
+    @PreAuthorize("hasAuthority('admin:write')")
+    public void promoteUser(@RequestBody UserId userId) { /* ... */ }
 
-       @DeleteMapping("/users/{id}")
-       @PreAuthorize("hasRole('SUPER_ADMIN') or @securityService.canDelete(#id)")
-       public void deleteUser(@PathVariable Long id) { /* ... */ }
+    @DeleteMapping("/users/{id}")
+    @PreAuthorize("hasRole('SUPER_ADMIN') or @securityService.canDelete(#id)")
+    public void deleteUser(@PathVariable Long id) { /* ... */ }
 
-       @GetMapping("/audit/{id}")
-       @PostAuthorize("returnObject.owner == authentication.name")
-       public AuditRecord getAudit(@PathVariable Long id) { /* ... */ }
-   }
-   ```
+    @GetMapping("/audit/{id}")
+    @PostAuthorize("returnObject.owner == authentication.name")
+    public AuditRecord getAudit(@PathVariable Long id) { /* ... */ }
+}
+```
 
-### 4. UserDetailsService Implementation
+### UserDetailsService Implementation
 
-   Loading users from a database:
+Loading users from a database:
 
-   ```java
-   @Service
-   public class UserService implements UserDetailsService {
-       private final UserRepository userRepository;
+```java
+@Service
+public class UserService implements UserDetailsService {
+    private final UserRepository userRepository;
 
-       @Override
-       public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
-           return userRepository.findByEmail(email)
-               .map(UserPrincipal::new)
-               .orElseThrow(() -> new UsernameNotFoundException("User not found: " + email));
-       }
+    @Override
+    public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
+        return userRepository.findByEmail(email)
+            .map(UserPrincipal::new)
+            .orElseThrow(() -> new UsernameNotFoundException("User not found: " + email));
+    }
 
-       public record UserPrincipal(User user) implements UserDetails {
-           @Override
-           public Collection<? extends GrantedAuthority> getAuthorities() {
-               return user.getRoles().stream()
-                   .flatMap(role -> role.getPermissions().stream())
-                   .map(perm -> new SimpleGrantedAuthority(perm.getName()))
-                   .toList();
-           }
+    public record UserPrincipal(User user) implements UserDetails {
+        @Override
+        public Collection<? extends GrantedAuthority> getAuthorities() {
+            return user.getRoles().stream()
+                .flatMap(role -> role.getPermissions().stream())
+                .map(perm -> new SimpleGrantedAuthority(perm.getName()))
+                .toList();
+        }
 
-           @Override
-           public String getPassword() { return user.getPassword(); }
-           @Override
-           public String getUsername() { return user.getEmail(); }
-           @Override
-           public boolean isEnabled() { return user.isActive(); }
-           @Override public boolean isAccountNonExpired() { return true; }
-           @Override public boolean isAccountNonLocked() { return !user.isLocked(); }
-           @Override public boolean isCredentialsNonExpired() { return true; }
-       }
-   }
-   ```
+        @Override
+        public String getPassword() { return user.getPassword(); }
+        @Override
+        public String getUsername() { return user.getEmail(); }
+        @Override
+        public boolean isEnabled() { return user.isActive(); }
+        @Override public boolean isAccountNonExpired() { return true; }
+        @Override public boolean isAccountNonLocked() { return !user.isLocked(); }
+        @Override public boolean isCredentialsNonExpired() { return true; }
+    }
+}
+```
 
 ---
 
 ## Common Mistakes
 
-1. **Storing passwords in plain text** — If the database is breached, all passwords are exposed. Always use `BCryptPasswordEncoder` or stronger (Argon2, SCrypt).
-
-2. **Overly permissive CORS** — Allowing all origins (`*`) opens the door for XSS and data theft. Restrict to specific, known origins.
-
-3. **Disabling CSRF for all endpoints without understanding the implications** — CSRF protection should only be disabled for stateless REST APIs using token-based authentication. Keep it enabled for traditional form-based applications.
-
-4. **Not validating JWT signature** — Without signature validation, anyone can forge tokens. Use a proper signing algorithm (HS256, RS256) with a secure secret key.
-
-5. **Storing JWT in `localStorage`** — Vulnerable to XSS attacks. Use HTTP-only cookies for storing tokens, or keep them in memory only.
-
-6. **Hard-coded roles in authorization expressions** — Makes permission changes require code deployment. Use configurable permissions or a database-backed authorization system.
-
-7. **Not securing actuator endpoints** — Actuator endpoints expose sensitive information (heap dumps, env, loggers). Always secure them or restrict to internal networks.
+- **Storing passwords in plain text** — If the database is breached, all passwords are exposed and can be used immediately. Always use `BCryptPasswordEncoder` or stronger (Argon2, SCrypt) for password hashing with automatic salting.
+- **Overly permissive CORS** — Allowing all origins (`*`) opens the door for XSS and data theft from any website. Restrict to specific, known origins that are verified and documented.
+- **Disabling CSRF for all endpoints without understanding the implications** — CSRF protection should only be disabled for stateless REST APIs using token-based authentication. Keep it enabled for traditional form-based applications where session cookies are used.
+- **Not validating JWT signature** — Without signature validation, anyone can forge tokens and impersonate any user. Use a proper signing algorithm (HS256, RS256) with a secure secret key stored in a secrets manager.
+- **Storing JWT in `localStorage`** — Vulnerable to XSS attacks — any injected script can steal the token. Use HTTP-only cookies for storing tokens, or keep them in memory only with refresh token rotation.
+- **Hard-coded roles in authorization expressions** — Makes permission changes require code deployment and application restart. Use configurable permissions or a database-backed authorization system that can be updated at runtime.
+- **Not securing actuator endpoints** — Actuator endpoints expose sensitive information (heap dumps, env, loggers) that can reveal secrets and internal architecture. Always secure them with role-based access or restrict to internal networks.
 
 ---
 

@@ -7,6 +7,8 @@
 - **Definition:** An architectural pattern that separates read and write operations into distinct models — Commands handle mutations, Queries handle data retrieval.
 - **Why It Exists:** Traditional CRUD uses a single model for both reads and writes, forcing compromises. CQRS allows each model to be optimized independently for its specific workload with different data stores, schemas, scaling strategies, and consistency models.
 - **Key Concepts:** **Command** (changes state, returns no data), **Query** (returns data, no side effects), **Command Handler** (validates and executes commands), **Query Handler** (fetches from read model), **Read Model** (denormalized data optimized for queries), **Write Model** (domain model with business logic), **Event Bus** (communicates changes from write to read side), **Projection** (transforms events into read model state)
+- **CQRS vs CQS** — CQS (Command-Query Separation) is a class-level principle: methods are either commands (void) or queries (return value, no side effects). CQRS elevates this to an architectural pattern with separate models, separate services, and often separate databases. CQRS applies CQS at the system level.
+- **Materialized Views as Read Models** — A materialized view is a pre-computed, denormalized representation of data optimized for specific query patterns. Examples: order summary with customer name and product details (pre-joined and ready to serve), daily sales aggregation (pre-calculated totals), user activity feed (pre-assembled from multiple sources). Materialized views eliminate expensive joins at query time.
 
 ---
 
@@ -16,6 +18,8 @@
 - **Query Processing Pipeline:** Client sends Query → Query Handler fetches from Read Model → Denormalized data returned directly.
 - **Separate Models:** Write model contains domain logic, invariants, and validation. Read model is denormalized, pre-joined, and optimized for specific query patterns. They can use the same database (different tables), different databases, or different database technologies.
 - **Eventual Consistency:** Read models are updated asynchronously after writes. Typical lag is 10ms–100ms. For critical reads, the write model can be queried directly.
+- **Transactional Outbox Pattern** — Publishing events reliably from the write side is a key challenge. The outbox pattern writes both the domain data and the event to the same database transaction. A separate process (outbox publisher) reads from the outbox table and publishes events to the message broker. This ensures the event is never lost — if publish fails, the outbox retains the event for retry.
+- **Multiple Read Models per Write Model** — A single write model can serve multiple read models optimized for different query patterns: a search read model (Elasticsearch), a dashboard read model (pre-aggregated in PostgreSQL), a real-time analytics read model (Redis sorted sets). Each projection independently consumes events from the write side, allowing different read models to scale independently.
 
 ```java
 // Command (write side)
@@ -63,6 +67,8 @@ public class GetOrderSummaryQueryHandler implements QueryHandler<GetOrderSummary
 - **Ignoring Eventual Consistency** — not handling the lag between write and read model update, causing users to see stale data after a write.
 - **Command Returning Data** — commands should be void (return ID only); if commands return data, they become queries and blur the separation.
 - **Duplicating Business Logic in Query Handlers** — query handlers should not duplicate validation or calculation logic from the write side.
+- **Not Handling Projection Failures** — If a projection fails to process an event, the read model becomes stale. Implement retry logic with exponential backoff, dead letter queues for persistent failures, and monitoring to alert on lagging projections.
+- **Over-normalizing Read Models** — Read models should be denormalized and query-optimized. A read model for an order dashboard should include customer name, email, and order total in a single table — even though the write model stores them in separate tables. The goal is zero joins at query time.
 
 ---
 
@@ -73,6 +79,8 @@ public class GetOrderSummaryQueryHandler implements QueryHandler<GetOrderSummary
 - **When to Use Separate Databases** — same database, different tables (simple CQRS); same DB type, different instances (read replicas for scale); different database types (PostgreSQL for writes, Elasticsearch for reads).
 - **Transactional Boundaries** — one transaction per aggregate. Use the Outbox pattern to ensure events are published atomically with state changes. Saga pattern for multi-aggregate workflows.
 - **Command Validation** — validate in command handlers before executing domain logic. Authorization checks belong in the application layer, not the domain model.
+- **Event Versioning in Projections** — Events evolve over time as new fields are added. Projections must handle multiple event versions. Use schema version in event metadata, write event handlers that can process multiple versions (ignore unknown fields), and use the upsert pattern (INSERT ON CONFLICT UPDATE) for idempotent projection updates.
+- **CQRS Without Event Sourcing** — CQRS does not require Event Sourcing. The write side can use a traditional database (PostgreSQL, MySQL) with changes propagated via event publication (using the outbox pattern). Event Sourcing is a separate choice about how to store state (as an append-only event log versus current state snapshot).
 
 ---
 
@@ -201,3 +209,5 @@ public class OrderSummaryProjector {
 - **Avoid CQRS for simple CRUD applications** — CQRS adds significant complexity: event handling, projection management, eventual consistency. Only use it when you have genuinely different read and write workloads — high write throughput with complex read queries, or read models that serve different purposes than the write model.
 
 - **Monitor projection lag as a critical SLO** — Projection lag (time between event publication and read model update) is the key health metric for CQRS. Alert if lag exceeds 2 seconds for user-facing queries or 30 seconds for analytical queries. Use dedicated metrics per projection to identify which ones are falling behind.
+- **Use read replicas before splitting databases** — Before adopting full CQRS with separate databases, try PostgreSQL read replicas. The write model writes to the primary, and the read model reads from replicas. This provides read scaling and reduced write-contention without the complexity of event-driven projections. Only add projections and separate read databases when read replicas are insufficient.
+- **Design projections to be rebuildable from scratch** — A projection should be disposable. If a read model becomes corrupted or needs schema changes, you should be able to drop it and rebuild by replaying all events from the event store. This requires idempotent projection handlers and an append-only event store with sufficient retention. Test projection rebuilding in CI to verify it produces correct results.

@@ -6,229 +6,221 @@
 
 **Dependency Injection (DI)** is a design pattern where objects receive their dependencies from an external source — the IoC container — rather than creating them internally. Spring's DI implementation is the core mechanism behind the framework's **loose coupling** and **testability**.
 
-### Key Concepts:
+### Why Use DI
 
-1. **Why Use DI**:
+- **Decoupling** — Classes depend on abstractions (interfaces), not concrete implementations. You can swap implementations without changing dependent code, which is the foundation of the Open/Closed Principle.
+- **Testability** — Dependencies can be replaced with mocks or stubs in unit tests. This makes Spring applications significantly easier to unit test compared to traditional Java EE applications.
+- **Lifecycle Management** — The container handles creation, initialization, and destruction of objects. Developers are freed from manual resource management, reducing boilerplate and the risk of resource leaks.
+- **Flexibility** — Different configurations can inject different implementations for different environments (dev, test, production). This enables environment-specific behavior without changing code — just swap the configuration.
 
-   - **Decoupling** — Classes depend on abstractions (interfaces), not concrete implementations. You can swap implementations without changing dependent code.
-   - **Testability** — Dependencies can be replaced with mocks or stubs in unit tests.
-   - **Lifecycle Management** — The container handles creation, initialization, and destruction of objects.
-   - **Flexibility** — Different configurations can inject different implementations for different environments (dev, test, production).
+### Injection Types
 
-2. **Injection Types**:
+- **Constructor Injection** — Dependencies are provided through constructor arguments. This is the **recommended approach** for required dependencies. Beans are immutable (all fields can be `final`) and are always fully initialized when constructed. Since Spring 4.3, `@Autowired` is optional on single-constructor beans.
+- **Setter Injection** — Dependencies are set via setter methods. Best for **optional dependencies** that have sensible defaults or need to be reconfigured at runtime. The bean can be instantiated without the dependency, but a null check is required before use.
+- **Field Injection** — Dependencies are injected directly into fields via reflection. **Avoid in production code** — it hides dependencies, makes testing harder, prevents immutability, and can cause NullPointerException under race conditions during startup.
 
-   - **Constructor Injection** — Dependencies are provided through constructor arguments. This is the **recommended approach** for required dependencies. Beans are immutable and always fully initialized.
-   - **Setter Injection** — Dependencies are set via setter methods. Best for **optional dependencies** that have sensible defaults.
-   - **Field Injection** — Dependencies are injected directly into fields via reflection. **Avoid in production code** — it hides dependencies, makes testing harder, and prevents immutability.
+### Constructor Injection (Recommended)
 
-3. **Constructor Injection (Recommended)** :
+```java
+@Service
+public class OrderService {
+    private final OrderRepository orderRepository;
+    private final PaymentGateway paymentGateway;
+    private final NotificationService notificationService;
 
-   ```java
-   @Service
-   public class OrderService {
-       private final OrderRepository orderRepository;
-       private final PaymentGateway paymentGateway;
-       private final NotificationService notificationService;
+    // Since Spring 4.3, @Autowired is optional on constructors
+    // when there is only one constructor
+    public OrderService(OrderRepository orderRepository,
+                        PaymentGateway paymentGateway,
+                        NotificationService notificationService) {
+        this.orderRepository = orderRepository;
+        this.paymentGateway = paymentGateway;
+        this.notificationService = notificationService;
+    }
+}
+```
 
-       // Since Spring 4.3, @Autowired is optional on constructors
-       // when there is only one constructor
-       public OrderService(OrderRepository orderRepository,
-                           PaymentGateway paymentGateway,
-                           NotificationService notificationService) {
-           this.orderRepository = orderRepository;
-           this.paymentGateway = paymentGateway;
-           this.notificationService = notificationService;
-       }
-   }
-   ```
+### Setter Injection (For Optional Dependencies)
 
-4. **Setter Injection (For Optional Dependencies)** :
+```java
+@Service
+public class EmailService {
+    private MailSender mailSender;
 
-   ```java
-   @Service
-   public class EmailService {
-       private MailSender mailSender;
+    @Autowired(required = false)
+    public void setMailSender(MailSender mailSender) {
+        this.mailSender = mailSender;
+    }
+}
+```
 
-       @Autowired(required = false)
-       public void setMailSender(MailSender mailSender) {
-           this.mailSender = mailSender;
-       }
-   }
-   ```
+### Field Injection (Avoid)
 
-5. **Field Injection (Avoid)** :
-
-   ```java
-   @Service
-   public class ReportService {
-       @Autowired
-       private ReportRepository repository; // Hidden, non-final
-   }
-   ```
+```java
+@Service
+public class ReportService {
+    @Autowired
+    private ReportRepository repository; // Hidden, non-final
+}
+```
 
 ---
 
 ## Core Concepts
 
-### 1. Handling Multiple Implementations
+### Handling Multiple Implementations
 
-   When multiple beans implement the same interface:
+When multiple beans implement the same interface:
 
-   ```java
-   public interface PaymentGateway { void process(Payment payment); }
+```java
+public interface PaymentGateway { void process(Payment payment); }
 
-   @Component
-   @Qualifier("stripe")
-   public class StripeGateway implements PaymentGateway { }
+@Component
+@Qualifier("stripe")
+public class StripeGateway implements PaymentGateway { }
 
-   @Component
-   @Qualifier("paypal")
-   public class PayPalGateway implements PaymentGateway { }
+@Component
+@Qualifier("paypal")
+public class PayPalGateway implements PaymentGateway { }
 
-   // Use @Qualifier to select
-   @Service
-   public class CheckoutService {
-       private final PaymentGateway gateway;
+// Use @Qualifier to select
+@Service
+public class CheckoutService {
+    private final PaymentGateway gateway;
 
-       public CheckoutService(@Qualifier("stripe") PaymentGateway gateway) {
-           this.gateway = gateway;
-       }
-   }
+    public CheckoutService(@Qualifier("stripe") PaymentGateway gateway) {
+        this.gateway = gateway;
+    }
+}
 
-   // Or @Primary for a default
-   @Component
-   @Primary
-   public class DefaultGateway implements PaymentGateway { }
-   ```
+// Or @Primary for a default
+@Component
+@Primary
+public class DefaultGateway implements PaymentGateway { }
+```
 
-### 2. `@Value` Injection
+### `@Value` Injection
 
-   Inject properties, SpEL expressions, and resources:
+Inject properties, SpEL expressions, and resources:
 
-   ```java
-   @Service
-   public class AppConfig {
-       @Value("${app.name}")
-       private String appName;
+```java
+@Service
+public class AppConfig {
+    @Value("${app.name}")
+    private String appName;
 
-       @Value("${app.timeout:5000}") // Default 5000
-       private int timeout;
+    @Value("${app.timeout:5000}") // Default 5000
+    private int timeout;
 
-       @Value("#{systemProperties['user.dir']}") // SpEL
-       private String userDir;
+    @Value("#{systemProperties['user.dir']}") // SpEL
+    private String userDir;
 
-       @Value("classpath:data/seed.json")
-       private Resource seedFile;
-   }
-   ```
+    @Value("classpath:data/seed.json")
+    private Resource seedFile;
+}
+```
 
-### 3. Autowiring Resolution Process
+### Autowiring Resolution Process
 
-   When Spring encounters `@Autowired`, it follows this resolution:
+When Spring encounters `@Autowired`, it follows this resolution:
 
-   ```
-   1. Find matching bean(s) by type
-   2. If exactly one → inject it
-   3. If more than one → look for @Primary → @Qualifier
-   4. If none and required=true → throw NoSuchBeanDefinitionException
-   5. If none and required=false → leave null
-   ```
+```
+1. Find matching bean(s) by type
+2. If exactly one → inject it
+3. If more than one → look for @Primary → @Qualifier
+4. If none and required=true → throw NoSuchBeanDefinitionException
+5. If none and required=false → leave null
+```
 
-### 4. Factory Pattern with DI
+### Factory Pattern with DI
 
-   Inject all implementations of an interface and dispatch dynamically:
+Inject all implementations of an interface and dispatch dynamically:
 
-   ```java
-   @Component
-   public class NotificationFactory {
-       private final Map<NotificationType, NotificationSender> senders;
+```java
+@Component
+public class NotificationFactory {
+    private final Map<NotificationType, NotificationSender> senders;
 
-       public NotificationFactory(List<NotificationSender> senderList) {
-           this.senders = senderList.stream()
-               .collect(Collectors.toMap(
-                   NotificationSender::getType, Function.identity()
-               ));
-       }
+    public NotificationFactory(List<NotificationSender> senderList) {
+        this.senders = senderList.stream()
+            .collect(Collectors.toMap(
+                NotificationSender::getType, Function.identity()
+            ));
+    }
 
-       public NotificationSender getSender(NotificationType type) {
-           NotificationSender sender = senders.get(type);
-           if (sender == null) {
-               throw new IllegalArgumentException("Unknown type: " + type);
-           }
-           return sender;
-       }
-   }
-   ```
+    public NotificationSender getSender(NotificationType type) {
+        NotificationSender sender = senders.get(type);
+        if (sender == null) {
+            throw new IllegalArgumentException("Unknown type: " + type);
+        }
+        return sender;
+    }
+}
+```
 
-### 5. Conditional Injection with `@Conditional`
+### Conditional Injection with `@Conditional`
 
-   Create beans conditionally based on environment, properties, or classpath:
+Create beans conditionally based on environment, properties, or classpath:
 
-   ```java
-   @Configuration
-   public class DataSourceConfig {
+```java
+@Configuration
+public class DataSourceConfig {
 
-       @Bean
-       @ConditionalOnProperty(name = "db.type", havingValue = "mysql")
-       public DataSource mysqlDataSource() { return new MySQLDataSource(); }
+    @Bean
+    @ConditionalOnProperty(name = "db.type", havingValue = "mysql")
+    public DataSource mysqlDataSource() { return new MySQLDataSource(); }
 
-       @Bean
-       @ConditionalOnProperty(name = "db.type", havingValue = "postgres")
-       public DataSource postgresDataSource() { return new PostgresDataSource(); }
+    @Bean
+    @ConditionalOnProperty(name = "db.type", havingValue = "postgres")
+    public DataSource postgresDataSource() { return new PostgresDataSource(); }
 
-       @Bean
-       @ConditionalOnMissingBean(DataSource.class)
-       public DataSource h2DataSource() { return new H2DataSource(); }
+    @Bean
+    @ConditionalOnMissingBean(DataSource.class)
+    public DataSource h2DataSource() { return new H2DataSource(); }
 
-       @Bean
-       @Profile("dev")
-       public DataSource devDataSource() { return new H2DataSource(); }
+    @Bean
+    @Profile("dev")
+    public DataSource devDataSource() { return new H2DataSource(); }
 
-       @Bean
-       @Profile("prod")
-       public DataSource prodDataSource() { return new ConnectionPoolDataSource(); }
-   }
-   ```
+    @Bean
+    @Profile("prod")
+    public DataSource prodDataSource() { return new ConnectionPoolDataSource(); }
+}
+```
 
-### 6. Circular Dependencies
+### Circular Dependencies
 
-   Circular dependencies occur when Bean A depends on Bean B and Bean B depends on Bean A:
+Circular dependencies occur when Bean A depends on Bean B and Bean B depends on Bean A:
 
-   ```java
-   @Service
-   public class A {
-       private final B b;
-       public A(B b) { this.b = b; }
-   }
+```java
+@Service
+public class A {
+    private final B b;
+    public A(B b) { this.b = b; }
+}
 
-   @Service
-   public class B {
-       private final A a;
-       public B(A a) { this.a = a; }
-   }
-   ```
+@Service
+public class B {
+    private final A a;
+    public B(A a) { this.a = a; }
+}
+```
 
-   - With **constructor injection**, Spring throws `BeanCurrentlyInCreationException`.
-   - With **setter/field injection**, Spring creates a proxy to break the cycle.
-   - **Fix**: Extract shared interface, use events, use `@Lazy` on one side, or restructure.
+- With **constructor injection**, Spring throws `BeanCurrentlyInCreationException`.
+- With **setter/field injection**, Spring creates a proxy to break the cycle.
+- **Fix**: Extract shared interface, use events, use `@Lazy` on one side, or restructure.
 
 ---
 
 ## Common Mistakes
 
-1. **Using field injection** — Dependencies are hidden, not final, and the class cannot be instantiated without Spring's container. Always prefer constructor injection.
-
-2. **Too many constructor parameters** — More than 6-7 parameters indicates the class has too many responsibilities. Extract related dependencies into a single object.
-
-3. **Not using `@Qualifier` when needed** — Spring throws `NoUniqueBeanDefinitionException`. Always qualify when multiple beans of the same type exist.
-
-4. **Circular dependencies with constructor injection** — Cannot be resolved. Use `@Lazy`, setter injection, or restructure.
-
-5. **Setting `@Autowired(required = false)` on a constructor** — Does not work the same way as on fields. Use `Optional<T>` for optional constructor dependencies.
-
-6. **Injecting `ApplicationContext` directly** — While possible, it ties your code to the Spring container. Prefer injecting the specific dependency instead.
-
-7. **Mixing injection types inconsistently** — Pick constructor injection as the standard and use it everywhere for consistency.
+- **Using field injection** — Dependencies are hidden, not final, and the class cannot be instantiated without Spring's container. Always prefer constructor injection for explicit, immutable dependency management.
+- **Too many constructor parameters** — More than 6-7 parameters indicates the class has too many responsibilities. Extract related dependencies into a single configuration or aggregate object to keep constructors clean and focused.
+- **Not using `@Qualifier` when needed** — Spring throws `NoUniqueBeanDefinitionException`. Always qualify when multiple beans of the same type exist, and consider creating custom qualifier annotations for clarity.
+- **Circular dependencies with constructor injection** — Cannot be resolved directly. Use `@Lazy`, switch to setter injection on one side, or restructure the code to eliminate the circular relationship entirely.
+- **Setting `@Autowired(required = false)` on a constructor** — Does not work the same way as on fields. Use `Optional<T>` for optional constructor dependencies, or use `@Autowired(required = false)` on individual setter methods.
+- **Injecting `ApplicationContext` directly** — While possible, it ties your code to the Spring container. Prefer injecting the specific dependency instead, which keeps your code decoupled and easier to test in isolation.
+- **Mixing injection types inconsistently** — Pick constructor injection as the standard and use it everywhere for consistency. Mixing field, setter, and constructor injection within the same codebase makes the dependency structure harder to understand and maintain.
 
 ---
 

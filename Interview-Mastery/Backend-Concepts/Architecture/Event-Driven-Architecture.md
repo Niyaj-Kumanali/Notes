@@ -7,6 +7,8 @@
 - **Definition:** A software design pattern where services communicate through the production, detection, consumption, and reaction to events via an intermediary event broker rather than direct request-response calls.
 - **Why It Exists:** EDA decouples event producers from consumers, enabling asynchronous, scalable, and loosely coupled systems. It handles variable workloads through buffering, supports independent scaling of producers and consumers, and enables real-time processing across distributed services.
 - **Key Concepts:** **Event** (immutable fact about something that happened), **Event Producer** (publishes events), **Event Consumer** (subscribes and processes), **Event Broker** (Kafka, RabbitMQ, Pulsar — routes events), **Topic** (named channel for events), **Partition** (ordered sequence within a topic), **Consumer Group** (set of consumers sharing load), **Delivery Guarantees** (at-most-once, at-least-once, exactly-once), **Dead Letter Queue** (failed events routed for analysis), **Schema Registry** (manages event schemas with compatibility checks)
+- **Event-Driven vs Request-Driven** — Request-driven (REST/gRPC) requires both parties to be online and responds immediately. Event-driven allows temporal decoupling — the producer publishes and forgets; the consumer processes when ready. Request-driven is simpler for query operations; event-driven excels for workflows, broadcasting, and cross-system integration.
+- **Choosing Between Kafka and RabbitMQ** — Kafka: high throughput (100K+ msgs/sec), persistent storage, replay capability, ordering within partitions, ideal for event streaming and data pipelines. RabbitMQ: flexible routing (exchanges, bindings), lower latency (sub-ms), work queues, ideal for task distribution and complex routing patterns. Kafka is a log; RabbitMQ is a message broker.
 
 ---
 
@@ -17,6 +19,8 @@
 - **Message Ordering:** Kafka guarantees ordering within a partition using the same partition key. RabbitMQ has no ordering guarantee by default. Global ordering requires a single partition (limits parallelism).
 - **Outbox Pattern:** Events are written to a database table within the same transaction as the state change, then reliably published to the message broker by a separate process. Prevents the dual-write problem where the DB is updated but the event is never published.
 - **Idempotent Consumers:** Store processed event IDs in a deduplication store (Redis with TTL or DB unique constraint) to safely handle duplicate deliveries under at-least-once semantics.
+- **Partition Key Design** — The partition key determines ordering and parallelism. Use business entity ID (order ID, user ID) as the partition key to ensure all events for the same entity are processed in order by the same consumer. Avoid using random keys — they distribute evenly but break ordering guarantees.
+- **Compacted Topics** — Kafka supports log compaction, where only the latest message for each key is retained. Useful for rebuilding state from events (a "table" semantics): each key represents an entity, and the latest value is its current state. Older versions are automatically removed. Compacted topics serve as the source for KTables in Kafka Streams.
 
 ```java
 // Idempotent event consumer with dedup
@@ -59,6 +63,9 @@ public class OutboxPublisher {
 - **No Error Handling in Consumers** — unhandled exceptions stop the consumer. Always catch exceptions, log, send to DLQ, and commit the offset.
 - **Assuming Message Ordering Across Partitions** — Kafka only guarantees ordering within a partition. Multi-partition ordering requires application-level coordination.
 - **Synchronous Blocking in Async Event Handlers** — blocking calls in consumer threads reduce throughput. Use async processing or reactive frameworks.
+- **Infinite Retry Without DLQ** — A consumer that retries forever on a bad event blocks subsequent events. Always use a dead letter queue after a finite number of retries (typically 3-5). The failed event goes to DLQ, and the consumer commits the offset and continues processing.
+- **Over-partitioning Topics** — More partitions increase parallelism but also increase overhead (more connections, more rebalancing). Rule of thumb: partitions = max consumers you'll ever need × 1.5. Avoid partitions exceeding 1000 without performance testing.
+- **Missing Telemetry on Event Pipeline** — Without monitoring consumer lag, event processing failures, and DLQ depth, issues go undetected until users complain. Monitor: consumer lag per partition, events processed/sec, error rate, DLQ size, processing latency per event.
 
 ---
 
@@ -69,6 +76,8 @@ public class OutboxPublisher {
 - **Strategic Event Design** — events are past-tense immutable facts (`OrderCreated`, `PaymentReceived`); commands are future-tense requests (`ReserveInventory`). Include enough data for autonomous processing (event-carried state transfer). Use unique event IDs for deduplication.
 - **Dead Letter Queue Strategy** — structured DLQ with original topic, error details, retry count. Automated retry with exponential backoff. After max retries, move to permanent dead storage and alert operations.
 - **Throughput Optimization** — increase partitions for higher throughput, batch consumption reduces overhead, compression (Snappy, Zstd) reduces network/storage. Tune fetch size, linger time, and batch size for throughput vs latency trade-offs.
+- **Async Communication Pitfalls** — Eventual consistency means stale data. Out-of-order events require idempotent handlers. Schema evolution needs compatibility management. Debugging async flows requires distributed tracing. Build these into your architecture from day one — retrofitting is much harder.
+- **Event Sourcing vs Event-Driven Architecture** — Event Sourcing stores state as an append-only event log; current state is derived by replaying events. Event-Driven Architecture uses events for communication but stores current state. They can be combined (CQRS + Event Sourcing) but are independent patterns. Event Sourcing provides audit trails and temporal queries; EDA provides decoupling and scalability.
 
 ---
 
@@ -219,3 +228,5 @@ public KStream<String, Transaction> fraudDetection(StreamsBuilder builder) {
 - **Implement structured error handling: DLQ + retry + alerting** — Every event consumer should have three-stage error handling: retry with exponential backoff for transient errors, DLQ for permanent failures, and alerting when the DLQ grows. Without this, event processing silently stops and data inconsistency grows until someone notices the symptom, not the cause.
 
 - **Monitor consumer lag as a critical business metric** — Consumer lag (how far behind real-time a consumer is) directly impacts user experience. A payment consumer lagging by 5 minutes means users wait 5 minutes for their orders to be confirmed. Alert when lag exceeds acceptable thresholds. Use different thresholds for different consumers: user-facing (30s), analytical (5min), batch (1hr).
+- **Use the transactional outbox pattern for every service that publishes events** — Dual-write (database + event) is a distributed transaction that always fails eventually without the outbox pattern. Write both the entity state change and the event to the same database transaction. A scheduled poller or CDC (Change Data Capture) process publishes the event reliably. This prevents the most common data loss scenario in event-driven systems.
+- **Design events for backward and forward compatibility from the start** — Events live longer than services. An event written today may be consumed by services deployed 2 years from now. Use Avro or Protobuf with a schema registry. Set compatibility to BACKWARD or FULL. Add fields as optional with defaults. Never remove fields — mark them as deprecated. Test compatibility in CI by publishing events with both old and new schemas.

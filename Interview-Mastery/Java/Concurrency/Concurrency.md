@@ -4,28 +4,17 @@
 
 ## Overview
 
-- **Definition:** Java Concurrency is the set of APIs and language features for managing multiple threads accessing shared resources. It covers synchronization, locks, atomic variables, concurrent collections, and advanced coordination mechanisms in `java.util.concurrent`.
-
-- **Why It Exists:** Without proper concurrency tools, developers had to use low-level `synchronized` and `wait/notify` — error-prone and hard to reason about. The modern concurrency API provides higher-level abstractions, thread-safe collections, efficient synchronization, and lock-free operations.
-
-- **Core Packages:**
-  - `java.util.concurrent` — Executors, locks, atomic vars, concurrent collections, synchronizers
-  - `java.util.concurrent.atomic` — AtomicInteger, AtomicReference, LongAdder
-  - `java.util.concurrent.locks` — ReentrantLock, ReadWriteLock, StampedLock, Condition
+- **Purpose** — Java Concurrency encompasses the APIs, language features, and best practices for managing multiple threads that access shared resources safely and efficiently. Without proper concurrency tools, developers relied on low-level `synchronized` blocks and `wait()`/`notify()` pairs — mechanisms that are notoriously error-prone and difficult to reason about in complex systems.
+- **Modern API** — The modern concurrency API in `java.util.concurrent` provides higher-level abstractions including thread pools, concurrent collections, atomic variables with lock-free semantics, and coordination primitives like `CountDownLatch`, `CyclicBarrier`, `Semaphore`, and `Phaser`. The goal of these abstractions is to make concurrent code easier to write correctly while maximizing throughput and minimizing contention.
+- **Core Packages** — The three core packages are `java.util.concurrent` with executors, locks, synchronizers, and concurrent collections; `java.util.concurrent.atomic` with `AtomicInteger`, `AtomicReference`, `LongAdder`, and related CAS-based primitives; and `java.util.concurrent.locks` with `ReentrantLock`, `ReadWriteLock`, `StampedLock`, and `Condition`.
 
 ---
 
 ## The Java Memory Model (JMM)
 
-- **Definition:** The JMM defines how threads interact through memory and when changes by one thread are visible to others. It's the formal specification that guarantees thread safety when using proper synchronization.
-
-- **Key Happens-Before Rules:**
-  - **Program order** — within a thread, actions are ordered as in source code
-  - **Monitor lock** — unlock on a monitor happens-before every subsequent lock on that monitor
-  - **Volatile** — write to a volatile field happens-before every subsequent read of that field
-  - **Thread start** — `Thread.start()` happens-before any action in the started thread
-  - **Thread join** — all actions in a thread happen-before `Thread.join()` returns
-  - **Transitivity** — if A happens-before B and B happens-before C, then A happens-before C
+- **Definition** — The Java Memory Model defines the formal rules for how threads interact through memory and when changes made by one thread become visible to others. Without the JMM, compilers and CPUs could reorder instructions freely, making unsynchronized concurrent access completely unpredictable across different hardware platforms.
+- **Happens-Before** — The JMM is built on the happens-before relationship: if action A happens-before action B, then A's results are visible to B, and A must appear before B in program order regardless of compiler or CPU optimizations. The key happens-before rules are program order within a single thread, monitor lock release before subsequent acquisition of the same lock, volatile write before subsequent read of the same field, `Thread.start()` before any action in the started thread, all actions in a thread before `Thread.join()` returns successfully, and transitivity across the chain.
+- **Importance** — Understanding the JMM is essential for diagnosing visibility bugs where one thread writes a value but another thread never sees it — the most common symptom of missing synchronization.
 
 ---
 
@@ -33,7 +22,8 @@
 
 ### synchronized
 
-- **Definition:** The intrinsic lock mechanism built into every Java object. Simple and JVM-optimized.
+- **Definition** — The `synchronized` keyword uses the intrinsic lock built into every Java object header, providing mutual exclusion and visibility guarantees in a single construct. An instance method `public synchronized void increment()` locks on `this`, a static method locks on the `Class` object, and a synchronized block allows specifying an explicit lock object.
+- **Monitor Evolution** — The JVM heavily optimizes `synchronized` through monitor evolution: under no contention, biased locking embeds the thread ID in the object header with zero CAS overhead; under light contention, lightweight locking uses CAS on the object header without blocking; and under heavy contention, the lock inflates to an OS mutex that parks the thread. The upgrade is one-way from biased through lightweight to heavyweight, and after Java 15 biased locking was deprecated due to its complexity in modern concurrent systems.
 
 ```java
 // Instance method — locks on this
@@ -50,25 +40,19 @@ public void update() {
 }
 ```
 
-- **Monitor Evolution (JDK 6+):**
-  - **No contention:** Biased locking (thread ID in object header)
-  - **Light contention:** Lightweight locking (CAS on object header)
-  - **Heavy contention:** Heavyweight locking (OS mutex — thread blocks)
-  - Upgrade is one-way: biased → lightweight → heavyweight
-
 ### volatile
 
-- **Definition:** Ensures visibility of changes across threads. Writes to a volatile variable flush to main memory; reads come from main memory.
+- **Definition** — The `volatile` keyword ensures that every write to a field is immediately visible to all subsequent reads of that field across all threads by preventing CPU caching and instruction reordering. However, `volatile` guarantees only visibility, not atomicity — an operation like `volatile int count; count++` is a read-modify-write sequence that remains a race condition because the increment itself is not atomic.
+- **Usage** — Use `volatile` for flags, status indicators, and reference assignments where compound actions are not required. For counters and accumulators, use `AtomicInteger`, `AtomicLong`, or `LongAdder` which provide atomic read-modify-write operations.
 
 ```java
 private volatile boolean running = true;
 ```
 
-- **Guarantees:** Visibility only, NOT atomicity. `volatile int count; count++` is still a read-modify-write race condition.
-
 ### ReentrantLock
 
-- **Definition:** A more flexible alternative to `synchronized` with features like tryLock, fairness, and Condition support.
+- **Definition** — `ReentrantLock` is a more flexible alternative to `synchronized` that provides features unavailable with intrinsic locks. It supports `tryLock()` with a timeout to avoid indefinite blocking, a fairness parameter in the constructor to prevent thread starvation, and `Condition` objects for more sophisticated wait-and-notify patterns than `synchronized`'s single wait set.
+- **Key Difference** — Unlike `synchronized` which automatically unlocks when the block exits, `ReentrantLock` requires explicit `unlock()` in a `finally` block — forgetting to unlock causes a lock leak that eventually hangs the system. Performance-wise, `synchronized` and `ReentrantLock` are comparable in modern JVMs, so the choice should be based on feature requirements rather than performance assumptions.
 
 ```java
 private final ReentrantLock lock = new ReentrantLock();
@@ -83,11 +67,10 @@ public void doWork() {
 }
 ```
 
-- **Features:** `tryLock(timeout)`, fair/unfair fairness, `Condition` for wait/notify patterns.
-
 ### ReadWriteLock
 
-- **Definition:** Allows multiple concurrent readers but exclusive writer access. Best for read-heavy, write-rare scenarios.
+- **Definition** — `ReadWriteLock` maintains a pair of associated locks: a shared read lock that multiple threads can hold simultaneously, and an exclusive write lock that no other thread may hold when a writer is active. This separation allows concurrent read operations to proceed without blocking each other, dramatically improving throughput in read-heavy, write-rare scenarios like caches, configuration stores, and lookup tables.
+- **Implementation** — `ReentrantReadWriteLock` is the standard implementation, and it supports fairness and reentrancy on both locks. The primary risk is writer starvation — under continuous read load, the writer may never acquire the lock because readers keep acquiring and releasing the read lock.
 
 ```java
 private final ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock();
@@ -107,7 +90,8 @@ public void put(K key, V value) {
 
 ### StampedLock (Java 8+)
 
-- **Definition:** Supports optimistic reads that are lock-free. Falls back to read lock if optimistic read fails due to a concurrent write.
+- **Definition** — `StampedLock` goes beyond `ReadWriteLock` by supporting optimistic reads that are entirely lock-free — no blocking or CAS overhead under the common case where no writer is active. An optimistic read acquires a stamp via `tryOptimisticRead()`, performs the read operation, then validates the stamp with `validate(stamp)`. If a concurrent write occurred between the read and validation, the stamp is invalidated and the read is retried with a regular read lock.
+- **Advantage** — This provides the best possible throughput for read-mostly workloads because optimistic reads never block writers, eliminating the writer starvation problem of `ReadWriteLock`. Note that `StampedLock` is not reentrant, and its locks are not `synchronized`-block-compatible.
 
 ```java
 private final StampedLock lock = new StampedLock();
@@ -128,7 +112,9 @@ public double getBalance() {
 
 ## Atomic Variables
 
-- **Definition:** Lock-free, thread-safe variables that use Compare-And-Swap (CAS) CPU instructions.
+- **Purpose** — Atomic variables in `java.util.concurrent.atomic` provide lock-free, thread-safe operations on single variables using Compare-And-Swap (CAS) CPU instructions at the hardware level. `AtomicInteger`, `AtomicLong`, `AtomicBoolean`, and `AtomicReference` support atomic operations like `incrementAndGet()`, `decrementAndGet()`, `compareAndSet()`, and `getAndUpdate()` without any operating system thread blocking.
+- **CAS Mechanism** — CAS works as a three-step CPU instruction: read a memory location, compare it with an expected value, and write the new value only if the comparison succeeds, returning success or failure atomically. The ABA problem occurs when a value changes from A to B and back to A — CAS does not detect this change because the current value still matches the expected A.
+- **ABA Solution** — `AtomicStampedReference` and `AtomicMarkableReference` solve the ABA problem by pairing the reference with an integer stamp or boolean mark that is updated on every change.
 
 ```java
 private final AtomicInteger counter = new AtomicInteger(0);
@@ -138,15 +124,7 @@ public int incrementAndGet() {
 }
 ```
 
-- **How CAS Works:**
-  1. Read memory location
-  2. Compare with expected value
-  3. If match, write new value
-  4. Return success/failure
-
-- **ABA Problem:** Value changes A→B→A, CAS doesn't detect change. Solution: `AtomicStampedReference`.
-
-- **LongAdder (Java 8+):** Better than AtomicInteger for high contention. Uses striped counters — multiple cells, update one at random, sum all on read.
+`LongAdder` (Java 8+) is a specialized counter that outperforms `AtomicLong` under high write contention. Instead of having all threads CAS on the same memory location (causing cache line bouncing), `LongAdder` maintains a base value plus an array of cells — each thread updates a randomly chosen cell with zero contention because different threads target different cells. Reading the sum requires accumulating all cell values, which is O(n) where n is the number of cells (typically a power of two up to the number of CPU cores). Use `LongAdder` for write-heavy counters where the sum is read infrequently, and `AtomicLong` for read-heavy or low-contention counters.
 
 ```java
 private final LongAdder requests = new LongAdder();
@@ -158,7 +136,7 @@ public long getRequestCount() { return requests.sum(); }
 
 ## Concurrent Collections
 
-- **Definition:** Thread-safe collections that provide better performance than synchronized wrappers.
+Concurrent collections in `java.util.concurrent` are thread-safe data structures that provide significantly better performance than wrapping a regular collection with `Collections.synchronizedMap()`. `ConcurrentHashMap` uses per-bucket locking (Java 8+) where only writes to the same hash bucket synchronize, while reads are entirely lock-free through volatile field access — multiple threads can read and write different buckets simultaneously without contention. `CopyOnWriteArrayList` creates a fresh copy of the underlying array on every mutation, making reads completely lock-free at the cost of O(n) writes, ideal for read-heavy listener registries. `ConcurrentLinkedQueue` is a lock-free unbounded queue using CAS operations with Michael-Scott algorithm, suitable for high-throughput producer-consumer patterns. `LinkedBlockingQueue` and `ArrayBlockingQueue` are bounded blocking queues backed by `ReentrantLock` and `Condition`, providing backpressure for producer-consumer systems. `ConcurrentSkipListMap` and `ConcurrentSkipListSet` provide sorted concurrent navigation with O(log n) operations using a skip-list data structure that supports lock-free reads.
 
 | Collection | Design | Best For |
 |-----------|--------|----------|
@@ -173,7 +151,7 @@ public long getRequestCount() { return requests.sum(); }
 
 ## Synchronizers
 
-- **Definition:** Higher-level coordination primitives for thread synchronization.
+The `java.util.concurrent` package provides higher-level coordination primitives that solve common synchronization patterns without requiring manual `wait()`/`notify()` code. `CountDownLatch` is a one-shot barrier: one or more threads await until a count reaches zero via `countDown()` calls, after which the latch cannot be reset. `CyclicBarrier` is a reusable barrier where a fixed number of threads rendezvous at the barrier point, and when all arrive, they all proceed and the barrier automatically resets for the next phase. `Semaphore` controls access to a pool of resources by maintaining a set of permits — threads acquire permits to proceed and release them when done, naturally implementing resource pools with backpressure. `Phaser` is the most flexible synchronizer, supporting dynamic party registration and multi-phase barriers, effectively replacing both `CountDownLatch` and `CyclicBarrier` with a single, more powerful API.
 
 ```java
 // CountDownLatch — wait for N operations (one-shot)
@@ -200,7 +178,7 @@ phaser.arriveAndAwaitAdvance();
 
 ## CompletableFuture (Java 8+)
 
-- **Definition:** A future that can be manually completed and composed with callbacks for asynchronous programming.
+`CompletableFuture` is a `Future` that can be explicitly completed and chained with callback-based asynchronous operations, enabling declarative async pipelines without blocking or manual thread management. Unlike the original `Future` (Java 5) which only supports blocking `get()` calls, `CompletableFuture` supports non-blocking callbacks (`thenApply`, `thenAccept`, `thenRun`), composition (`thenCompose` for flat-mapping, `thenCombine` for joining two independent results), error handling (`exceptionally` to recover with a fallback, `handle` to process success or failure), and timeouts (`orTimeout` in Java 9+). It also provides `allOf()` and `anyOf()` for combining multiple futures, and `supplyAsync()` / `runAsync()` for executing tasks on configurable executors. The framework uses the common `ForkJoinPool` by default, but a dedicated executor should always be provided for I/O-bound tasks.
 
 ```java
 CompletableFuture<User> future = CompletableFuture
@@ -229,14 +207,15 @@ CompletableFuture.anyOf(f1, f2, f3).join();
 
 ## Common Mistakes
 
-- **Double-checked locking without volatile** — publication race. Use `volatile` or holder class pattern
-- **synchronized(this) scope too coarse** — low concurrency. Narrow scope or use ConcurrentHashMap
-- **Forgetting unlock in finally** — lock leak. Always try/finally unlock
-- **Busy-waiting with while(true)** — 100% CPU. Use wait/notify, blocking queue, or LockSupport.park()
-- **String as lock object** — string interning causes false sharing. Use `new Object()` as lock
-- **Not handling InterruptedException** — lost interrupt signal. Restore interrupt flag: `Thread.currentThread().interrupt()`
-- **Deadlock from nested synchronized** — threads block forever. Use consistent lock ordering
-- **Not sizing thread pool** — thread starvation or OOM. Profile and size appropriately
+Double-checked locking without a `volatile` field is a classic JMM bug — without `volatile`, the compiler and CPU can reorder the writes to the field and the constructor, causing a thread to see a partially-constructed object. The fix is either to declare the field `volatile` or use the initialize-on-demand holder class pattern.
+
+Making a `synchronized` scope too coarse destroys concurrency by serializing all operations that could run in parallel. If `synchronized(this)` protects unrelated fields, split into separate lock objects for unrelated data, or use `ConcurrentHashMap` and atomic variables to eliminate the lock entirely.
+
+Forgetting to place `lock.unlock()` in a `finally` block causes a lock leak — if the critical section throws an exception, the lock is never released, and any thread subsequently waiting for that lock blocks forever. Always structure `ReentrantLock` usage as `lock.lock(); try { ... } finally { lock.unlock(); }`.
+
+Using a `String` as a lock object is dangerous because string interning means two identical string literals may refer to the same `String` object, creating unintended lock sharing across unrelated code paths. Always use `new Object()` as a lock for fine-grained locking.
+
+Not handling `InterruptedException` properly — catching it and ignoring it loses the interrupt signal, leaving the thread unable to respond to cancellation requests. The correct pattern is either to propagate the exception or restore the interrupt flag with `Thread.currentThread().interrupt()`.
 
 ---
 
@@ -244,7 +223,7 @@ CompletableFuture.anyOf(f1, f2, f3).join();
 
 ### Scenario 1: Real-Time Order Matching Engine
 
-A stock exchange matches buy and sell orders. Thousands of orders arrive per second from multiple trading firms. The matching engine must maintain an order book per stock, match orders instantly, and publish trades — all with strict fairness guarantees.
+A stock exchange matches buy and sell orders. Thousands of orders arrive per second from multiple trading firms. The matching engine must maintain an order book per stock, match orders instantly by price-time priority, and publish trades — all with strict fairness guarantees and zero data loss.
 
 ```java
 public class OrderBook {
@@ -263,11 +242,11 @@ public class OrderBook {
 }
 ```
 
-`ConcurrentSkipListMap` provides thread-safe sorted access — O(log n) for insertion and query. `ConcurrentNavigableMap.headMap()` returns a view of entries with price ≤ the order price. Each price level uses a `ConcurrentLinkedQueue` for FIFO ordering among same-price orders. The per-bucket design of `ConcurrentHashMap` would not work here because we need sorted access by price. The skip-list's lock-free implementation allows multiple matching threads to operate on different price levels simultaneously.
+`ConcurrentSkipListMap` provides thread-safe sorted access with O(log n) insertion and query, maintaining price-time priority ordering without external synchronization. `headMap()` returns a navigable view of entries with keys less than or equal to the incoming order's price, enabling efficient price-level matching. Each price level uses a `ConcurrentLinkedQueue` for FIFO ordering among same-price orders, using lock-free CAS operations to avoid contention. The skip-list's probabilistic balancing and lock-free reads allow multiple matching threads to operate on different price levels simultaneously, scaling with the number of CPU cores.
 
 ### Scenario 2: Distributed Tracing with CompletableFuture
 
-A microservice receives a request and must fan out to 5 downstream services (user profile, order history, recommendations, inventory, pricing). The response aggregates data from all services. If any service fails, the entire response must use cached fallback data within 200ms.
+A microservice receives a request and must fan out to five downstream services — user profile, order history, recommendations, inventory, and pricing. The response aggregates data from all services with a 200ms deadline. If any service times out, the response must use cached fallback data.
 
 ```java
 public class AggregationService {
@@ -295,11 +274,11 @@ public class AggregationService {
 }
 ```
 
-`CompletableFuture.allOf()` combines three independent async calls. `.applyToEither()` with `timeoutAfter()` implements a race — if the 200ms deadline arrives before all services respond, we use fallback data. Each individual call has a 150ms timeout to prevent slow services from consuming the entire budget. The `executor` with 20 threads handles the thread fan-out without using the common ForkJoinPool.
+`CompletableFuture.allOf()` combines three independent async calls and completes when all three complete or any one fails. The `applyToEither()` with `timeoutAfter()` implements a deadline race — if the 200ms aggregate deadline arrives before all services respond, the dashboard uses fallback data from `getNow()`. Each individual call has a 150ms timeout via `orTimeout()`, preventing a single slow service from consuming the entire latency budget. The dedicated `executor` with 20 threads isolates the I/O operations from the common ForkJoinPool, preventing thread starvation across the application.
 
 ### Scenario 3: Database Migration with Phaser
 
-A schema migration tool must run 8 migration scripts in parallel across 4 shards. After all migrations complete, it should validate constraints and then switch traffic to the new schema. The tool uses a `Phaser` to coordinate the phases.
+A schema migration tool must run 8 migration scripts in parallel across 4 database shards. After all migrations complete, the tool validates constraints and then switches traffic to the new schema. The phases must be coordinated: all shards complete script 1 before any starts script 2.
 
 ```java
 public class MigrationCoordinator {
@@ -328,246 +307,212 @@ public class MigrationCoordinator {
 }
 ```
 
-`Phaser` is a reusable barrier that supports dynamic party registration. Each shard is a party that registers, runs through 3 phases (one per script), and deregisters. The main thread also participates, advancing through phases after each script. The key advantage over `CountDownLatch` and `CyclicBarrier`: `Phaser` supports an arbitrary number of parties that can change dynamically, and it's reusable across phases without reset.
+`Phaser` is the ideal choice for this multi-phase parallel workload because it supports dynamic party registration (each shard registers upon creation), reusable barriers across multiple phases, and automatic phase advancement without manual reset. Each shard worker registers as a party, runs all three scripts — advancing through the phaser after each script to ensure all shards complete before any starts the next — and deregisters when finished. The main thread participates as party 1, advancing through phases after each migration script and running validation and traffic switching after all shards have deregistered. Compared to `CyclicBarrier`, `Phaser` avoids the need to know the exact party count at construction time.
 
 ---
 
 ## Scenario-Based Questions
 
-1. **Q: You are designing a real-time chat server that handles 100K concurrent connections. Each user can be in multiple chat rooms. Messages must be delivered to all members of a room within 100ms. The server runs on 8 cores. How do you structure the concurrency?**
-   A: Use the reactor pattern with a small number of event loop threads (one per core) and non-blocking I/O. Each room's state is single-threaded — all operations on a room are handled by the same event loop thread to avoid locking:
-   ```java
-   public class ChatServer {
-       private final EventLoopGroup group = new EventLoopGroup(Runtime.getRuntime().availableProcessors());
-       private final ConcurrentHashMap<String, EventLoop> roomAssignments = new ConcurrentHashMap<>();
+**Q: You are designing a real-time chat server that handles 100K concurrent connections. Each user can be in multiple chat rooms. Messages must be delivered to all members of a room within 100ms. The server runs on 8 cores. How do you structure the concurrency?**
 
-       public void joinRoom(String roomId, Channel channel) {
-           EventLoop eventLoop = roomAssignments.computeIfAbsent(roomId, id -> group.next());
-           eventLoop.execute(() -> roomRegistry.get(roomId).addMember(channel));
-       }
-   }
-   ```
-   Each room is pinned to a specific event loop thread — no locks needed for room state. `ConcurrentHashMap` for room-to-thread mapping handles concurrent room creation. The event loop threads handle I/O (Netty/NIO) which scales to 100K connections with 8 threads. Thread-per-connection would require 100K threads and collapse under the memory overhead (1GB+ just for thread stacks).
+A: Use the reactor pattern with a small number of event loop threads (one per core) and non-blocking I/O, assigning each chat room to a single event loop thread to eliminate locking on room state:
+```java
+public class ChatServer {
+    private final EventLoopGroup group = new EventLoopGroup(Runtime.getRuntime().availableProcessors());
+    private final ConcurrentHashMap<String, EventLoop> roomAssignments = new ConcurrentHashMap<>();
 
-2. **Q: A leader-election system uses ZooKeeper/Etcd to pick one node as the leader. When the leader fails, another node must take over. During the handoff, two nodes briefly believe they are both leaders. How do you prevent this split-brain scenario?**
-   A: Use a fencing token — a monotonically increasing epoch number that the leader must include in all writes. When a new leader is elected, it increments the epoch. Any write from the old leader (with a lower epoch) is rejected:
-   ```java
-   public class FencedLeader {
-       private volatile int epoch;
-
-       public boolean executeWithFence(Runnable action) {
-           int currentEpoch = this.epoch;
-           return storage.writeWithEpoch(currentEpoch, action); // storage rejects stale epochs
-       }
-
-       public void onElected() {
-           this.epoch = storage.incrementAndGetEpoch(); // atomically increment
-       }
-   }
-   ```
-   The lock-based approach (`synchronized` or `ReentrantLock`) prevents interleaving within a JVM but doesn't help across JVMs. The fencing token is the only reliable way to prevent split-brain. Combined with a lease (leader must renew every N seconds), the window of double-leadership is limited to the lease duration.
-
-3. **Q: A payment processing system uses `synchronized` blocks to ensure idempotency — only one thread processes a given payment ID. Under load, throughput drops and threads pile up waiting for the lock. How do you scale beyond a single-threaded bottleneck?**
-   A: Replace the single monolithic lock with striped locking — one lock per payment ID hash bucket:
-   ```java
-   public class IdempotentProcessor {
-       private final Striped<Lock> locks = Striped.lock(1024); // Guava's Striped
-
-       public void process(Payment payment) {
-           Lock lock = locks.get(payment.getId()); // deterministic lock per ID
-           lock.lock();
-           try {
-               if (alreadyProcessed(payment.getId())) return;
-               processPayment(payment);
-           } finally {
-               lock.unlock();
-           }
-       }
-   }
-   ```
-   `Striped.lock(1024)` creates 1024 locks. Payments with the same ID hash to the same lock (ensuring per-ID serialization), but different IDs use different locks (allowing parallelism up to 1024 concurrent processors). This is the idea behind sharded locking — used by `ConcurrentHashMap` internally. The stripe count should be a power of 2 and tuned so that lock contention is <5%.
-
-4. **Q: A caching system stores computed results in a `ConcurrentHashMap<K, CompletableFuture<V>>`. Multiple threads may request the same key simultaneously. Only one should compute; others should wait for the result. The computation may fail — future callers should retry, not get the failed result. How do you handle this?**
-   A: Use `computeIfAbsent()` with atomic removal on failure:
-   ```java
-   public class ComputingCache<K, V> {
-       private final ConcurrentHashMap<K, CompletableFuture<V>> cache = new ConcurrentHashMap<>();
-
-       public V get(K key) throws ExecutionException, InterruptedException {
-           CompletableFuture<V> future = cache.computeIfAbsent(key, k -> CompletableFuture
-               .supplyAsync(() -> compute(k), executor)
-               .whenComplete((result, ex) -> {
-                   if (ex != null) cache.remove(k); // remove on failure → retry
-               }));
-           try {
-               return future.get();
-           } catch (ExecutionException e) {
-               cache.remove(key, future); // only remove if still the same future
-               throw e;
-           }
-       }
-   }
-   ```
-   `computeIfAbsent` guarantees that only the first caller creates the future. Other callers get the same future. On failure, `whenComplete` removes the entry so future callers retry. The `cache.remove(key, future)` in the catch block handles the edge case where the future completed exceptionally and was already removed — the second `remove` is a no-op. This pattern is commonly used in libraries like Caffeine and Spring's `Cacheable`.
-
-5. **Q: A background job processes 1M records using a fixed thread pool. Each record processing holds a database connection. The pool has 10 threads and the connection pool has 10 connections. Occasionally, the system deadlocks — threads are waiting for connections, but connections are held by threads waiting for the queue to process more records. How do you diagnose and fix this thread pool deadlock?**
-   A: This is a classic thread starvation deadlock. The task spawns subtasks that also need thread pool threads, but all threads are blocked waiting for subtasks that can't run:
-   ```java
-   // Deadlock scenario
-   executor.submit(() -> {
-       List<Future<Result>> futures = data.stream()
-           .map(item -> executor.submit(() -> processWithDb(item))) // children need threads too
-           .toList();
-       futures.forEach(f -> f.get()); // blocks the parent thread
-   });
-   ```
-   Fixes: (1) Use `CompletableFuture` with async chaining instead of blocking `get()`: `CompletableFuture.supplyAsync(() -> process(data), executor).thenComposeAsync(...)`. (2) Use a larger pool or separate pools for parent and child tasks. (3) Use `ForkJoinPool` which uses work-stealing — blocked tasks are automatically compensated. The debugging technique: take a thread dump and look for threads in `WAITING` state (parking) waiting on `Future.get()` or `LinkedBlockingQueue.put()`.
-
-6. **Q: A data pipeline reads events from Kafka (1K events/s), enriches them with data from a REST API (50ms per call), and writes to Elasticsearch. The current implementation processes events sequentially — 50s latency. How do you parallelize while preserving per-partition ordering (Kafka guarantee)?**
-   A: Use a `Striped` executor that ensures events from the same partition are processed by the same thread:
-   ```java
-   public class PartitionedProcessor {
-       private final ExecutorService[] executors;
-
-       public void process(ConsumerRecord<String, byte[]> record) {
-           int partition = record.partition();
-           executors[partition % executors.length].submit(() -> {
-               EnrichedEvent enriched = restClient.enrich(record);
-               elasticsearch.index(enriched);
-           });
-       }
-   }
-   ```
-   Events from partition 0 always go to executor 0, partition 1 to executor 1, etc. Within each executor, tasks are processed sequentially (single-threaded executor), preserving Kafka's per-partition ordering. With 10 executors, throughput scales 10x (from 20 events/s to 200 events/s). The ordering-per-partition is maintained while different partitions are processed in parallel. Use `Executors.newSingleThreadExecutor()` for each partition group.
-
-7. **Q: A thread-safe counter using `synchronized` is the bottleneck in a high-throughput system. You try replacing it with `AtomicInteger`, but under contention the CAS spin-loop burns CPU. How do you design a counter that is both fast under low contention and doesn't burn CPU under high contention?**
-   A: Use `LongAdder` (Java 8+) which uses cell striping:
-   ```java
-   // AtomicInteger — CAS spin-loop under contention, burns CPU
-   private final AtomicInteger count = new AtomicInteger();
-   count.incrementAndGet();
-
-   // LongAdder — striped counters, no spin-loop
-   private final LongAdder count = new LongAdder();
-   count.increment(); // fast — updates a random cell
-   // reading:
-   long total = count.sum(); // slower — sums all cells
-   ```
-   Under low contention, `LongAdder` behaves like `AtomicInteger` (single cell). Under high contention, it creates additional cells and distributes updates across them. A thread picks a random cell to update — no CAS retries. The trade-off: `sum()` is O(n) where n is the number of cells (typically powers of 2, max `CPU cores`). Use `LongAdder` for write-heavy counters and `AtomicLong` for read-heavy or low-contention counters.
-
-8. **Q: A web server uses `ThreadLocal` to store request context (user ID, trace ID). A thread pool reuses threads for multiple requests. After the first request completes, the second request sees the first request's context. How do you prevent this context leak?**
-   A: Clear the `ThreadLocal` in a finally block or use a servlet filter:
-   ```java
-   public class ContextFilter implements Filter {
-       @Override
-       public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain) {
-           try {
-               RequestContext.set(request);
-               chain.doFilter(request, response);
-           } finally {
-               RequestContext.clear(); // always clean up
-           }
-       }
-   }
-   ```
-   Without cleanup, thread-pool reuse causes context leaking between requests. The same applies to MDC (Mapped Diagnostic Context) in logging frameworks. For async processing, the context must be captured before the async call and restored in the callback. Use a library like `TransmittableThreadLocal` (Alibaba) that automatically propagates context across `CompletableFuture` and executor boundaries.
-
-9. **Q: A microservice has a health check endpoint that calls downstream services. Each downstream call is 100ms. Under normal load, the health check returns in 100ms. Under load, health checks pile up — 50 concurrent health checks × 100ms = 5s response time. How do you ensure health checks remain fast regardless of load?**
-   A: Cache the health status with a short TTL and use a single background thread to refresh:
-   ```java
-   public class HealthChecker {
-       private volatile HealthStatus cached = HealthStatus.UNKNOWN;
-       private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
-
-       @PostConstruct
-       public void start() {
-           scheduler.scheduleAtFixedRate(this::check, 0, 5, SECONDS);
-       }
-
-       private void check() {
-           HealthStatus status = checkDownstream(); // takes ~100ms
-           cached = status;
-           alertIfDown(status);
-       }
-
-       public HealthStatus getHealth() {
-           return cached; // never blocks, always fast
-       }
-   }
-   ```
-   All health check requests read the `volatile cached` field — O(1), non-blocking. A single background thread performs the actual check every 5 seconds. This pattern (observed-replicated state) ensures the health endpoint returns in microseconds regardless of load. The trade-off: health status may be up to 5 seconds stale, which is acceptable for load balancer health checks.
-
-10. **Q: A service uses `synchronized` blocks that are nested — `synchronized(A) { synchronized(B) { ... } }`. Another method has `synchronized(B) { synchronized(A) { ... } }`. Occasionally the service hangs. What is happening and how do you fix it?**
-    A: This is a classic deadlock — thread 1 holds A and waits for B; thread 2 holds B and waits for A:
-    ```java
-    // Thread 1                         // Thread 2
-    synchronized(lockA) {               synchronized(lockB) {
-        synchronized(lockB) {               synchronized(lockA) {
-            // ...                           // ...
-        }                               }
-    }                                   }
-    ```
-    Fixes: (1) Always acquire locks in the same global order (A then B): `synchronized(A) { synchronized(B) { } }` in both methods. (2) Use `ReentrantLock.tryLock()` with timeout to detect and recover from deadlock:
-    ```java
-    if (lockA.tryLock(100, MILLISECONDS)) {
-        try {
-            if (lockB.tryLock(100, MILLISECONDS)) {
-                try { /* critical section */ }
-                finally { lockB.unlock(); }
-            }
-        } finally { lockA.unlock(); }
+    public void joinRoom(String roomId, Channel channel) {
+        EventLoop eventLoop = roomAssignments.computeIfAbsent(roomId, id -> group.next());
+        eventLoop.execute(() -> roomRegistry.get(roomId).addMember(channel));
     }
-    ```
-    (3) Use higher-level abstractions like `StampedLock` or `Phaser` that avoid manual lock ordering. For prevention, use a lock ordering checker (like `jstack` or `ThreadMXBean.findDeadlockedThreads()`) in CI tests.
+}
+```
+Each room is pinned to a specific event loop thread via `computeIfAbsent`, so all operations on that room's state happen on the same thread with no locks needed. The `ConcurrentHashMap` for room-to-thread mappings handles concurrent room creation from multiple event loop threads. With 8 event loop threads using NIO (via Netty or similar), the server scales to 100K connections — the thread-per-connection model would require 100K threads consuming over 1GB of stack memory alone.
+
+**Q: A payment processing system uses `synchronized` blocks to ensure idempotency — only one thread processes a given payment ID. Under load, throughput drops and threads pile up waiting for the lock. How do you scale beyond a single-threaded bottleneck?**
+
+A: Replace the single monolithic lock with striped locking — one lock per payment ID hash bucket, allowing parallel processing of different payment IDs:
+```java
+public class IdempotentProcessor {
+    private final Striped<Lock> locks = Striped.lock(1024); // Guava's Striped
+
+    public void process(Payment payment) {
+        Lock lock = locks.get(payment.getId()); // deterministic lock per ID
+        lock.lock();
+        try {
+            if (alreadyProcessed(payment.getId())) return;
+            processPayment(payment);
+        } finally {
+            lock.unlock();
+        }
+    }
+}
+```
+`Striped.lock(1024)` creates 1024 distinct locks, and `locks.get(payment.getId())` deterministically maps each payment ID to one of those locks. Payments with the same ID always map to the same lock (ensuring per-ID serialization for idempotency), but different IDs naturally distribute across different locks, allowing up to 1024 concurrent payments to be processed in parallel. This is the same sharded-locking principle that `ConcurrentHashMap` uses internally. The stripe count should be a power of two and tuned so that lock contention stays below 5%.
+
+**Q: A caching system stores computed results in a `ConcurrentHashMap<K, CompletableFuture<V>>`. Multiple threads may request the same key simultaneously. Only one should compute; others should wait for the result. The computation may fail — future callers should retry, not get the failed result. How do you handle this?**
+
+A: Use `computeIfAbsent()` for atomic lazy initialization combined with automatic entry removal on computation failure:
+```java
+public class ComputingCache<K, V> {
+    private final ConcurrentHashMap<K, CompletableFuture<V>> cache = new ConcurrentHashMap<>();
+
+    public V get(K key) throws ExecutionException, InterruptedException {
+        CompletableFuture<V> future = cache.computeIfAbsent(key, k -> CompletableFuture
+            .supplyAsync(() -> compute(k), executor)
+            .whenComplete((result, ex) -> {
+                if (ex != null) cache.remove(k); // remove on failure → retry
+            }));
+        try {
+            return future.get();
+        } catch (ExecutionException e) {
+            cache.remove(key, future); // only remove if still the same future
+            throw e;
+        }
+    }
+}
+```
+`computeIfAbsent` guarantees that only the first caller executes the computation — subsequent callers receive the same `CompletableFuture` and block on `future.get()`. The `whenComplete` callback removes the map entry if the computation fails, so the next caller retries the computation rather than receiving the failed result. The `cache.remove(key, future)` in the catch block handles the edge case where the future completed exceptionally — if the `whenComplete` already removed the entry, this second remove is a no-op. This pattern is the basis for cache deduplication in libraries like Caffeine and Spring's `@Cacheable`.
+
+**Q: A background job processes 1M records using a fixed thread pool. Each record processing holds a database connection. The pool has 10 threads and the connection pool has 10 connections. Occasionally, the system deadlocks — threads are waiting for connections, but connections are held by threads waiting for the queue to process more records. How do you diagnose and fix this thread pool deadlock?**
+
+A: This is a classic thread starvation deadlock where parent tasks submit subtasks that require the same thread pool, exhausting all threads because parents are blocked waiting for children's futures:
+```java
+// Deadlock scenario
+executor.submit(() -> {
+    List<Future<Result>> futures = data.stream()
+        .map(item -> executor.submit(() -> processWithDb(item))) // children need threads too
+        .toList();
+    futures.forEach(f -> f.get()); // blocks the parent thread
+});
+```
+The fix involves several strategies: use `CompletableFuture` with asynchronous chaining to avoid blocking `get()` calls; use separate thread pools for parent and child tasks so they never compete; or use `ForkJoinPool` with its work-stealing and compensating thread mechanism where blocked tasks are automatically detected and compensated with new threads. The debugging technique is always a thread dump — look for threads in `WAITING` state with stack traces showing `Future.get()` or `LinkedBlockingQueue.put()` as the blocking point.
+
+**Q: A data pipeline reads events from Kafka (1K events/s), enriches them with data from a REST API (50ms per call), and writes to Elasticsearch. The current implementation processes events sequentially — 50s latency. How do you parallelize while preserving per-partition ordering?**
+
+A: Use a striped executor where events from the same Kafka partition are always routed to the same single-threaded executor, preserving per-partition ordering while allowing different partitions to be processed in parallel:
+```java
+public class PartitionedProcessor {
+    private final ExecutorService[] executors;
+
+    public void process(ConsumerRecord<String, byte[]> record) {
+        int partition = record.partition();
+        executors[partition % executors.length].submit(() -> {
+            EnrichedEvent enriched = restClient.enrich(record);
+            elasticsearch.index(enriched);
+        });
+    }
+}
+```
+Events from Kafka partition 0 always go to executor 0, partition 1 to executor 1, and so on. Each executor is a `newSingleThreadExecutor()` so tasks within a partition are processed sequentially, preserving Kafka's per-partition ordering guarantee. With the number of executors matching the number of partitions (typically 10-50), throughput scales linearly — from 20 events/sec to 200+ events/sec — while the ordering guarantee is maintained within each partition. Kafka's consumer groups handle the rebalancing when partitions are reassigned.
+
+**Q: A thread-safe counter using `synchronized` is the bottleneck in a high-throughput system. You try replacing it with `AtomicInteger`, but under contention the CAS spin-loop burns CPU. How do you design a counter that is both fast under low contention and doesn't burn CPU under high contention?**
+
+A: Use `LongAdder` (Java 8+) which employs cell striping — under low contention it behaves like a single `AtomicLong` with one CAS, but under high contention it expands to multiple cells where each thread updates a randomly chosen cell with no CAS retries:
+```java
+// LongAdder — striped counters, no spin-loop
+private final LongAdder count = new LongAdder();
+count.increment(); // fast — updates a random cell
+// reading:
+long total = count.sum(); // slower — sums all cells
+```
+The key insight is that `AtomicLong` causes cache line bouncing — every CAS invalidates the cache line on all other cores, causing the core owning the line to write it back. With `LongAdder`, each thread writes to a different cell on a different cache line, eliminating the invalidation traffic. The trade-off is that `sum()` is O(n) where n is the number of cells (up to the number of CPU cores, typically powers of two). Use `LongAdder` for write-heavy counters (metrics, request counts, statistics) and `AtomicLong` for read-heavy or latency-sensitive counters.
+
+**Q: A web server uses `ThreadLocal` to store request context (user ID, trace ID). A thread pool reuses threads for multiple requests. After the first request completes, the second request sees the first request's context. How do you prevent this context leak?**
+
+A: Clear the `ThreadLocal` in a `finally` block using a servlet filter or middleware that ensures cleanup regardless of whether the request succeeds or fails:
+```java
+public class ContextFilter implements Filter {
+    @Override
+    public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain) {
+        try {
+            RequestContext.set(request);
+            chain.doFilter(request, response);
+        } finally {
+            RequestContext.clear(); // always clean up
+        }
+    }
+}
+```
+Without explicit cleanup, the `ThreadLocal` value persists on the thread after the request completes, and when the thread pool reuses that thread for the next request, the old context is visible. The same issue applies to SLF4J's MDC (Mapped Diagnostic Context). For asynchronous processing where callbacks execute on different threads, the context must be captured before the async call and restored in the callback — use a library like `TransmittableThreadLocal` (Alibaba) that automatically propagates context across executor and `CompletableFuture` boundaries.
+
+**Q: A microservice has a health check endpoint that calls downstream services. Each downstream call is 100ms. Under normal load, the health check returns in 100ms. Under load, health checks pile up — 50 concurrent health checks times 100ms equals 5 seconds response time. How do you ensure health checks remain fast regardless of load?**
+
+A: Cache the health status with a short TTL and use a single background thread for the actual health check, so the health endpoint always reads a `volatile` field with zero latency:
+```java
+public class HealthChecker {
+    private volatile HealthStatus cached = HealthStatus.UNKNOWN;
+    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+
+    @PostConstruct
+    public void start() {
+        scheduler.scheduleAtFixedRate(this::check, 0, 5, SECONDS);
+    }
+
+    private void check() {
+        HealthStatus status = checkDownstream(); // takes ~100ms
+        cached = status;
+        alertIfDown(status);
+    }
+
+    public HealthStatus getHealth() {
+        return cached; // never blocks, always fast
+    }
+}
+```
+All health check requests read the `volatile cached` field — an O(1) memory read that returns in microseconds regardless of how many concurrent callers exist. A single background thread performs the actual downstream health checks every 5 seconds, updating the cached value. This pattern — observed-replicated state — sacrifices 5 seconds of staleness for O(1) response time, which is the correct trade-off for load balancer health checks that typically use 10-30 second intervals.
+
+**Q: A service uses `synchronized` blocks that are nested — `synchronized(A) { synchronized(B) { ... } }`. Another method has `synchronized(B) { synchronized(A) { ... } }`. Occasionally the service hangs. What is happening and how do you fix it?**
+
+A: This is a classic deadlock — thread 1 holds lock A and waits for lock B; thread 2 holds lock B and waits for lock A — a cycle that can never resolve:
+```java
+// Thread 1                         // Thread 2
+synchronized(lockA) {               synchronized(lockB) {
+    synchronized(lockB) {               synchronized(lockA) {
+        // ...                           // ...
+    }                               }
+}                                   }
+```
+Three fixes exist: enforce consistent lock ordering across the entire codebase (always acquire A then B); use `ReentrantLock.tryLock()` with a timeout so the lock acquisition backs off rather than blocking forever; or use higher-level abstractions like `StampedLock` or `Phaser` that eliminate the need for manual lock ordering. For prevention, use `ThreadMXBean.findDeadlockedThreads()` in automated tests to detect lock cycles before they reach production.
 
 ---
 
 ## Interview Questions
 
-1. **What is the Java Memory Model (JMM) and why is it important?**
-   A: The JMM defines how threads interact through memory and when one thread's changes are visible to others. It specifies happens-before rules: synchronized unlock before subsequent lock, volatile write before subsequent read, thread start/join, and transitivity. Without the JMM, compiler and CPU reorderings could make unsynchronized access unpredictable. The JMM guarantees thread safety when proper synchronization is used.
+**What is the Java Memory Model (JMM) and why is it important?** The JMM defines the formal rules for how threads interact through memory and when one thread's changes are visible to others. It establishes happens-before relationships including program order, monitor lock unlock before subsequent lock, volatile write before subsequent read, thread start, thread join, and transitivity. Without the JMM, compiler and CPU reorderings would make unsynchronized concurrent access unpredictable and platform-dependent.
 
-2. **What is the difference between `synchronized` and `ReentrantLock`?**
-   A: `synchronized` is simpler — automatic lock release, no manual unlock. `ReentrantLock` offers: `tryLock()` with timeout, fair/unfair fairness, `Condition` for wait/notify, interruptible locking, and ability to check if held. Performance is similar (both are JVM-optimized). Use `synchronized` by default; use `ReentrantLock` when you need timeout, fairness, or multiple condition variables.
+**What is the difference between `synchronized` and `ReentrantLock`?** `synchronized` is simpler — it automatically releases the lock when the block exits and is JVM-optimized with biased locking. `ReentrantLock` offers advanced features: `tryLock()` with timeout, fair/unfair modes, `Condition` for multiple wait sets, interruptible locking, and the ability to query lock state. Performance is similar. Use `synchronized` by default; use `ReentrantLock` when you need timeout-based locking, fairness guarantees, or multiple condition variables.
 
-3. **What is `volatile` and what does it guarantee?**
-   A: `volatile` guarantees visibility — a write to a volatile variable happens-before any subsequent read of that variable. It prevents CPU caching and instruction reordering. `volatile` does NOT guarantee atomicity — `volatile int count; count++` is still a read-modify-write race condition. Use `volatile` for flags and status variables where atomic compound actions aren't needed. For counters, use `AtomicInteger` or `LongAdder`.
+**What is `volatile` and what does it guarantee?** `volatile` guarantees visibility: every write to a `volatile` field happens-before every subsequent read of that field across all threads, preventing CPU caching and instruction reordering. It does NOT guarantee atomicity — `volatile int count; count++` is still a read-modify-write race condition. Use `volatile` for flags and status variables. For atomic counters, use `AtomicInteger` or `LongAdder`.
 
-4. **What is CAS (Compare-And-Swap) and how does it work?**
-   A: CAS is a CPU-level instruction that atomically compares a memory location with an expected value and updates it to a new value if the comparison succeeds. It returns success/failure. Java exposes CAS via `AtomicInteger`, `AtomicReference`, etc. CAS is lock-free — no OS thread blocking. Under high contention, CAS retries (spin-loop) can burn CPU. Java 9+ provides `VarHandle` for direct CAS operations on any field.
+**What is CAS (Compare-And-Swap) and how does it work?** CAS is a CPU-level instruction that atomically reads a memory location, compares it with an expected value, and writes a new value only if the comparison succeeds. It returns a boolean indicating success. Java exposes CAS through `AtomicInteger`, `AtomicLong`, `AtomicReference`, and `VarHandle` (Java 9+). CAS is lock-free — it never parks the OS thread — but under high contention, repeated CAS failures cause spin-loop CPU usage.
 
-5. **What is the difference between `CountDownLatch` and `CyclicBarrier`?**
-   A: `CountDownLatch` is one-shot — it counts down to zero and cannot be reset. Threads `await()` until the count reaches zero. `CyclicBarrier` is reusable — N threads `await()` until all N arrive, then they all proceed and the barrier resets. Use `CountDownLatch` for one-time synchronization (e.g., wait for services to start). Use `CyclicBarrier` for multi-phase computations (e.g., iterative algorithm convergence).
+**What is the difference between `CountDownLatch` and `CyclicBarrier`?** `CountDownLatch` is one-shot — it counts down from N to zero and cannot be reset. Threads await until the count reaches zero. `CyclicBarrier` is reusable — N threads await until all N arrive, then they all proceed and the barrier automatically resets. Use `CountDownLatch` for one-time synchronization; use `CyclicBarrier` for multi-phase parallel computations.
 
-6. **What is a `CompletableFuture` and how does it differ from a `Future`?**
-   A: `Future` (Java 5) represents an async result with blocking `get()` — no composition, no callbacks. `CompletableFuture` (Java 8) supports: non-blocking callbacks (`thenApply`, `thenAccept`), composition (`thenCompose`, `thenCombine`), error handling (`exceptionally`, `handle`), timeouts (`orTimeout`), and combining multiple futures (`allOf`, `anyOf`). Use `CompletableFuture` for async pipelines; use `Future` only when interfacing with legacy `ExecutorService.submit()`.
+**What is a `CompletableFuture` and how does it differ from a `Future`?** `Future` (Java 5) represents an asynchronous result with only a blocking `get()` — no composition, no callbacks. `CompletableFuture` (Java 8) supports non-blocking callbacks (`thenApply`, `thenAccept`), composition (`thenCompose`, `thenCombine`), error handling (`exceptionally`, `handle`), timeouts (`orTimeout`), and combining multiple futures (`allOf`, `anyOf`). Use `CompletableFuture` for async pipelines; use `Future` only when interfacing with legacy `ExecutorService.submit()`.
 
-7. **What is thread starvation and how do you prevent it?**
-   A: Thread starvation occurs when a thread never gets CPU time to make progress. Causes: thread priority misuse, unfair locks, CPU-bound threads monopolizing cores, and bounded thread pools rejecting tasks. Prevention: use fair locks (`new ReentrantLock(true)`), avoid thread priority changes, size thread pools appropriately, use work-stealing (`ForkJoinPool`), and add timeouts to all blocking operations.
+**What is thread starvation and how do you prevent it?** Thread starvation occurs when a thread never gets CPU time to make progress, typically from priority inversion, unfair lock acquisition, or bounded thread pools that cannot accommodate all submitter threads. Prevention strategies include using fair locks (`new ReentrantLock(true)`), avoiding thread priority changes, sizing thread pools appropriately with profiling, using `ForkJoinPool` for work-stealing, and adding timeouts to all blocking operations.
 
-8. **What is the ABA problem in CAS and how do you solve it?**
-   A: ABA occurs when a value changes A → B → A, and CAS doesn't detect the change (it sees A matches the expected A). This can corrupt data structures like lock-free stacks. Solutions: use `AtomicStampedReference` or `AtomicMarkableReference` which pair the reference with a version stamp. The stamp is incremented on every write, so even if the reference is the same, the stamp differs.
+**What is the ABA problem in CAS and how do you solve it?** The ABA problem occurs when a value changes from A to B and back to A between a CAS read and write — CAS sees the expected A, succeeds, but the data structure may be in an unexpected state. This is critical in lock-free data structures like stacks. Solutions: `AtomicStampedReference` pairs the reference with an integer stamp incremented on every write, and `AtomicMarkableReference` pairs it with a boolean mark.
 
-9. **What is the difference between `submit()` and `execute()` in ExecutorService?**
-   A: `execute(Runnable)` returns void — fire-and-forget, no result or exception tracking. `submit(Runnable)` returns `Future<?>` — allows checking completion and catching exceptions via `future.get()`. `submit(Callable<T>)` returns `Future<T>` — the callable returns a result. Use `execute()` for fire-and-forget tasks; use `submit()` when you need the result or exception handling. Exceptions from `execute()` go to the uncaught exception handler; exceptions from `submit()` are stored in the Future.
+**What is the difference between `submit()` and `execute()` in ExecutorService?** `execute(Runnable)` returns void — fire-and-forget with no result or exception tracking. `submit(Runnable)` returns `Future<?>` allowing completion checking and exception capture via `future.get()`. `submit(Callable<T>)` returns `Future<T>` with the callable's return value. Exceptions from `execute()` go to the uncaught exception handler; exceptions from `submit()` are stored in the `Future`. Use `execute()` for fire-and-forget; use `submit()` when you need the result or error handling.
 
-10. **What is the difference between `shutdown()` and `shutdownNow()` in ExecutorService?**
-    A: `shutdown()` prevents new tasks from being submitted but allows already-submitted tasks to complete. Returns gracefully. `shutdownNow()` attempts to stop all actively executing tasks (sends `interrupt()`) and returns a list of queued (not yet started) tasks. Use `shutdown()` for normal shutdown; use `shutdownNow()` when you need to stop quickly (e.g., application crash). Best practice: `shutdown()` → `awaitTermination(timeout)` → `shutdownNow()` → `awaitTermination(timeout)`.
+**What is the difference between `shutdown()` and `shutdownNow()` in ExecutorService?** `shutdown()` prevents new task submission but allows already-submitted tasks to complete normally. `shutdownNow()` interrupts actively executing tasks and returns the list of queued (not yet started) tasks. The best practice pattern is: `shutdown()`, then `awaitTermination(timeout)`, then if not terminated, `shutdownNow()`, then `awaitTermination(timeout)` again for the forced shutdown.
 
 ---
 
 ## Developer Recommendations
 
-- **Prefer `synchronized` over `ReentrantLock` unless you need advanced features** — `synchronized` is simpler (no manual unlock), JVM-optimized (biased locking, lock coarsening), and less error-prone. Use `ReentrantLock` only when you need `tryLock()` with timeout, fairness, `Condition` variables, or interruptible locking. The `synchronized` block is the default choice for 90% of concurrency needs.
+Prefer `synchronized` over `ReentrantLock` unless you specifically need advanced features like `tryLock()` with timeout, fairness, `Condition` variables, or interruptible locking. `synchronized` is simpler (no manual unlock required), JVM-optimized with biased locking and lock coarsening, and less error-prone — you cannot forget to unlock. For 90% of concurrency needs, `synchronized` is the correct choice.
 
-- **Use `LongAdder` over `AtomicLong` for high-contention counters** — `AtomicLong` uses CAS which causes cache line bouncing under contention — every thread's CAS invalidates other cores' cache lines. `LongAdder` uses cell striping: each thread updates a random cell with zero contention. Writes scale with the number of cores. Reads (`.sum()`) are slower (sum all cells) — use `AtomicLong` for read-heavy counters and `LongAdder` for write-heavy counters.
+Use `LongAdder` over `AtomicLong` for write-heavy counters where the sum is read infrequently. Under high contention, `AtomicLong` causes cache line bouncing as each CAS invalidates the line on all other cores. `LongAdder` distributes updates across multiple cells with zero contention — each thread updates a random cell. This makes writes scale with the number of cores. Use `AtomicLong` for read-heavy counters where `sum()` is called frequently, because `LongAdder.sum()` must accumulate all cells and is O(n).
 
-- **Always use `ConcurrentHashMap` for shared maps** — `HashMap` in concurrent access causes infinite loops (JDK 7 resize), data loss, and `ConcurrentModificationException`. `ConcurrentHashMap` provides lock-free reads and per-bucket synchronization for writes. Use `computeIfAbsent()` for atomic lazy initialization — the function runs at most once per key even with concurrent callers.
+Always use `ConcurrentHashMap` for maps accessed by multiple threads. A `HashMap` used concurrently can cause infinite loops during resize (JDK 7), data loss, and `ConcurrentModificationException`. `ConcurrentHashMap` provides lock-free reads and per-bucket synchronization for writes. Use `computeIfAbsent()` for atomic lazy initialization — the mapping function runs at most once per key even with thousands of concurrent callers. Avoid `putIfAbsent()` followed by `get()` which is not atomic.
 
-- **Use `Semaphore` to limit access to bounded resources, not thread pools** — A semaphore controls access count: `semaphore.acquire()` before using a resource, `release()` after. Unlike thread pools which limit threads, semaphores limit concurrent operations regardless of thread count. Use semaphores for connection pools, file handles, or rate-limited API calls. Always release in `finally` block to prevent leaks.
+Use `Semaphore` to limit access to bounded resources like database connections, file handles, or rate-limited API calls. Unlike thread pools which limit threads, semaphores limit concurrent operations regardless of thread count. Always call `release()` in a `finally` block to prevent permit leaks.
 
-- **Always clear `ThreadLocal` in finally blocks when using thread pools** — Thread pool threads are reused. A `ThreadLocal` set during one request persists for the next request on the same thread, causing context leakage. Always clear: `try { ... } finally { contextHolder.remove(); }`. For async callbacks, capture context before submitting and restore in the callback using `CompletableFuture` with context propagation.
+Always clear `ThreadLocal` values in `finally` blocks when using thread pools because threads are reused. A `ThreadLocal` set during one request persists for the next request on the same thread, causing context leakage that is extremely hard to debug. The pattern is `try { ... } finally { contextHolder.remove(); }`.
 
-- **Add timeouts to all blocking operations** — `future.get()`, `queue.take()`, `latch.await()`, `lock.tryLock()`, `completableFuture.join()` can block indefinitely. Always use the overloaded version with a timeout: `future.get(5, SECONDS)`. For `CompletableFuture`, use `.orTimeout(5, SECONDS)`. If timeout expires, clean up (cancel futures, interrupt threads) to prevent resource leaks.
+Add timeouts to all blocking operations — `future.get()`, `queue.take()`, `latch.await()`, `lock.tryLock()`, and `completableFuture.join()` can all block indefinitely. Always use the timeout overload: `future.get(5, SECONDS)`. For `CompletableFuture`, use `.orTimeout(5, SECONDS)`. When a timeout expires, clean up by cancelling futures and interrupting threads.
 
-- **Use `StampedLock` for read-heavy, write-rare scenarios** — `ReentrantReadWriteLock` causes writer starvation under high read load — the writer may wait indefinitely while readers keep acquiring the read lock. `StampedLock` with optimistic reads (`tryOptimisticRead()`) doesn't block writers at all. If a write occurs during an optimistic read, validate returns false and you fall back to a regular read lock. This gives better throughput for read-mostly workloads.
+Use `StampedLock` for read-mostly workloads where `ReadWriteLock` causes writer starvation. `StampedLock` with `tryOptimisticRead()` never blocks writers — if a writer arrives during an optimistic read, the stamp validation fails and the read falls back to a regular read lock. This gives superior throughput for read-heavy data structures like configuration registries and lookup tables.

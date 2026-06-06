@@ -6,147 +6,139 @@
 
 **Spring Boot Async Processing** enables methods to run in a separate thread, returning control to the caller immediately. It is built on Spring's `@Async` annotation and `@EnableAsync` configuration, and is ideal for non-blocking operations like email sending, report generation, and notification dispatch.
 
-### Key Concepts:
+### `@Async` Annotation
 
-1. **`@Async` Annotation**:
+Methods annotated with `@Async` execute in a separate thread. The caller returns immediately without waiting for the method to complete:
 
-   Methods annotated with `@Async` execute in a separate thread. The caller returns immediately without waiting for the method to complete:
+```java
+@EnableAsync
+@SpringBootApplication
+public class Application {}
 
-   ```java
-   @EnableAsync
-   @SpringBootApplication
-   public class Application {}
+@Service
+public class EmailService {
 
-   @Service
-   public class EmailService {
+    @Async
+    public void sendEmail(String to, String body) {
+        // Runs in a separate thread
+        // Caller returns immediately
+        try {
+            Thread.sleep(2000); // Simulate email sending
+            log.info("Email sent to {}", to);
+        } catch (Exception e) {
+            log.error("Failed to send email", e);
+        }
+    }
 
-       @Async
-       public void sendEmail(String to, String body) {
-           // Runs in a separate thread
-           // Caller returns immediately
-           try {
-               Thread.sleep(2000); // Simulate email sending
-               log.info("Email sent to {}", to);
-           } catch (Exception e) {
-               log.error("Failed to send email", e);
-           }
-       }
+    @Async
+    public CompletableFuture<SendResult> sendEmailWithResult(String to, String body) {
+        // Returns a Future — caller can check result later
+        return CompletableFuture.completedFuture(new SendResult(to, true));
+    }
+}
+```
 
-       @Async
-       public CompletableFuture<SendResult> sendEmailWithResult(String to, String body) {
-           // Returns a Future — caller can check result later
-           return CompletableFuture.completedFuture(new SendResult(to, true));
-       }
-   }
-   ```
+### Return Types for `@Async`
 
-2. **Return Types for `@Async`**:
+- **`void`** — Fire-and-forget. No way to check result or exception. Handle exceptions internally or configure `AsyncUncaughtExceptionHandler`.
+- **`CompletableFuture<T>`** — Returns a future that the caller can use to get the result or exception later. Supports composition with `thenApply`, `exceptionally`, and `allOf`.
+- **`Future<T>`** — Older interface, less flexible than `CompletableFuture`. Avoid in new code.
+- **`ListenableFuture<T>`** — Deprecated since Spring 6. Use `CompletableFuture` instead.
 
-   - **`void`** — Fire-and-forget. No way to check result or exception. Handle exceptions internally.
-   - **`CompletableFuture<T>`** — Returns a future that the caller can use to get the result or exception later.
-   - **`Future<T>`** — Older interface, less flexible than `CompletableFuture`.
-   - **`ListenableFuture<T>`** — Deprecated since Spring 6. Use `CompletableFuture`.
+### Thread Pool Configuration
 
-3. **Thread Pool Configuration**:
+By default, Spring uses `SimpleAsyncTaskExecutor` (creates a new thread per task — not for production). Always configure a proper thread pool:
 
-   By default, Spring uses `SimpleAsyncTaskExecutor` (creates a new thread per task — not for production). Always configure a proper thread pool:
+```java
+@Configuration
+@EnableAsync
+public class AsyncConfig implements AsyncConfigurer {
 
-   ```java
-   @Configuration
-   @EnableAsync
-   public class AsyncConfig implements AsyncConfigurer {
+    @Override
+    public Executor getAsyncExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(5);
+        executor.setMaxPoolSize(10);
+        executor.setQueueCapacity(100);
+        executor.setThreadNamePrefix("async-");
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(30);
+        executor.setRejectedExecutionHandler(new CallerRunsPolicy());
+        executor.initialize();
+        return executor;
+    }
 
-       @Override
-       public Executor getAsyncExecutor() {
-           ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-           executor.setCorePoolSize(5);
-           executor.setMaxPoolSize(10);
-           executor.setQueueCapacity(100);
-           executor.setThreadNamePrefix("async-");
-           executor.setWaitForTasksToCompleteOnShutdown(true);
-           executor.setAwaitTerminationSeconds(30);
-           executor.setRejectedExecutionHandler(new CallerRunsPolicy());
-           executor.initialize();
-           return executor;
-       }
-
-       @Override
-       public AsyncUncaughtExceptionHandler getAsyncUncaughtExceptionHandler() {
-           return (ex, method, params) ->
-               log.error("Async method {} threw exception", method.getName(), ex);
-       }
-   }
-   ```
+    @Override
+    public AsyncUncaughtExceptionHandler getAsyncUncaughtExceptionHandler() {
+        return (ex, method, params) ->
+            log.error("Async method {} threw exception", method.getName(), ex);
+    }
+}
+```
 
 ---
 
 ## Core Concepts
 
-### 1. How `@Async` Works Under the Hood
+### How `@Async` Works Under the Hood
 
-   When a method annotated with `@Async` is called:
-   - Spring's AOP proxy intercepts the call.
-   - The proxy submits the method execution to the configured `TaskExecutor`.
-   - The method runs in a separate thread from the thread pool.
-   - The caller receives a `CompletableFuture` (if the method returns one) or `void` immediately.
+When a method annotated with `@Async` is called:
+- Spring's AOP proxy intercepts the call.
+- The proxy submits the method execution to the configured `TaskExecutor`.
+- The method runs in a separate thread from the thread pool.
+- The caller receives a `CompletableFuture` (if the method returns one) or `void` immediately.
 
-### 2. Thread Pool Executor Configuration
+### Thread Pool Executor Configuration
 
-   Key parameters for `ThreadPoolTaskExecutor`:
+Key parameters for `ThreadPoolTaskExecutor`:
 
-   - **`corePoolSize`** — Minimum number of threads kept alive in the pool.
-   - **`maxPoolSize`** — Maximum number of threads the pool can grow to.
-   - **`queueCapacity`** — Number of tasks that can be queued before new threads are created.
-   - **`keepAliveSeconds`** — Time excess idle threads wait before terminating.
-   - **`threadNamePrefix`** — Prefix for thread names (useful for debugging).
-   - **`rejectedExecutionHandler`** — Policy when the pool and queue are full:
-     - `CallerRunsPolicy` — The caller thread executes the task (backpressure).
-     - `AbortPolicy` — Throws `RejectedExecutionException` (default).
-     - `DiscardPolicy` — Silently discards the task.
-     - `DiscardOldestPolicy` — Discards the oldest queued task.
+- **`corePoolSize`** — Minimum number of threads kept alive in the pool.
+- **`maxPoolSize`** — Maximum number of threads the pool can grow to.
+- **`queueCapacity`** — Number of tasks that can be queued before new threads are created.
+- **`keepAliveSeconds`** — Time excess idle threads wait before terminating.
+- **`threadNamePrefix`** — Prefix for thread names (useful for debugging and monitoring).
+- **`rejectedExecutionHandler`** — Policy when the pool and queue are full:
+  - `CallerRunsPolicy` — The caller thread executes the task, providing natural backpressure.
+  - `AbortPolicy` — Throws `RejectedExecutionException` (default).
+  - `DiscardPolicy` — Silently discards the task.
+  - `DiscardOldestPolicy` — Discards the oldest queued task.
 
-### 3. Exception Handling
+### Exception Handling
 
-   For `void` methods, exceptions in async methods are not propagated to the caller. Handle them using `AsyncUncaughtExceptionHandler`:
+For `void` methods, exceptions in async methods are not propagated to the caller. Handle them using `AsyncUncaughtExceptionHandler`:
 
-   ```java
-   @Override
-   public AsyncUncaughtExceptionHandler getAsyncUncaughtExceptionHandler() {
-       return (ex, method, params) -> {
-           log.error("Async method {} failed with params {}",
-               method.getName(), params, ex);
-           // Send alert, retry, etc.
-       };
-   }
-   ```
+```java
+@Override
+public AsyncUncaughtExceptionHandler getAsyncUncaughtExceptionHandler() {
+    return (ex, method, params) -> {
+        log.error("Async method {} failed with params {}",
+            method.getName(), params, ex);
+        // Send alert, retry, etc.
+    };
+}
+```
 
-   For `CompletableFuture` methods, exceptions are captured in the future:
+For `CompletableFuture` methods, exceptions are captured in the future:
 
-   ```java
-   CompletableFuture<Result> future = emailService.sendEmailWithResult(to, body);
-   future.exceptionally(ex -> {
-       log.error("Async email failed", ex);
-       return new SendResult(to, false);
-   });
-   ```
+```java
+CompletableFuture<Result> future = emailService.sendEmailWithResult(to, body);
+future.exceptionally(ex -> {
+    log.error("Async email failed", ex);
+    return new SendResult(to, false);
+});
+```
 
 ---
 
 ## Common Mistakes
 
-1. **Self-invocation bypassing the proxy** — Calling an `@Async` method from within the same class executes synchronously. Extract to a separate bean.
-
-2. **`@Async` on private methods** — Ignored because the proxy cannot intercept private methods. Only use on public methods.
-
-3. **No exception handler for void methods** — Exceptions are silently swallowed. Always configure `AsyncUncaughtExceptionHandler`.
-
-4. **Default thread pool (unbounded)** — `SimpleAsyncTaskExecutor` creates a new thread for every call, leading to thread leaks and OOM. Always configure a proper `ThreadPoolTaskExecutor`.
-
-5. **Forgetting `@EnableAsync`** — Without it, `@Async` methods execute synchronously.
-
-6. **Not handling context propagation** — Security context, transaction context, and MDC are not propagated to the async thread by default. Use `TaskDecorator` or `HystrixContextWrapper`.
-
-7. **Returning `void` without error handling inside the method** — Any exception inside a `void` async method is lost unless caught internally. Always wrap the body in try-catch.
+- **Self-invocation bypassing the proxy** — Calling an `@Async` method from within the same class executes synchronously because the AOP proxy is not involved. Extract to a separate bean for async behavior to work.
+- **`@Async` on private methods** — Ignored because the proxy cannot intercept private methods. Only use `@Async` on public methods for the annotation to be effective.
+- **No exception handler for void methods** — Exceptions in void async methods are silently swallowed and completely lost. Always configure `AsyncUncaughtExceptionHandler` to catch and log failures.
+- **Default thread pool (unbounded)** — `SimpleAsyncTaskExecutor` creates a new thread for every call, leading to thread leaks and OOM under load. Always configure a proper `ThreadPoolTaskExecutor` for production.
+- **Forgetting `@EnableAsync`** — Without it, `@Async` methods execute synchronously in the caller's thread, negating the performance benefit entirely.
+- **Not handling context propagation** — Security context, transaction context, and MDC are not propagated to the async thread by default. Use `TaskDecorator` to capture and restore context across threads.
+- **Returning `void` without error handling inside the method** — Any exception inside a `void` async method is lost unless caught internally. Always wrap the method body in try-catch with proper logging and alerting.
 
 ---
 

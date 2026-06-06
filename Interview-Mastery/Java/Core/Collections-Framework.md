@@ -4,218 +4,81 @@
 
 ## Overview
 
-- **Definition:** The Java Collections Framework (JCF) is a unified architecture for storing, retrieving, manipulating, and communicating groups of objects. It provides interfaces like `List`, `Set`, `Map`, `Queue`, and `Deque`, along with their implementations and utility algorithms in the `Collections` class.
-
-- **Why It Exists:** Before JCF (Java 1.2), Java had `Vector`, `Hashtable`, `Stack`, and `Arrays` with inconsistent APIs and no common algorithms. JCF standardized everything with:
-  - **Interfaces** that separate contracts from implementations
-  - **Reusable algorithms** that work across all implementations
-  - **Interoperability** so all collections speak the same API language
-
-- **Core Interfaces:**
-  - **Collection** — root interface for List, Set, Queue
-  - **List** — ordered, allows duplicates, positional access
-  - **Set** — no duplicates, at most one null
-  - **Map** — key-value pairs, no duplicate keys
-  - **Queue** — for holding elements prior to processing (typically FIFO)
-  - **Deque** — double-ended queue, insert/remove at both ends
+- **Purpose** — The Java Collections Framework (JCF) provides a unified architecture for storing, retrieving, manipulating, and communicating groups of objects. It defines a hierarchy of interfaces like `List`, `Set`, `Map`, `Queue`, and `Deque` with battle-tested implementations and reusable algorithms in the `Collections` utility class.
+- **Design Principle** — JCF separates contracts from implementations, enabling polymorphism and interchangeability across the collection ecosystem. Code written against an interface can swap implementations (e.g., `ArrayList` to `LinkedList`) without modifying a single line of application logic.
+- **History** — Before JCF was introduced in Java 1.2, developers worked with fragmented APIs (`Vector`, `Hashtable`, `Stack`, raw arrays) with inconsistent naming and no common algorithmic support. The framework solved these problems by introducing standard interfaces and the `Iterable` interface for seamless integration with the for-each loop and Stream API.
 
 ---
 
-## Collection Hierarchy
+## Core Concepts
 
-```
-                      Iterable
-                          |
-                     Collection
-                    /    |    \
-                 List   Set   Queue
-                 / \   / \     |
-          ArrayList  HashSet  Deque
-          LinkedList TreeSet  ArrayDeque
-                    LinkedHashSet
+- **Root Interface** — The JCF is rooted at the `Iterable` interface, which provides the `iterator()` method and enables the for-each loop. `Collection` extends `Iterable` and serves as the root interface for `List`, `Set`, and `Queue`.
+- **List** — Represents an ordered, index-based sequence that allows duplicates and provides positional access. `Set` prohibits duplicate elements and enforces uniqueness through the `equals()` and `hashCode()` contract.
+- **Queue and Deque** — Manage elements prior to processing, typically in FIFO order. `Deque` adds support for insertion and removal at both ends.
+- **Map** — Sits separately from the `Collection` hierarchy (it does not extend `Collection`) and stores key-value pairs with unique keys.
 
-                     Map
-                   /  |  \
-              HashMap TreeMap
-           LinkedHashMap
-```
+### List Interface
 
----
+- **ArrayList** — The most commonly used `List` implementation, backed by a resizable array that grows by 50% when full (`oldCapacity + (oldCapacity >> 1)`), starting from a default capacity of 10. It offers O(1) random access via `get()`, O(1) amortized `add()` at the end, but O(n) cost for insertions or removals in the middle due to element shifting. It benefits from CPU cache locality and contiguous memory, with modern JIT compilers heavily optimizing array access.
+- **LinkedList** — Backed by a doubly-linked list where each element is a `Node` object with `prev` and `next` pointers, adding approximately 40 bytes of overhead per element. It offers O(1) insertions and deletions at either end or the middle when using a `ListIterator`, but O(n) for positional access. `LinkedList` implements both `List` and `Deque`, making it usable as a queue or stack.
+- **Usage Guidance** — `ArrayList` is the correct default for nearly all use cases due to CPU cache locality and contiguous memory. `LinkedList` should only be considered when doing frequent insertions and deletions at the beginning of the list and `ArrayDeque` cannot be used.
 
-## List Interface
+### Set Interface
 
-- **Definition:** An ordered collection (sequence) that allows duplicates and provides positional access.
+- **HashSet** — Backed by a `HashMap`, offering O(1) average time complexity for `add()`, `remove()`, and `contains()` with no guarantees about iteration order. It relies on proper `hashCode()` and `equals()` implementations — failure to override both correctly is one of the most common bugs in Java.
+- **LinkedHashSet** — Extends `HashSet` by maintaining a doubly-linked list running through all entries, preserving insertion order with only slightly worse performance than `HashSet`.
+- **TreeSet** — Backed by a `TreeMap` (a Red-Black tree), maintaining elements in sorted order according to natural ordering or a provided `Comparator`. All operations are O(log n), and `TreeSet` does not allow null values.
+- **Selection Criteria** — Choose `HashSet` for fastest performance with no ordering, `LinkedHashSet` for insertion-order iteration, and `TreeSet` for sorted iteration.
 
-- **ArrayList:**
-  - Backed by a resizable array
-  - **Get:** O(1), **Add (end):** O(1) amortized, **Add (mid):** O(n), **Remove:** O(n)
-  - Grows by 1.5x when full (`oldCapacity + (oldCapacity >> 1)`)
-  - Default initial capacity is 10
-  - Good for: random access, iteration, adding/removing at end
+### Map Interface
 
-- **LinkedList:**
-  - Backed by a doubly-linked list
-  - **Get:** O(n), **Add (end):** O(1), **Add (mid):** O(1), **Remove:** O(1)
-  - Each element is a Node object with prev/next pointers (~40 bytes per element overhead)
-  - Implements both List and Deque
-  - Good for: frequent insert/delete at head or middle, implementing queue/stack
+- **HashMap** — The workhorse implementation, backed by an array of buckets (`Node<K,V>[]`) with a default initial capacity of 16 and a load factor of 0.75. It provides O(1) average time for `get()` and `put()`, with performance degrading only under hash collisions.
+- **HashMap Optimization (Java 8+)** — Buckets exceeding 8 entries are treeified into balanced Red-Black trees (provided the table has at least 64 buckets), improving worst-case from O(n) to O(log n). This prevents hash-collision DoS attacks that affected earlier versions.
+- **LinkedHashMap** — Extends `HashMap` with a doubly-linked list running through all entries, supporting both insertion-order and access-order iteration. Access-order mode is the foundation for LRU cache implementations.
+- **TreeMap** — Uses a Red-Black tree internally, maintaining keys in sorted order with O(log n) operations. It is ideal for range queries, prefix scans, and navigational operations.
+- **EnumMap** — A specialized Map implementation for enum keys that uses a plain array indexed by ordinal. It delivers 2-3x better performance than `HashMap` with zero memory waste.
 
-```java
-List<String> list = new ArrayList<>();
-list.add("Apple");
-list.add("Banana");
-list.add(0, "First");         // Insert at position
-String fruit = list.get(1);   // Random access O(1)
-list.remove(0);               // Remove by index
-```
+### Queue and Deque
 
----
+- **Queue Operations** — Provides two sets of operations: one set throws exceptions on failure (`add()`, `remove()`, `element()`), and the other returns special values (`offer()` returns false, `poll()` returns null, `peek()` returns null).
+- **Deque** — Extends `Queue` to support insertion and removal at both ends with methods like `addFirst()`, `addLast()`, `offerFirst()`, `offerLast()`, `pollFirst()`, and `pollLast()`.
+- **ArrayDeque** — The recommended implementation for both stack and queue use cases. It is backed by a resizable array, does not allow null elements, has no per-node memory overhead, and offers better performance than `LinkedList` due to CPU cache locality.
+- **PriorityQueue** — A heap-based unbounded queue that orders elements according to natural ordering or a `Comparator`. It provides O(log n) insertion and O(1) retrieval of the head element, but iterating does not produce elements in sorted order — only `poll()` returns elements in priority order.
 
-## Set Interface
+### Concurrent Collections
 
-- **Definition:** A collection with no duplicates. At most one null element.
+- **ConcurrentHashMap** — Replaces `Collections.synchronizedMap()` with per-bucket locking (JDK 8+), CAS-based initialization, and lock-free reads. Multiple threads can read and write different buckets simultaneously without contention.
+- **CopyOnWriteArrayList** — Creates a fresh copy of the underlying array on every mutative operation, making reads lock-free. It is ideal for read-heavy, write-rare scenarios like event listener registries.
+- **ConcurrentLinkedQueue** — A lock-free, unbounded queue that uses CAS operations internally. It is suitable for high-throughput producer-consumer patterns.
+- **LinkedBlockingQueue** — A bounded blocking queue that supports the producer-consumer pattern with backpressure. Threads block when the queue is full or empty, using internal `Condition` objects.
+- **ConcurrentSkipListMap** — Provides a sorted, concurrent navigable map using a skip-list data structure. It offers O(log n) operations with probabilistic balancing and no locking or blocking for reads.
 
-- **HashSet:**
-  - Backed by a HashMap
-  - Unordered, O(1) average for add/remove/contains
-  - Requires proper `hashCode()` and `equals()` implementation
+### Collections Utility Class
 
-- **LinkedHashSet:**
-  - Extends HashSet, maintains insertion order via linked list
-  - Slightly slower than HashSet, but predictable iteration order
-
-- **TreeSet:**
-  - Backed by a TreeMap (Red-Black tree)
-  - Sorted order (natural or Comparator), O(log n) operations
-  - Does not allow null values
-
-```java
-Set<String> hashSet = new HashSet<>();
-hashSet.add("Java");
-hashSet.add("Python");
-hashSet.add("Java");           // Duplicate — not added
-
-Set<String> treeSet = new TreeSet<>();
-treeSet.add("C");
-treeSet.add("A");
-treeSet.add("B");              // Iterates as A, B, C (sorted)
-```
-
----
-
-## Map Interface
-
-- **Definition:** An object that maps keys to values. No duplicate keys.
-
-- **HashMap:**
-  - Backed by an array of buckets (Node<K,V>[])
-  - Default initial capacity: 16, load factor: 0.75
-  - O(1) average for get/put
-  - Treeifies buckets when they reach 8 nodes (and table >= 64)
-
-- **LinkedHashMap:**
-  - Maintains insertion order or access order (for LRU caches)
-  - Slightly more memory than HashMap
-
-- **TreeMap:**
-  - Red-Black tree implementation
-  - Sorted by keys (natural order or Comparator)
-  - O(log n) for get/put
-
-```java
-Map<String, Integer> scores = new HashMap<>();
-scores.put("Alice", 95);
-scores.put("Bob", 87);
-int score = scores.get("Alice");        // 95
-for (Map.Entry<String, Integer> entry : scores.entrySet()) {
-    System.out.println(entry.getKey() + ": " + entry.getValue());
-}
-```
-
----
-
-## Queue and Deque
-
-- **Queue:** Typically FIFO order. Operations:
-  - `add(e)` / `offer(e)` — insert (offer returns false if full)
-  - `remove()` / `poll()` — retrieve and remove head (poll returns null if empty)
-  - `element()` / `peek()` — retrieve head without removing (peek returns null if empty)
-
-- **Deque:** Double-ended queue. Operations at both ends:
-  - `addFirst(e)`, `addLast(e)` — throws if full
-  - `offerFirst(e)`, `offerLast(e)` — returns boolean
-  - `removeFirst()`, `removeLast()` — throws if empty
-  - `pollFirst()`, `pollLast()` — returns null if empty
-
-- **ArrayDeque:** Recommended implementation for both stack and queue. Faster than LinkedList, no nulls allowed, resizable array.
-
-```java
-Queue<String> queue = new ArrayDeque<>();
-queue.offer("First");
-queue.offer("Second");
-String head = queue.poll();    // "First"
-
-Deque<String> stack = new ArrayDeque<>();
-stack.push("Bottom");
-stack.push("Top");
-String top = stack.pop();      // "Top"
-```
-
----
-
-## Concurrent Collections
-
-- **Definition:** Thread-safe collections from `java.util.concurrent` package designed for concurrent access.
-
-- **ConcurrentHashMap:** Per-bucket locking (JDK 8+), CAS for initialization, no null keys/values. Replaces synchronized HashMap.
-
-- **CopyOnWriteArrayList:** Every mutation creates a new copy of the array. Read operations are lock-free. Best for read-heavy, write-rare scenarios.
-
-- **ConcurrentLinkedQueue:** Lock-free queue using CAS operations. Unbounded, thread-safe.
-
-- **LinkedBlockingQueue:** Bounded blocking queue backed by linked nodes. Supports producer-consumer pattern with backpressure.
-
-- **ConcurrentSkipListMap:** Sorted concurrent map using skip-list data structure.
-
-```java
-Map<String, String> cache = new ConcurrentHashMap<>();
-cache.put("key", "value");
-String val = cache.get("key");  // Thread-safe without explicit synchronization
-```
-
----
-
-## Collections Utility Class
-
-- **Definition:** `java.util.Collections` provides static helper methods that operate on or return collections.
-
-- **Sorting and Searching:** `sort()`, `binarySearch()`, `reverse()`, `shuffle()`
-
-- **Synchronization Wrappers:** `synchronizedList()`, `synchronizedMap()`, etc.
-
-- **Unmodifiable Wrappers:** `unmodifiableList()`, `unmodifiableMap()`, etc.
-
-- **Factories:** `singletonList()`, `emptyList()`
-
-```java
-List<String> list = new ArrayList<>(List.of("C", "A", "B"));
-Collections.sort(list);                              // [A, B, C]
-List<String> readOnly = Collections.unmodifiableList(list);
-// readOnly.add("X");  // Throws UnsupportedOperationException
-```
+- **Sorting and Searching** — The `java.util.Collections` class provides `sort()`, `binarySearch()`, `reverse()`, `shuffle()`, `rotate()`, and `swap()` static helper methods.
+- **Synchronization Wrappers** — Methods like `synchronizedList()`, `synchronizedMap()`, and `synchronizedSet()` wrap any collection with coarse-grained synchronization, though these are largely replaced by `java.util.concurrent` alternatives.
+- **Unmodifiable Wrappers** — `unmodifiableList()`, `unmodifiableMap()`, and `unmodifiableSet()` create read-only views that throw `UnsupportedOperationException` on mutation attempts. The underlying collection can still change through its original reference.
+- **Factory Methods** — `singletonList()`, `emptyList()`, and `emptySet()` provide memory-efficient singletons for edge cases. Since Java 9, `List.of()`, `Set.of()`, and `Map.of()` create deeply immutable collections that are often more compact and efficient.
 
 ---
 
 ## Common Mistakes
 
-- **Modifying collection during iteration** — causes `ConcurrentModificationException`. Use `Iterator.remove()` or `Collection.removeIf()` instead.
-- **Mutable objects in HashSet** — if hash code changes after insertion, `contains()` fails. Use immutable keys.
-- **Not overriding equals/hashCode** — HashMap and HashSet won't work correctly. Override both consistently.
-- **LinkedList for most use cases** — ArrayList is better for 99% of list scenarios. LinkedList has high memory overhead.
-- **Synchronized wrapper instead of ConcurrentHashMap** — `Collections.synchronizedMap()` locks entire map. Use `ConcurrentHashMap`.
-- **HashMap without sizing** — default capacity 16 causes many resizes. Pre-size with `expectedSize / 0.75f + 1`.
-- **PriorityQueue iteration expecting sorted order** — PriorityQueue only guarantees head is correct on `poll()`. Don't iterate directly.
-- **Returning internal collection references** — callers can modify internals. Return `Collections.unmodifiableList()`.
+- **ConcurrentModificationException** — Modifying a collection directly while iterating over it throws `ConcurrentModificationException` because the iterator checks a `modCount` field on each `next()` call. Use the iterator's own `remove()` method or `Collection.removeIf()` (Java 8+) to remove elements during iteration. This mistake is especially insidious in multi-threaded code where one thread modifies a collection while another iterates.
+- **Mutable Keys in HashMap/HashSet** — Using mutable objects as keys causes hard-to-find bugs because if a key's `hashCode()` changes after insertion, the map loses track of that entry entirely — `get()` returns `null` even though the key is logically present. Always use immutable keys (`String`, `Integer`, `UUID`) or ensure `hashCode()` depends only on immutable fields.
+- **Inconsistent equals() and hashCode()** — Failing to override both `equals()` and `hashCode()` consistently breaks `HashMap`, `HashSet`, and `HashTable`. The contract states that if two objects are equal according to `equals()`, they must have the same hash code. Modern IDEs and `java.util.Objects` make generating correct implementations trivial.
+- **LinkedList as Default** — Choosing `LinkedList` as a default list implementation is a common anti-pattern with significant memory and performance costs. Each element requires a `Node` object (~40 bytes overhead), breaking CPU cache locality and increasing GC pressure. `ArrayList` operations at the end are O(1) amortized.
+- **synchronizedMap() vs ConcurrentHashMap** — Using `Collections.synchronizedMap()` instead of `ConcurrentHashMap` degrades concurrency by locking the entire map on every read and write. `ConcurrentHashMap` achieves scalability through per-bucket locking (Java 8+), lock-free reads via `volatile` semantics, and atomic compound operations like `computeIfAbsent()` and `merge()`.
+
+---
+
+## Design Considerations
+
+- **Access Patterns** — Random access patterns favor `ArrayList` for its O(1) positional `get()` and CPU cache line efficiency. Sequential access with frequent head insertions favors `ArrayDeque` or `LinkedList` depending on memory constraints.
+- **Collection Size** — For small collections (under 100 elements), algorithmic complexity is often irrelevant compared to memory overhead and allocation cost. The total number of elements matters greatly when selecting an implementation.
+- **Thread Safety Granularity** — Wrapping a `HashMap` with `synchronizedMap()` provides thread safety at the cost of serializing all access, acceptable only for low-contention scenarios. For high-concurrency environments, `ConcurrentHashMap` with per-bucket locking and lock-free reads is the correct choice. Thread-safe individual operations do not compose into thread-safe compound operations — use atomic methods like `compute()`.
+- **Memory Footprint** — `ArrayList` with 1 million `Integer` elements consumes roughly 4 MB while `LinkedList` consumes 40+ MB due to per-node object overhead. For numeric data, specialized primitive collections like `Int2ObjectOpenHashMap` (fastutil) can reduce memory by 50-70% compared to boxed `HashMap<Integer, V>`.
+- **Collection Sizing** — Starting with default capacities forces resizing multiple times — a `HashMap` growing to 100 entries undergoes resizes at 16, 32, 64, and 128, each requiring a full rehash. The correct initial capacity is `expectedSize / loadFactor + 1`. For `ArrayList`, simply initialize with `new ArrayList<>(expectedSize)`.
 
 ---
 
@@ -223,7 +86,7 @@ List<String> readOnly = Collections.unmodifiableList(list);
 
 ### Scenario 1: LRU Cache in a Web Application
 
-A web server needs to cache the last 1000 recently viewed product pages per user session. The cache must evict the least-recently-viewed product when it exceeds capacity.
+A web server needs to cache the last 1000 recently viewed product pages per user session. The cache must evict the least-recently-viewed product when it exceeds capacity, and every cache hit must refresh the access timestamp so hot items remain in the cache longer. The implementation must be efficient enough to handle hundreds of requests per second without introducing noticeable latency.
 
 ```java
 public class ProductCache<K, V> {
@@ -250,11 +113,11 @@ public class ProductCache<K, V> {
 }
 ```
 
-`LinkedHashMap` with access-order and `removeEldestEntry()` gives O(1) operations and automatic LRU eviction without external dependencies.
+`LinkedHashMap` with access-order enabled and `removeEldestEntry()` provides O(1) operations and automatic LRU eviction without requiring any external dependencies like Caffeine or Guava. The access order mode causes every `get()` and `put()` to reorder the internal linked list, moving the accessed entry to the tail. When `removeEldestEntry()` returns `true` (i.e., the map exceeds capacity), the eldest entry — the least-recently-accessed one at the head of the linked list — is automatically removed. This pattern is a textbook use of `LinkedHashMap` that interviewers frequently reference.
 
 ### Scenario 2: Priority-Based Task Scheduler
 
-A job scheduler processes tasks with different priorities. High-priority tasks must execute before low-priority ones, but tasks with the same priority are processed FIFO.
+A job scheduler processes tasks with different priorities. High-priority tasks must execute before low-priority ones, but tasks with the same priority must be processed in FIFO order to ensure fairness. The scheduler receives tasks from multiple concurrent producers and a single consumer thread drains them for execution. The collection must support efficient insertion and head removal without requiring full sorting.
 
 ```java
 public class PriorityTaskScheduler {
@@ -273,11 +136,11 @@ public class PriorityTaskScheduler {
 }
 ```
 
-`PriorityQueue` maintains the heap property so `poll()` always returns the highest-priority task. The FIFO tiebreaker ensures fairness among same-priority tasks.
+`PriorityQueue` maintains the heap property internally so `poll()` always returns the highest-priority task in O(log n) time. The composite comparator first orders by priority and then breaks ties by `enqueuedAt` timestamp, ensuring FIFO ordering within the same priority level. This approach avoids the O(n log n) cost of full sorting each time a task is submitted — instead, each insertion is O(log n) and each poll is O(log n), making it suitable for real-time scheduling. For concurrent access, this specific implementation would need to be wrapped with `PriorityBlockingQueue` or external synchronization.
 
 ### Scenario 3: High-Throughput Metrics Aggregator
 
-A metrics service receives 100K events/second from multiple threads. Each event has a metric name and value. The system aggregates (sum/count) metrics per minute.
+A metrics service receives 100K events per second from multiple threads. Each event carries a metric name (string) and a numeric value. The system must aggregate these values (sum and count) per metric and produce a snapshot every minute. The implementation must scale with the number of producer threads without introducing contention on the data structure itself.
 
 ```java
 public class MetricsAggregator {
@@ -298,90 +161,84 @@ public class MetricsAggregator {
 }
 ```
 
-`ConcurrentHashMap` with `LongAdder` values provides per-bucket locking (not global), allowing true concurrent writes. `computeIfAbsent` is atomic.
+`ConcurrentHashMap` with `LongAdder` values provides per-bucket locking for updates, allowing true concurrent writes from hundreds of threads without contention. The `LongAdder` class uses striped counters internally, reducing CAS contention under high write loads — it is specifically designed for scenarios where the sum is read less frequently than individual values are incremented. `computeIfAbsent` is atomic, ensuring that each metric name gets exactly one `LongAdder` instance created, even when multiple threads attempt to record the same new metric simultaneously. The `snapshotAndReset()` method uses `forEachKey(1, ...)` with a parallelism threshold of 1 to traverse the map, removes each entry atomically, and captures the aggregated sum in a snapshot map that can be sent to an external monitoring system.
 
 ---
 
 ## Scenario-Based Questions
 
-1. **Q: You are building an inventory management system where multiple warehouse workers scan items simultaneously. Each scan updates stock counts. How do you prevent lost updates without locking the entire inventory?**
-   A: Use `ConcurrentHashMap<String, AtomicInteger>` where each product's stock is an `AtomicInteger`. The key design: `ConcurrentHashMap` provides per-bucket concurrency, and `AtomicInteger` uses CAS for the increment — no global lock. For bulk operations, use `compute()` which is atomic per key: `inventory.compute("SKU-123", (k, v) -> v == null ? 0 : v.decrementAndGet())`. This avoids `put-if-absent` races and scales to hundreds of concurrent workers.
+**Q: You are building an inventory management system where multiple warehouse workers scan items simultaneously. Each scan updates stock counts. How do you prevent lost updates without locking the entire inventory?**
 
-2. **Q: You have a REST API that returns paginated results from a leaderboard. Users can view any page. The leaderboard changes every few seconds. How do you ensure that a user viewing page 2 doesn't see items they saw on page 1 (duplicates) or miss items (skips)?**
-   A: Use a `CopyOnWriteArrayList` for the leaderboard snapshot. Sort once per refresh interval, create a new list, and replace the reference. Pagination reads from a frozen snapshot — no concurrent modification. Each page request uses `subList(fromIndex, toIndex)` on the snapshot. The stale-snapshot problem is acceptable for a leaderboard that updates every 5-10 seconds. For stricter consistency, use `Collections.unmodifiableList()` and replace the entire list atomically with `volatile` reference.
+A: Use `ConcurrentHashMap<String, AtomicInteger>` where each product's stock is an `AtomicInteger` that uses compare-and-swap (CAS) at the hardware level, eliminating the need for synchronized blocks or locks during single-value updates. The `ConcurrentHashMap` provides per-bucket concurrency, meaning multiple workers scanning different products can proceed in parallel without contending on the same lock. For operations involving multiple steps, use the `compute()` method which is atomic per key: `inventory.compute("SKU-123", (k, v) -> v == null ? 0 : v.decrementAndGet())`. This approach avoids the put-if-absent race condition where two threads might read the same value and overwrite each other's update, and it scales to hundreds of concurrent workers. For batch operations like end-of-day reconciliation, the `forEachKey()` or `reduceKeys()` methods allow parallel bulk processing without external synchronization.
 
-3. **Q: You're designing a rate limiter that tracks requests per user in a 1-second sliding window. The system handles 50K QPS across 10K users. How do you store and expire the request timestamps efficiently?**
-   A: Use `ConcurrentHashMap<String, ArrayDeque<Long>>` with per-key locking via `compute()`. For each request: `timestamps.compute(userId, (k, deque) -> { if (deque == null) deque = new ArrayDeque<>(); long now = System.currentTimeMillis(); while (!deque.isEmpty() && deque.peekFirst() < now - 1000) deque.pollFirst(); if (deque.size() >= RATE_LIMIT) throw RateExceededException(); deque.addLast(now); return deque; })`. The `compute()` method is atomic per key, so concurrent requests for different users don't contend. For memory cleanup, a scheduled task removes stale user entries from the map.
+**Q: You have a REST API that returns paginated results from a leaderboard. Users can view any page. The leaderboard changes every few seconds. How do you ensure that a user viewing page 2 does not see items they saw on page 1 (duplicates) or miss items (skips)?**
 
-4. **Q: You are implementing an undo/redo system for a text editor. Users can perform thousands of operations. The undo stack must not grow unbounded. How do you design this with standard collections?**
-   A: Use `ArrayDeque` as a circular buffer bounded by capacity (e.g., 100 operations). For undo: `ArrayDeque<EditOperation> undoStack = new ArrayDeque<>(100)`. When pushing a new operation: if the stack is full, poll the oldest entry first (`if (undoStack.size() >= 100) undoStack.pollFirst()`), then push. The redo stack is a separate `ArrayDeque` that is cleared whenever a new operation is performed (invalidating the redo history). `ArrayDeque` is preferred over `LinkedList` because it has no per-node memory overhead and is faster for both ends.
+A: Use a `CopyOnWriteArrayList` for the leaderboard snapshot — sort it once per refresh interval and atomically replace the reference so that pagination always reads from a frozen snapshot without concurrent modification exceptions. Each page request uses `subList(fromIndex, toIndex)` on the current snapshot, and since the snapshot is immutable, users never see duplicates or experience shifting rankings mid-pagination that would cause items to appear on multiple pages. The stale-snapshot problem (a user might see an older leaderboard state) is acceptable for a leaderboard that updates every 5-10 seconds and is a deliberate trade-off between consistency and complexity. For stricter consistency, use a `volatile` reference to an unmodifiable list and replace the entire list atomically — this gives you a happen-before guarantee between the writer thread and all reader threads.
 
-5. **Q: A microservice produces events, and consumers must process them in the order they were produced per partition (key). If consumer A dies, another consumer must take over from the last committed offset. Which collection model does this resemble?**
-   A: This is a `ConcurrentLinkedDeque` per partition, but the actual implementation uses `ConcurrentSkipListMap` for offset tracking. The key insight: each partition is an ordered, thread-safe sequence. `ConcurrentSkipListMap<PartitionId, TreeMap<Offset, Record>>` provides O(log n) operations for offset-based lookups. The `ConcurrentNavigableMap` subMap view allows efficient range queries (e.g., records from offset X to Y). This is exactly how Kafka consumers track offsets internally — a sorted, concurrent map.
+**Q: You are designing a rate limiter that tracks requests per user in a 1-second sliding window. The system handles 50K QPS across 10K users. How do you store and expire the request timestamps efficiently?**
 
-6. **Q: You are building a dependency resolver (like Maven or Gradle) that must detect circular dependencies. You have millions of nodes. Which collection do you use for the DFS visited set?**
-   A: Use `HashSet<Node>` for the current-path set (to detect cycles) and `HashSet<Node>` for the fully-processed set (to avoid revisiting). The DFS is: when visiting a node, add to path set; if already in path set, circular dependency detected; after processing all children, remove from path set and add to processed set. Both sets must be `HashSet` with proper `hashCode()`/`equals()` on the node type — O(1) operations are critical for millions of nodes. If the graph is very large and memory is constrained, consider a `BitSet` or `RoaringBitmap` for integer-indexed nodes.
+A: Use `ConcurrentHashMap<String, ArrayDeque<Long>>` with per-key atomicity provided by the `compute()` method, which executes the remapping function under an internal lock scoped to the specific key's bucket. On each request, the compute function checks the current time, evicts timestamps older than 1 second from the deque's head, checks whether the remaining count exceeds the limit, and pushes the current timestamp onto the deque's tail — all within a single atomic operation. This design ensures that concurrent requests for different users proceed in parallel without contention, while concurrent requests for the same user are serialized only for that specific key. For periodic memory cleanup of idle users, schedule a background task that traverses the map and removes entries whose deques are empty, preventing unbounded growth from users who hit the rate limiter once and never return.
 
-7. **Q: An ad-serving platform needs to find the top 50 ads by revenue from a stream of 10 million ad impressions per hour. Only one pass over the data is allowed. How do you maintain the top 50?**
-   A: Use a min-heap via `PriorityQueue` with capacity 51. For each ad impression: add the ad's revenue to the heap; if the heap size exceeds 50, poll the minimum. After processing all data, the heap contains the top 50 items in O(n log 50) time — much better than O(n log n) for sorting all 10M items. For concurrent processing, each thread maintains its own top-50 heap and they are merged at the end using the same approach. This is the standard "top K" pattern in distributed systems.
+**Q: You are implementing an undo/redo system for a text editor. Users can perform thousands of operations. The undo stack must not grow unbounded. How do you design this with standard collections?**
 
-8. **Q: You are designing a connection pool. Threads borrow and return connections. If all connections are in use, a thread must wait. When a connection is returned, waiting threads should be notified. What collection do you use for the pool and the wait queue?**
-   A: Use `LinkedBlockingQueue<Connection>` for the pool itself with a fixed capacity. Threads call `poll(timeout, unit)` to borrow with a timeout, and `offer(conn)` to return. The blocking queue handles all the thread coordination internally — threads block via `Condition` objects (park/unpark) with zero busy-wait. For fairness, use `new LinkedBlockingQueue<>(true)` for fair ordering. This is far simpler than implementing wait/notify manually and handles interruption, timeout, and thread safety correctly.
+A: Use `ArrayDeque` as a bounded stack by manually enforcing a capacity limit — when pushing a new operation, check if the deque has reached capacity (e.g., 100 operations), and if so, poll the oldest entry from the front of the deque before pushing the new operation onto the back. The redo stack is a separate `ArrayDeque` that is cleared on every new operation that is not an undo or redo, because any new action invalidates the current redo history and creates a new branch in the operation timeline. `ArrayDeque` is the correct choice here because it has no per-node memory overhead (unlike `LinkedList`) and offers O(1) amortized time for both `addLast()` and `pollFirst()`, with excellent CPU cache locality from its contiguous underlying array. For undo, you pop from the back of the undo stack, invert the operation, push it onto the redo stack, and apply the inverse — the cost is O(1) per operation with no garbage collection pressure from node allocation.
 
-9. **Q: A collaborative editing application (like Google Docs) must merge edits from multiple users on the same document. Each edit has a timestamp and a position. How do you track the edit history for Operational Transformation (OT) or CRDT?**
-   A: Use a `TreeSet<Edit>` with a custom comparator by position and then by timestamp. Each user's edits are inserted at the correct position. For CRDT-based approaches, use `ConcurrentSkipListMap<Position, Edit>` which provides O(log n) insertion and iteration. The skip-list data structure is naturally concurrent and supports snapshot iterators. For the actual OT algorithm, a `LinkedList<Edit>` per user (append-only) tracks the edit history, and a `TreeMap<Integer, Edit>` maintains the current document state by character position.
+**Q: A microservice produces events, and consumers must process them in the order they were produced per partition (key). If consumer A dies, another consumer must take over from the last committed offset. Which collection model does this resemble?**
 
-10. **Q: You need to implement a multi-level cache (L1: local heap, L2: Redis, L3: database) with the following semantics: if L1 has the key, return immediately; if not, check L2; if not, check L3 and populate L1 and L2. Concurrent requests for the same key must not cascade — only one thread should populate. How do you coordinate?**
-    A: Use `ConcurrentHashMap<K, CompletableFuture<V>>` as the L1 cache. On request: `cache.computeIfAbsent(key, k -> fetchFromL2(k))`. The `computeIfAbsent` is atomic — only the first caller executes the fetching function. Subsequent callers get the same `CompletableFuture` and `join()` on it. The fetching function checks L2, then L3 if needed, and completes the future. This pattern (sometimes called "future-based deduplication" or "coalescing cache") prevents the thundering-herd problem without explicit locking. For eviction, wrap with Caffeine or use scheduled computation of stale keys.
+A: This maps directly to a sorted, concurrent map per partition, and the actual production implementation in systems like Kafka uses `ConcurrentSkipListMap` for offset tracking with O(log n) operations for offset-based lookups and range scans. Each partition maps to a sorted sequence of records indexed by monotonically increasing offsets, and the `ConcurrentNavigableMap` subMap view allows efficient range queries — for example, retrieving all records from offset X to Y without scanning the entire partition. The skip-list data structure is naturally concurrent, supporting lock-free reads and fine-grained locking for writes, which mirrors how Kafka consumers track offset positions: a sorted structure where the current offset advances sequentially and any consumer can seek to an arbitrary offset. The `ConcurrentSkipListMap` provides snapshot iterators that allow consistent traversal even while concurrent writes are happening, which is exactly what a consumer rebalancing scenario requires.
+
+**Q: You are building a dependency resolver (like Maven or Gradle) that must detect circular dependencies. You have millions of nodes. Which collection do you use for the DFS visited set?**
+
+A: Use `HashSet<Node>` for both the current-path set (to detect cycles by tracking the recursion stack) and the fully-processed set (to avoid revisiting subgraphs that have already been resolved). In the DFS traversal, when visiting a node, add it to the path set — if it is already present, a circular dependency exists, and the specific cycle can be reconstructed from the path set contents. After processing all children of a node, remove it from the path set (backtracking) and add it to the processed set, so that any subsequent dependency reaching this node through a different path finds it already resolved and skips the subtree. Both sets must be `HashSet` with proper `hashCode()` and `equals()` implementations, because O(1) operations are essential for a traversal involving millions of nodes — using `TreeSet` with its O(log n) operations would add tens of millions of comparisons. For extremely large graphs where memory is constrained, consider representing nodes as sequential integer identifiers and using a `BitSet` or `RoaringBitmap`, which can store millions of visited states in a few megabytes.
+
+**Q: An ad-serving platform needs to find the top 50 ads by revenue from a stream of 10 million ad impressions per hour. Only one pass over the data is allowed. How do you maintain the top 50?**
+
+A: Use a min-heap via `PriorityQueue` with a maximum capacity of 51 elements — for each ad impression, add the ad's revenue to the heap, and if the heap size exceeds 50, poll the minimum element to evict it. After processing all 10 million impressions, the heap contains exactly the top 50 ads by revenue, and the total time complexity is O(n log 50), which is dramatically better than O(n log n) sorting of the full dataset. For parallel processing across multiple worker threads, each thread maintains its own local top-50 heap, and these heaps are merged at the end using the same min-heap approach: iterate through all local heaps, adding each element to a global heap, and evicting the minimum when the global heap exceeds 50. This pattern — known as the "top K" or "heap with eviction" pattern — is a fundamental building block in distributed data processing frameworks like MapReduce, Spark, and Flink.
+
+**Q: You are designing a connection pool. Threads borrow and return connections. If all connections are in use, a thread must wait. When a connection is returned, waiting threads should be notified. What collection do you use for the pool and the wait queue?**
+
+A: Use `LinkedBlockingQueue<Connection>` with a fixed capacity for the connection pool itself — threads call `poll(timeout, unit)` to borrow a connection with a configurable timeout, preventing indefinite blocking if all connections are deadlocked or slow. Returning a connection is a simple `offer(conn)` call, which internally notifies one waiting thread via a `Condition` object (backed by `LockSupport.park()` and `unpark()`), eliminating busy-waiting and CPU waste. The `LinkedBlockingQueue` handles all the underlying thread coordination internally: it uses separate `ReentrantLock` instances for take and put operations, allowing concurrent borrowers and returners to proceed with minimal contention. For fairness, construct the queue with `true` for the fairness parameter, which uses a FIFO wait queue and prevents thread starvation under high contention — this is critical in production systems where some threads might otherwise wait indefinitely.
+
+**Q: A collaborative editing application (like Google Docs) must merge edits from multiple users on the same document. Each edit has a timestamp and a position. How do you track the edit history for Operational Transformation (OT) or CRDT?**
+
+A: Use a `ConcurrentSkipListMap<Position, Edit>` for the current document state, providing O(log n) insertion and ordered iteration that is naturally concurrent and supports snapshot iterators for consistent reads during live editing sessions. For the Operational Transformation algorithm, a `LinkedList<Edit>` per user (append-only) tracks each user's edit history in chronological order, and these per-user histories are merged to compute the transformation function when concurrent edits conflict. The skip-list structure is particularly well-suited here because it provides probabilistic balancing without the need for rebalancing locks (unlike a Red-Black tree), making it ideal for the highly concurrent environment of collaborative editing where dozens of users may be editing simultaneously. The `subMap()` and `headMap()` navigational methods allow efficient range queries to compute the visible document region and to determine which edits overlap spatially for conflict resolution.
+
+**Q: You need to implement a multi-level cache (L1: local heap, L2: Redis, L3: database) with the following semantics: if L1 has the key, return immediately; if not, check L2; if not, check L3 and populate L1 and L2. Concurrent requests for the same key must not cascade — only one thread should populate. How do you coordinate?**
+
+A: Use `ConcurrentHashMap<K, CompletableFuture<V>>` as the L1 cache — on a cache miss, call `cache.computeIfAbsent(key, k -> fetchFromL2(k))`, which atomically ensures that only the first caller executes the fetch function while subsequent callers receive the same `CompletableFuture` and block on `join()`. The fetching function checks L2 (Redis), and if that is also a miss, checks L3 (database) and populates both L2 and L1 by completing the future with the fetched value. This pattern, known as "future-based deduplication" or "coalescing cache", prevents the thundering-herd problem where thousands of concurrent requests for the same uncached key would all cascade to the database simultaneously, potentially causing an outage. For cache eviction, wrap the `ConcurrentHashMap` with a scheduled task that removes stale entries or use a library like Caffeine that provides time-based and size-based eviction on top of the same `computeIfAbsent` pattern.
 
 ---
 
 ## Interview Questions
 
-1. **What is the difference between fail-fast and fail-safe iterators?**
-   A: Fail-fast iterators (e.g., `ArrayList`, `HashMap`) throw `ConcurrentModificationException` if the collection is structurally modified after the iterator is created. They track changes via a `modCount` field. Fail-safe iterators (e.g., `ConcurrentHashMap`, `CopyOnWriteArrayList`) operate on a snapshot or a copy of the underlying data, so modifications don't affect iteration. Fail-safe iterators trade memory/consistency for safety.
+**What is the difference between fail-fast and fail-safe iterators?** Fail-fast iterators (used by `ArrayList`, `HashMap`, `HashSet`) throw `ConcurrentModificationException` when the collection is structurally modified after the iterator is created, detecting changes through a `modCount` field that the collection increments on every structural modification. Fail-safe iterators (used by `ConcurrentHashMap`, `CopyOnWriteArrayList`) operate on a snapshot or a copy of the underlying data, so concurrent modifications do not affect iteration — the trade-off is memory overhead from the snapshot and potentially stale data.
 
-2. **When would you use LinkedList over ArrayList?**
-   A: `LinkedList` is better when you need frequent insertions/deletions at the beginning or middle of the list, or when implementing a queue/deque (it implements both `List` and `Deque`). In practice, `LinkedList` is rarely the right choice because the per-node memory overhead (~40 bytes) is high and modern `ArrayList` operations are fast due to CPU cache locality. Use `ArrayDeque` for queue/stack scenarios instead.
+**When would you use LinkedList over ArrayList?** `LinkedList` is appropriate when you need frequent insertions or deletions at the beginning or middle of the list using a `ListIterator`, or when implementing a queue or deque through its dual `List` and `Deque` interface implementations. In practice, `LinkedList` is rarely the optimal choice because each element carries roughly 40 bytes of per-node overhead from the `Node` object's `prev`, `next`, `item`, and object header fields, and the non-contiguous memory layout destroys CPU cache locality.
 
-3. **How does HashMap handle collisions?**
-   A: In Java 8+, `HashMap` uses separate chaining with linked lists that convert to balanced trees (red-black) when a bucket exceeds 8 entries (provided the table has at least 64 buckets). Tree nodes use `compareTo()` (if keys implement `Comparable`) or `hashCode()` ordering. This prevents O(n) degradation from hash collisions — worst case becomes O(log n) instead of O(n). Before Java 8, only linked lists were used.
+**How does HashMap handle collisions?** In Java 8+, `HashMap` uses separate chaining with linked lists that convert into balanced Red-Black trees when a bucket exceeds 8 entries and the table has at least 64 buckets, preventing the worst-case O(n) degradation from hash collisions and improving it to O(log n). The tree uses either `Comparable.compareTo()` (if keys implement `Comparable`) or `System.identityHashCode()` ordering, and the tree is converted back to a linked list when the bucket shrinks below 6 entries. Before Java 8, only linked lists were used and malicious input causing hash collisions could trigger O(n) map operations, making this a security vulnerability (hash-collision DoS).
 
-4. **What is the difference between HashMap and ConcurrentHashMap?**
-   A: `HashMap` is not thread-safe — concurrent modifications cause race conditions or `ConcurrentModificationException`. `ConcurrentHashMap` is thread-safe using per-bucket locking (Java 8+) or segment-based locking (Java 7). `ConcurrentHashMap` uses CAS for lock-free reads and synchronized blocks only for writes that affect the same bucket. It also provides atomic `computeIfAbsent()`, `merge()`, and `forEachKey()` operations. `ConcurrentHashMap` does not allow null keys or values.
+**What is the difference between HashMap and ConcurrentHashMap?** `HashMap` is not thread-safe and concurrent modifications lead to race conditions, data corruption, or `ConcurrentModificationException`. `ConcurrentHashMap` uses per-bucket locking (Java 8+) where only writes to the same bucket synchronize, while reads are entirely lock-free through volatile semantics on the `Node` array reference and value fields. `ConcurrentHashMap` provides atomic compound operations like `computeIfAbsent()`, `merge()`, and `forEachKey()`, and it does not allow null keys or values.
 
-5. **How does LinkedHashMap maintain insertion order?**
-   A: `LinkedHashMap` extends `HashMap` and adds a doubly-linked list connecting the entries. Each `Entry` has `before` and `after` references. The linked list preserves either insertion order or access order (configured via constructor). Access order is used for LRU cache implementation via the `removeEldestEntry()` method. The linked list adds O(1) overhead per operation and uses slightly more memory than plain `HashMap`.
+**How does LinkedHashMap maintain insertion order?** `LinkedHashMap` extends `HashMap` and adds a doubly-linked list connecting all entries, where each entry has `before` and `after` references that thread through the map. The linked list preserves either insertion order (the order in which keys were first added) or access order (each `get()` or `put()` moves the entry to the end), configurable through the constructor's `accessOrder` parameter. Access-order mode is the foundation for LRU cache implementations via the `removeEldestEntry()` callback, which is called on every `put()` and `putAll()` to determine whether the eldest entry should be evicted.
 
-6. **What is the difference between TreeSet and HashSet?**
-   A: `HashSet` is backed by `HashMap` and offers O(1) average operations but no ordering guarantees. `TreeSet` is backed by `TreeMap` (Red-Black tree) and maintains sorted order (natural or `Comparator`), with O(log n) operations. `HashSet` allows a null element; `TreeSet` does not. `TreeSet` requires elements to implement `Comparable` or a `Comparator` to be provided. `HashSet` requires proper `hashCode()`/`equals()`.
+**What is the difference between TreeSet and HashSet?** `HashSet` is backed by `HashMap` and provides O(1) average operations with no ordering guarantees, allowing a single null element. `TreeSet` is backed by `TreeMap` (a Red-Black tree) and maintains elements in sorted order using either natural ordering (elements must implement `Comparable`) or a provided `Comparator`, with O(log n) operations and no null support. Choosing between them requires knowing whether sorted iteration or raw performance is more important — `TreeSet` is the right choice when you need range queries (`subSet()`, `headSet()`, `tailSet()`), while `HashSet` is preferable when you only need uniqueness.
 
-7. **What is the initial capacity and load factor of HashMap? Why are they important?**
-   A: Default initial capacity is 16; default load factor is 0.75. The load factor controls when the map resizes — when `size > capacity × loadFactor`, the capacity doubles. A higher load factor (0.9) saves memory but increases collision probability. A lower load factor (0.5) reduces collisions but wastes memory. The 0.75 default is a trade-off between time and space. If you know the expected size, pre-size: `expectedSize / 0.75f + 1` to avoid resizing.
+**What are the initial capacity and load factor of HashMap? Why are they important?** The default initial capacity is 16 and the default load factor is 0.75 — the load factor controls when the map resizes, doubling the capacity when `size > capacity * loadFactor`. A higher load factor (0.9) saves memory but increases collision probability, degrading lookup performance; a lower load factor (0.5) reduces collisions but wastes memory with empty buckets. The 0.75 default represents a time-space trade-off that works well for most workloads. For a known expected size, pre-size the map with `(expectedSize / 0.75f) + 1` to avoid all resizing overhead.
 
-8. **How do you make a collection immutable or unmodifiable?**
-   A: `Collections.unmodifiableList()`, `unmodifiableSet()`, `unmodifiableMap()`, etc. These create a view that throws `UnsupportedOperationException` on mutation. In Java 9+, `List.of()`, `Set.of()`, `Map.of()` create immutable collections directly. The difference: unmodifiable wrappers are views — the underlying collection can still change; `List.of()` is deeply immutable. For deep immutability, always return copies or use `List.copyOf()`.
+**How do you make a collection immutable or unmodifiable?** `Collections.unmodifiableList()`, `unmodifiableSet()`, and `unmodifiableMap()` create wrapper views that throw `UnsupportedOperationException` on mutation attempts, though the underlying collection can still change if another reference to it is modified. In Java 9+, `List.of()`, `Set.of()`, and `Map.of()` create deeply immutable collections with compact internal representations that cannot be changed by any means, making them preferable for API return types. For defensive copies, use `List.copyOf()` which returns an unmodifiable copy of a collection without copying if the source is already immutable.
 
-9. **What is the difference between poll() and remove() in Queue?**
-   A: Both retrieve and remove the head of the queue. `remove()` throws `NoSuchElementException` if the queue is empty; `poll()` returns `null`. The same distinction applies to `element()` vs `peek()` — `element()` throws, `peek()` returns null. The `offer()`/`add()` pair has a similar pattern: `add()` throws `IllegalStateException` if the queue is full (bounded queues), `offer()` returns `false`.
+**What is the difference between poll() and remove() in Queue?** Both methods retrieve and remove the head of the queue, but `remove()` throws `NoSuchElementException` when the queue is empty while `poll()` returns `null`. The same pattern applies to `element()` (throws) versus `peek()` (returns null) for retrieval without removal, and `add()` (throws `IllegalStateException` for bounded queues) versus `offer()` (returns false) for insertion. These two sets of operations give the caller the choice between exception-based error handling and sentinel-value-based control flow.
 
-10. **How does CopyOnWriteArrayList achieve thread safety, and when should you use it?**
-    A: `CopyOnWriteArrayList` achieves thread safety by creating a new copy of the underlying array on every mutative operation (add, set, remove). Reads are lock-free and never blocked — they operate on the current array reference. This makes it ideal for read-heavy, write-rare scenarios like listener lists in event systems. The trade-off is that writes are O(n) and memory-intensive (the old array is garbage collected). Never use it for write-heavy workloads.
+**How does CopyOnWriteArrayList achieve thread safety, and when should you use it?** `CopyOnWriteArrayList` achieves thread safety by creating a fresh copy of the underlying array on every mutative operation — `add()`, `set()`, and `remove()` all produce a new array — while reads operate on the current array reference without any synchronization or locking. This design is optimal for read-heavy, write-rare scenarios such as listener registries in event-driven systems where the listener list seldom changes but is iterated frequently on every event. The trade-off is that writes are O(n) with memory overhead from the old array, which persists until garbage collected, so `CopyOnWriteArrayList` must never be used for write-heavy workloads.
 
 ---
 
 ## Developer Recommendations
 
-- **Prefer `ConcurrentHashMap` over `Collections.synchronizedMap()`** — `ConcurrentHashMap` uses per-bucket locking, allowing concurrent reads and writes to different buckets. `synchronizedMap()` locks the entire map, serializing all access and reducing throughput on multi-core systems. For a map with 10 concurrent writers, `ConcurrentHashMap` can be 10x faster.
-
-- **Use `ArrayDeque` instead of `LinkedList` for stack/queue** — `ArrayDeque` is backed by a resizable array with no per-node overhead. `LinkedList` creates a `Node` object for every element (~40 bytes overhead). `ArrayDeque` also has better CPU cache locality since elements are contiguous in memory. For stacks and queues, `ArrayDeque` is always the better choice.
-
-- **Pre-size collections when the size is known** — Starting with default capacity (e.g., 16 for `HashMap`) causes multiple resizes: 16 → 32 → 64 → 128 for 100 elements. Each resize is O(n). Use `new HashMap<>(expectedSize / 0.75f + 1)` to avoid resizing entirely. For `ArrayList`, `new ArrayList<>(expectedSize)` avoids incremental array copying.
-
-- **Override `equals()` and `hashCode()` consistently for map/set keys** — If two objects are logically equal but have different hash codes, they'll be stored as separate entries. If an object's hash code changes after insertion (mutable key), the map/set will lose track of it. Use immutable keys (e.g., `String`, `Integer`, `UUID`) or ensure `hashCode()` depends only on immutable fields.
-
-- **Use `EnumMap` and `EnumSet` over `HashMap`/`HashSet` for enum keys** — `EnumMap` is backed by a plain array indexed by the enum ordinal. It's faster (no hashCode computation), more memory-efficient, and maintains natural enum order. For `Enum` keys, `EnumMap` outperforms `HashMap` by 2-3x with zero memory waste.
-
-- **Return immutable or unmodifiable collections from API methods** — Returning a reference to an internal `ArrayList` allows callers to modify your internal state. Always return `Collections.unmodifiableList(internalList)` or `List.copyOf(internalList)`. This prevents callers from adding/removing elements and makes the API contract clear. The cost is a single wrapper object creation.
-
-- **Use `computeIfAbsent()` over `putIfAbsent()` for atomic lazy initialization** — `map.computeIfAbsent(key, k -> new Value())` is atomic — the function runs at most once per key even with concurrent callers. `putIfAbsent()` followed by `get()` is not atomic — multiple threads may create redundant instances. This is critical in caching scenarios to prevent the thundering-herd problem.
+- **Prefer ConcurrentHashMap over synchronizedMap()** — `ConcurrentHashMap` uses per-bucket locking (Java 8+) that allows concurrent reads and writes to different buckets without any contention, while `Collections.synchronizedMap()` serializes all access on the same mutex. In a benchmark with ten concurrent writers, `ConcurrentHashMap` can be 10x faster because threads rarely contend on the same bucket, and reads are entirely lock-free. The atomic `computeIfAbsent()`, `merge()`, and `forEachKey()` methods also eliminate entire categories of thread-safety bugs.
+- **Use ArrayDeque over LinkedList** — `ArrayDeque` is backed by a resizable array with no per-node object overhead, whereas `LinkedList` creates a `Node` object for every single element adding ~40 bytes overhead per element. The contiguous memory layout of `ArrayDeque` provides excellent CPU cache locality — iterating 100K elements may generate zero cache misses, while the same iteration on `LinkedList` causes a cache miss on nearly every node.
+- **Pre-size collections when size is known** — A `HashMap` starting at default capacity 16 and growing to 100 elements undergoes resizes at 16, 32, 64, and 128, each requiring a full rehash. The formula `new HashMap<>(expectedSize / 0.75f + 1)` pre-allocates the correct capacity, ensuring zero resizes during population. For `ArrayList`, use `new ArrayList<>(expectedSize)` to avoid incremental array copying.
+- **Override equals() and hashCode() consistently** — The contract is strict: if `a.equals(b)` is true, then `a.hashCode() == b.hashCode()` must hold. Using mutable objects as keys is even more dangerous — if a key's hash code changes after insertion, the map entry becomes permanently unreachable. Modern IDEs and `java.util.Objects` (with `Objects.hash()` and `Objects.equals()`) make generating correct implementations straightforward.
+- **Use EnumMap and EnumSet for enum keys** — These enum-based implementations are backed by plain arrays indexed by the enum's ordinal, completely eliminating hash code computation and maintaining insertion order. `EnumMap` outperforms `HashMap` by 2-3x in practice and uses a fraction of the memory since it stores values in a simple object array with no `Node` objects or load factor.
+- **Return immutable collections from API methods** — Returning a direct reference to an internal `ArrayList` gives callers the ability to silently mutate internal state. Use `Collections.unmodifiableList(internalList)` to create a view that throws `UnsupportedOperationException` on mutation, or `List.copyOf(internalList)` (Java 10+) to create a truly independent immutable copy.
+- **Use computeIfAbsent() over putIfAbsent()** — `computeIfAbsent(key, k -> new Value())` is an atomic operation where the mapping function executes at most once per key, and all concurrent callers receive the same value. The `putIfAbsent()` pattern requires a subsequent `get()` to retrieve the value, and two concurrent threads can easily execute `putIfAbsent()` with two different instances before either thread reads the result, wasting memory and computational resources.

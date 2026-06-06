@@ -7,6 +7,8 @@
 - **Definition:** A resilience design pattern that detects failures and prevents cascading failures in distributed systems by failing fast when a downstream service is unhealthy.
 - **Why It Exists:** Without circuit breakers, a failing downstream service causes upstream services to waste resources waiting for timeouts, leading to cascading failures across the system.
 - **Key Concepts:** **CLOSED** (normal operation, failures counted), **OPEN** (requests fail immediately, timer starts), **HALF_OPEN** (limited test requests to check recovery), **Failure Threshold** (count or rate that triggers OPEN), **Sliding Window** (time or count window for failure calculation), **Fallback Method** (alternative behavior when circuit is open), **Resilience4j** (Java fault-tolerance library)
+- **Circuit Breaker vs Retry** — Retry handles transient failures (network glitches, connection resets) by re-executing the same call. Circuit breaker handles persistent failures by stopping calls entirely. They work together: retry first (e.g., 3 attempts with exponential backoff), then circuit breaker for remaining failures. Never use retry without a circuit breaker — infinite retries against a dead service exhaust resources.
+- **State Transition Events** — Each state transition (CLOSED→OPEN, OPEN→HALF_OPEN, HALF_OPEN→CLOSED) should emit an event for monitoring. Resilience4j exposes these via `CircuitBreakerRegistry` event listeners. Log and alert on every transition to OPEN — it indicates a downstream service is unhealthy and may require operational response.
 
 ---
 
@@ -16,6 +18,8 @@
 - **Key Parameters:** `failureRateThreshold` — % of failures to open circuit; `slidingWindowSize` — number of requests in the window; `minimumNumberOfCalls` — minimum calls before rate calculation; `waitDurationInOpenState` — time in OPEN before HALF_OPEN; `permittedNumberOfCallsInHalfOpenState` — test calls allowed.
 - **Failure Counting Strategies:** Count-based (consecutive or total failures), Rate-based (percentage in sliding time window), Hybrid (both count and rate thresholds).
 - **Thread Pool vs Semaphore Isolation:** Thread Pool — each call runs in a separate thread, complete isolation, higher overhead. Semaphore — calls run on the calling thread, lower overhead, less isolation.
+- **Sliding Window Types** — Count-based: evaluates the last N calls (sliding window resets after N calls regardless of time). Time-based: evaluates calls within the last N seconds (better for variable traffic — ensures the window contains enough data). Choose count-based for consistent traffic patterns; time-based for bursty traffic where call volume fluctuates.
+- **Slow Call Detection** — Circuit breakers catch failures (exceptions), but slow responses are equally damaging. Configure `slowCallDurationThreshold` (e.g., 500ms) and `slowCallRateThreshold` (e.g., 50%). When 50% of calls exceed 500ms, the circuit opens — even without exceptions. This catches performance degradation before hard failures occur.
 
 ```java
 @Bean
@@ -50,6 +54,8 @@ public PaymentResponse paymentFallback(PaymentRequest request, Throwable t) {
 - **Too Long Wait in OPEN State** — 30 seconds is usually sufficient; longer waits prolong degradation unnecessarily.
 - **Not Recording Relevant Exceptions** — recording only generic `Exception.class` instead of specific exceptions like `TimeoutException`, `ConnectException`, `HttpServerErrorException`.
 - **Circuit Breaker Without Monitoring** — if you can't see circuit breaker state changes, you can't respond to outages.
+- **Shared Circuit Breaker for Different APIs of the Same Service** — If a service has a health endpoint (always OK) and a payment endpoint (failing), a single circuit breaker for the whole service treats both the same. Use separate circuit breakers for different logical endpoints or operations within the same downstream service.
+- **Not Setting Minimum Number of Calls** — With default `minimumNumberOfCalls = 10`, the first failure on a quiet system can open the circuit. For low-traffic services, the circuit may never collect enough samples to make a statistically valid decision. Set `minimumNumberOfCalls` to 5-10 for high-traffic and 2-3 for low-traffic services.
 
 ---
 
@@ -60,6 +66,8 @@ public PaymentResponse paymentFallback(PaymentRequest request, Throwable t) {
 - **Exception Classification** — record server errors (5xx, network timeouts, connection refused); ignore client errors (4xx) and authentication failures since they don't indicate downstream health.
 - **Combined Resilience Patterns** — layer TimeLimiter (2s timeout), Retry (3 attempts, 500ms apart), CircuitBreaker (opens at 50% failure, 30s wait), and Bulkhead (max 10 concurrent calls) for complete protection.
 - **Service Mesh Integration** — Istio and Linkerd provide circuit breaking at the network layer via sidecar proxies with centralized configuration and outlier detection.
+- **Circuit Breaker Metrics and Alerts** — Export metrics via Micrometer: `circuit_breaker_state` (0=CLOSED, 1=OPEN, 2=HALF_OPEN), `circuit_breaker_failure_rate`, `circuit_breaker_call_count`, `circuit_breaker_slow_call_count`. Create Grafana dashboards showing circuit breaker states per service. Alert on any circuit remaining OPEN for more than 5 minutes — this indicates a persistent downstream issue requiring investigation.
+- **Graceful Degradation with Stale Data** — When a circuit opens for a data service, the fallback should return the last known good data from a local cache rather than an error. For example, a product recommendation circuit breaker fallback returns cached recommendations that may be hours old. Users see slightly outdated recommendations instead of errors. The trade-off (stale data vs errors) almost always favors serving stale data.
 
 ---
 
@@ -210,3 +218,5 @@ public List<Product> dbFallback(String category, Throwable t) {
 - **Monitor circuit breaker state changes with metrics and alerts** — Export circuit breaker metrics (state, failure rate, call count) via Micrometer to Prometheus/Grafana. Create alerts for state transitions: "paymentService circuit breaker OPEN" should page the on-call engineer immediately. Without monitoring, circuit breakers silently degrade the user experience.
 
 - **Use gradual HALF_OPEN recovery instead of a hard transition** — The default HALF_OPEN sends all permitted test calls at once. For critical services, implement a phased recovery: start with 1% of traffic, observe for 30 seconds, then 10%, then 100%. This prevents a recovered-but-wobbly service from taking down the entire system again.
+- **Layer circuit breaker with TimeLimiter and Bulkhead for defense in depth** — A circuit breaker alone doesn't prevent slow responses from blocking threads. TimeLimiter cuts off slow calls at a configured duration (e.g., 2 seconds). Bulkhead dedicates a separate thread pool per downstream service (e.g., 10 threads for payments, 20 for catalog). Together: Bulkhead isolates, TimeLimiter cuts off, CircuitBreaker stops calling dead services. This three-layer defense prevents any single downstream failure from cascading.
+- **Always provide a meaningful fallback that lets the system continue** — A fallback that throws an exception back to the user defeats circuit breaking. Good fallbacks: return stale cached data (even if outdated), return a default response (empty list instead of recommendations), queue the request for later processing, or degrade non-critical features. The fallback should let the system operate at reduced capacity rather than failing entirely.

@@ -7,6 +7,8 @@
 - **Definition:** OAuth 2.0 is an authorization framework that enables third-party applications to obtain limited access to services on behalf of a resource owner, without sharing credentials.
 - **Why It Exists:** Decouples authentication from authorization. Separates the role of the client from the resource owner, allowing delegated access. Industry standard used by Google, Facebook, GitHub, and virtually every major platform.
 - **Key Concepts:** **Resource Owner** (user who authorizes access), **Client** (application requesting access), **Authorization Server** (issues tokens), **Resource Server** (validates tokens, serves data), **Grant Types** (Authorization Code, Client Credentials, Device Code, Refresh Token), **PKCE** (Proof Key for Code Exchange — protects public clients), **Scopes** (permissions the client requests).
+- **OAuth 2.0 vs OIDC** — OAuth 2.0 is an authorization framework that issues access tokens for resource access. OpenID Connect (OIDC) adds an authentication layer on top: ID Token (JWT with user identity), UserInfo endpoint, and standardized scopes (`openid`, `profile`, `email`). OAuth answers "what can you do?"; OIDC answers "who are you?"
+- **Token Types** — Access tokens (short-lived, typically 15-60 minutes, used to access resources), Refresh tokens (long-lived, typically 7-30 days, used to obtain new access tokens), and ID tokens (OIDC, JWT containing user identity claims). Each token type has different security properties and storage requirements.
 
 ---
 
@@ -16,6 +18,8 @@
 - **PKCE:** Public clients (mobile, SPA) generate a `code_verifier` (random 128-char string) and `code_challenge = SHA256(code_verifier)`. The challenge is sent in the auth request; the verifier is sent in the token request. Prevents interception attacks.
 - **Client Credentials Grant:** Server-to-server communication. Client authenticates with its own credentials and receives an access token directly, without user involvement. Used for service-to-service API calls.
 - **OAuth 2.1:** Consolidates best practices — PKCE required for all public clients, Implicit and Password grants removed, refresh tokens must be sender-constrained or rotate, redirect URIs use exact matching.
+- **Client Authentication Methods** — Confidential clients authenticate using `client_secret_basic` (HTTP Basic Auth), `client_secret_post` (POST body), or `private_key_jwt` (client assertion signed with private key). JWK-based client authentication (`private_key_jwt`) is more secure than shared secrets because the client's private key is never transmitted.
+- **Scope Negotiation and Consent** — Clients request specific scopes during authorization. The authorization server may grant a subset based on policy or user consent. The returned token includes only the granted scopes. Resource servers must validate that the token's scope covers the requested operation, typically by checking the `scope` claim in the JWT.
 
 ```java
 // Spring Security OAuth2 Resource Server
@@ -43,6 +47,9 @@ public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 - **Not Validating Redirect URIs** — Can lead to open redirect vulnerabilities.
 - **Missing State Parameter** — Vulnerable to CSRF attacks on the authorization callback.
 - **Hardcoded Client Secrets** — Use environment variables, vaults, or managed secrets.
+- **Implicit Grant Usage** — The Implicit Grant (deprecated in OAuth 2.1) exposes tokens in the URL fragment, visible in browser history and server logs. Migrate to Authorization Code + PKCE for all clients.
+- **Missing Token Introspection on Resource Servers** — Resource servers that blindly accept any JWT without validating signature, expiry, issuer, or audience are vulnerable to token forgery attacks.
+- **Overly Broad Scopes** — Requesting `read_all` or `write_all` instead of granular scopes violates the principle of least privilege. Use fine-grained scopes like `orders:read`, `profile:write`.
 
 ---
 
@@ -55,6 +62,9 @@ public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 - **Token Validation:** Resource servers validate JWT locally (signature, exp, iss, aud) or use introspection endpoint for opaque tokens. Cache introspection results.
 - **Microservices Architecture:** API Gateway validates tokens, passes them downstream. Downstream services validate locally (JWT) or use token exchange for service-specific tokens.
 - **DPoP (Demonstration of Proof-of-Possession):** Binds token to a client's public key. Prevents token replay if the token is stolen.
+- **Rich Authorization Requests (RAR)** — An extension that allows clients to request fine-grained authorization with detailed parameters (e.g., `payment:amount=50`, `file:write:path=/docs`). RAR replaces coarse scopes with rich, context-specific authorization data.
+- **Token Exchange (RFC 8693)** — Enables a client or service to exchange one token for another with different scopes or audience. Critical for service-to-service delegation in microservices where a token issued for Service A must be exchanged for a token scoped to Service B.
+- **FAPI (Financial-grade API)** — A higher-security OAuth 2.0 profile for financial services. Requirements include: JWT-secured authorization requests (JAR), JWT-secured client authentication, PAR (Pushed Authorization Requests), and sender-constrained access tokens (DPoP or mTLS).
 
 ---
 
@@ -175,3 +185,5 @@ authRequestUri += "&code_challenge=" + codeChallenge + "&code_challenge_method=S
 - **Centralize token validation in an API gateway** — In a microservices architecture, each service should not independently implement OAuth token validation. The API gateway validates tokens, extracts claims, and passes a standardized user context (by claims or a dedicated internal JWT) to downstream services. This ensures consistent policy enforcement, simplifies auditing, and reduces the attack surface. Internal services can trust the gateway without implementing their own validation logic.
 
 - **Plan for key rotation from day one** — Signing keys expire, are compromised, or need algorithm upgrades. From launch, support multiple keys in JWKS. Use the `kid` header to identify which key signed the token. When rotating: (1) add the new key to JWKS, (2) wait for all clients to fetch the updated JWKS (monitor cache duration), (3) start signing with the new key, (4) keep old keys in JWKS for token validation until all tokens signed with them expire. This phased approach prevents validation failures during the transition.
+- **Use the Authorization Code grant with PKCE for all client types, even confidential ones** — PKCE adds a second factor of protection beyond the client secret. If a confidential client's secret is leaked, PKCE still prevents authorization code interception. The overhead is negligible — a single SHA-256 hash of a random string. Make PKCE the default for every OAuth flow in your authorization server configuration.
+- **Implement token exchange for service-to-service delegation** — When Service A has a user token and needs to call Service B, never pass the original token to Service B (wrong audience). Use token exchange (RFC 8693) to obtain a token scoped to Service B. The authorization server validates the original token's identity and issues a new token with the correct audience. This maintains the security boundary between services.

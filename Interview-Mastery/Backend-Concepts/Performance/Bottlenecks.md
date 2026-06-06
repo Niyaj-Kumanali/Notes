@@ -7,6 +7,8 @@
 - **Definition:** A bottleneck is a point in a system where limited capacity constrains overall performance — the slowest component determines maximum throughput.
 - **Why It Exists:** Every system has a weakest link. Identifying and resolving bottlenecks is the core of performance engineering. Fixing one bottleneck reveals the next, following the bottleneck chain.
 - **Key Concepts:** **Universal Scalability Law** (models throughput degradation from contention + coherency overhead), **Compute-bound** (CPU limited), **Memory-bound** (RAM limited), **I/O-bound** (disk/network), **Contention-bound** (locks, shared resources), **Queueing-bound** (request queue fills up).
+- **Bottleneck Economics** — The cost of fixing a bottleneck increases exponentially as you move up the stack: optimizing a database query costs hours, adding a cache costs days, redesigning the architecture costs weeks. Always fix the cheapest bottleneck first and re-measure before moving to the next.
+- **Amdahl's Law vs Universal Scalability Law** — Amdahl's Law predicts speedup as `1/((1-P)+P/N)` where P is the parallelizable portion. The USL adds coherency overhead: `C(N) = N / (1 + σ(N-1) + κN(N-1))`. The USL predicts that beyond a certain point, adding more nodes actually decreases throughput due to coordination overhead.
 
 ---
 
@@ -15,6 +17,8 @@
 - **Types of Bottlenecks:** **CPU** — high utilization, context switching, inefficient algorithms. **Memory** — frequent GC, OOM, oversized caches, leaks. **Disk I/O** — missing indexes, full table scans, IOPS limit. **Network** — packet loss, small TCP buffers, chatty inter-service calls. **Database** — slow queries, lock contention, connection pool exhaustion. **Thread Pool** — queue building, rejections.
 - **Bottleneck Chain:** System throughput is determined by its slowest component. Fixing one reveals the next: DB queries (100ms) → CPU (95% util) → Thread pool contention → Network bandwidth.
 - **Bottleneck Detection Flow:** Define target → Measure current → Identify saturated resource → Hypothesize cause → Fix → Measure impact → Repeat.
+- **Profiling Tools and Techniques** — Java: async-profiler for CPU and allocation profiling, JFR (Java Flight Recorder) for low-overhead runtime analysis, JMH for microbenchmarks. Database: `EXPLAIN ANALYZE`, `pg_stat_statements`, slow query logs. Network: `tcpdump`, Wireshark, mtr for path analysis.
+- **Resource Saturation Indicators** — CPU: utilization > 70%, context switching rate > 10K/sec. Memory: GC frequency increasing, swap usage > 0. Disk: iowait > 10%, queue depth > 2x spindles. Network: dropped packets, retransmits > 1%. Database: connection pool exhaustion, lock wait time growing.
 
 ```java
 // Thread pool monitoring with Micrometer
@@ -33,6 +37,8 @@ Gauge.builder("threadpool.queue.size", executor, e -> e.getQueue().size())
 - **Local-Only Testing** — Bottlenecks often only appear under production load (concurrency, data volume).
 - **Single Metric Focus** — High CPU doesn't mean CPU is the bottleneck; it could be I/O waiting.
 - **Assuming Linearity** — Doubling servers does not double throughput (Amdahl's Law, USL).
+- **Optimizing the Wrong Tier** — Adding application servers when the database is the bottleneck. Always measure end-to-end before scaling any specific tier.
+- **Not Measuring Baseline Performance** — Without baseline metrics, you can't tell if a change improved or degraded performance. Establish P50/P95/P99 latency baselines during normal load before making changes.
 
 ---
 
@@ -43,6 +49,8 @@ Gauge.builder("threadpool.queue.size", executor, e -> e.getQueue().size())
 - **Resolution Priority:** Low-hanging fruit (missing indexes, pool sizing) → Architecture changes (caching, async) → Code optimization (algorithms) → Hardware scaling → Architecture redesign (CQRS, event sourcing).
 - **Predictive Detection:** Track growth rates of metrics (DB size, request rate). Model when each resource reaches capacity. Schedule upgrades before saturation.
 - **Common Patterns:** High CPU + low throughput = algorithm inefficiency. Low CPU + low throughput = I/O/DB bottleneck. Increasing latency + stable CPU = queue buildup.
+- **Load Testing for Bottleneck Discovery** — Gradually increase load while monitoring all resources. The first resource to saturate is the bottleneck. Use tools like Gatling, JMeter, or k6. Test with production-like data volumes and concurrency patterns. Monitor P50/P95/P99 latencies alongside resource utilization.
+- **Distributed System Bottlenecks** — In microservices, common bottlenecks include: serialized service chains (cascading latency), shared databases (contention under parallel load), message broker partitions (insufficient partitions for consumer parallelism), and API Gateway (single entry point for all traffic).
 
 ---
 
@@ -166,3 +174,5 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 - **Use caching before scaling** — Adding application servers or database replicas is expensive. Caching often resolves the bottleneck with zero infrastructure changes. Add Redis for API response caching, Caffeine for hot objects, and CDN for static content. A 90% cache hit ratio effectively reduces load by 10x.
 
 - **Set timeouts on all external calls** — Without timeouts, a slow downstream service blocks threads indefinitely. Set connect timeout (500ms), read timeout (P99 + buffer), and connection pool timeout. Use circuit breakers to fail fast when the downstream is unhealthy. Timeouts convert thread exhaustion (system down) into graceful degradation (slightly slower).
+- **Establish baseline metrics before optimizing** — Record P50/P95/P99 latency, throughput, CPU, memory, and GC behavior during normal load before making any changes. Without baselines, you can't objectively measure improvement. Store historical metrics in Prometheus with at least 3 months of retention to compare performance across releases.
+- **Use the bottleneck chain approach — fix one, find the next** — Performance optimization is iterative, not one-shot. After fixing a database query (100ms → 10ms), re-measure: the new bottleneck might be CPU (now at 95%) from serialization, or network bandwidth from increased throughput. Each fix shifts the constraint to the next resource. Plan for multiple optimization cycles.

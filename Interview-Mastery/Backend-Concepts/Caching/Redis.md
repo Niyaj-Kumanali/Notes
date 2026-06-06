@@ -7,6 +7,8 @@
 - **Definition:** Redis (Remote Dictionary Server) is an open-source, in-memory data structure store used as a database, cache, message broker, and streaming engine.
 - **Why It Exists:** Provides sub-millisecond latency with rich data structures (strings, hashes, lists, sets, sorted sets, streams, bitmaps, HyperLogLog, geospatial), replication, persistence, and clustering — making it the most widely deployed distributed cache.
 - **Key Concepts:** **Single-Threaded Event Loop** (atomic commands, no race conditions), **Persistence** (RDB snapshots, AOF log, hybrid), **Eviction Policies** (allkeys-lru/lfu, volatile-ttl), **Replication** (async master-replica), **Redis Cluster** (16384 hash slots, CRC16 sharding), **Sentinel** (high availability failover).
+- **Redis Use Cases Beyond Caching** — Real-time leaderboards (sorted sets), rate limiters (sorted sets + Lua), pub/sub notifications, job queues (lists or streams), distributed locks (SET NX EX + Redlock), session stores, geospatial queries (GEO API), and probabilistic data structures (Bloom filters via RedisBloom module).
+- **Redis Memory Efficiency** — Use hashes for storing objects instead of individual string keys (reduces key overhead from ~80 bytes/key to ~20 bytes/field). Use integer encoding for small integers. Enable compression for large values. Use shorter key names (but keep them readable). Monitor `used_memory_overhead` to track key-level overhead.
 
 ---
 
@@ -16,6 +18,8 @@
 - **Persistence:** **RDB** — point-in-time snapshots, compact, fast recovery, data loss between snapshots. **AOF** — logs every write, durable (fsync everysec), larger file. **Hybrid** (Redis 4.0+) combines RDB base + AOF incremental.
 - **Redis Cluster:** Automatic sharding across up to 1000 nodes. CRC16(key) % 16384 determines slot. Smart clients calculate node ownership. Nodes gossip for failure detection.
 - **High Availability:** **Sentinel** provides monitoring, automatic failover, and service discovery. Minimum 3 Sentinels for quorum. **Replicas** provide read scaling and failover target.
+- **Redis Transactions vs Lua Scripts** — Redis transactions (MULTI/EXEC) batch commands but don't provide rollback — if one command fails, the rest still execute. Lua scripts provide true atomicity: all commands execute or none do, and they can include conditional logic (if/else). Prefer Lua scripts for any operation that needs atomic read-modify-write.
+- **Redis Stack (Redis 7+)** — Extends Redis with modules for search (full-text, vector search), JSON (native JSON document store), time series (ingestion, aggregation), and graph (property graph database). Redis Stack modules run within the same single-threaded event loop, maintaining atomicity guarantees.
 
 ```java
 // Distributed rate limiter with Lua script
@@ -37,6 +41,9 @@ private static final String SCRIPT =
 - **Storing Large Values (>10MB)** — Degrades performance and network throughput. Use object store for blobs.
 - **Ignoring Connection Management** — Connection leaks from unclosed connections. Use `RedisTemplate` or try-with-resources.
 - **No maxmemory Configuration** — Without it, Redis can exhaust server RAM and get OOM-killed.
+- **Using Redis as a Primary Database Without Persistence** — Without RDB or AOF, all data is lost on restart. Redis is primarily a cache, not a primary store. For critical data, configure both RDB (periodic snapshots) and AOF (everysec fsync) persistence.
+- **Not Configuring Connection Pooling** — Creating a new Redis connection per request exhausts file descriptors and increases latency. Use connection pooling (Lettuce or Jedis Pool) with a pool size of 10-50 connections per application instance.
+- **Running Redis on the Same Server as the Application** — Redis competes for CPU, memory, and network bandwidth. Dedicate separate instances for Redis, ideally with high-clock-speed CPUs for the single-threaded event loop.
 
 ---
 
@@ -48,6 +55,8 @@ private static final String SCRIPT =
 - **Hot Key Mitigation** — Replicate hot key to multiple shards, add local cache on each node, split key into sub-keys.
 - **Security** — Use ACLs (Redis 6+), TLS, bind to private interfaces, rename dangerous commands (`FLUSHALL`), deploy in VPC.
 - **Monitoring** — `INFO stats` for hit ratio, `SLOWLOG` for slow queries, `MEMORY DOCTOR` for fragmentation, `--hotkeys` and `--bigkeys` analysis.
+- **Redis Persistence Configuration Trade-offs** — RDB with 5-minute save intervals: best for cache (acceptable data loss, fast startup). AOF everysec: good for session store (lose 1 second of data, slightly slower startup). AOF always: strongest durability, but 10x slower writes. Hybrid (RDB base + AOF incremental): best of both — fast startup with minimal data loss.
+- **Cluster Resharding and Slot Migration** — When adding or removing nodes in Redis Cluster, slots must be migrated. Use `redis-cli --cluster reshard` to move slots from source to target nodes. Resharding is online and non-blocking. Monitor cluster state during resharding — the cluster remains available but per-node CPU increases. Plan resharding during low traffic windows.
 
 ---
 
@@ -175,3 +184,5 @@ public class LeaderboardService {
 - **Monitor memory, hit ratio, and evictions** — Three critical Redis metrics: `used_memory` vs `maxmemory` (track growth trends), `keyspace_hits / (keyspace_hits + keyspace_misses)` for hit ratio (target >95%), and `evicted_keys` (should be near zero — evictions mean cache is undersized). Set up alerts for each. Use `MEMORY DOCTOR` for fragmentation issues.
 
 - **Use Lua scripts for atomic multi-key operations** — Redis single-threaded execution makes Lua scripts atomic. Instead of GET → check → SET (3 round trips, race condition possible), write a Lua script that does all operations atomically in one round trip. Redis's built-in replication ensures the script runs the same way on replicas.
+- **Use the right eviction policy for your use case** — `allkeys-lru` for general-purpose caching (hot data stays, cold data evicted). `allkeys-lfu` for workloads with stable popularity (viral content, trending items). `volatile-ttl` for session stores where each key has a TTL and you want to evict soonest-expiring first. Never use `noeviction` in a cache deployment — it causes write failures when memory fills up.
+- **Use Redis Cluster for datasets exceeding a single node's memory** — A single Redis instance is limited by available RAM (typically 16-64GB in production). Redis Cluster automatically shards data across nodes using 16384 hash slots. Each node handles a subset of slots. For 100GB dataset, use 3-5 nodes with replicas. Cluster mode requires smart clients (Lettuce, Jedis) that understand slot routing. Operations spanning multiple keys (MGET, transactions) only work within the same slot.

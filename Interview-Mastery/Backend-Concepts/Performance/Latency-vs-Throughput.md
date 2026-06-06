@@ -7,6 +7,8 @@
 - **Definition:** Latency measures the time to complete a single operation (ms). Throughput measures operations completed per unit time (requests/second).
 - **Why It Exists:** These are the two fundamental performance metrics. Understanding the relationship and trade-offs between them is essential for designing scalable, responsive systems. Improving one often negatively impacts the other.
 - **Key Concepts:** **P50/P95/P99/P999** (latency percentiles), **Little's Law** (L = λ × W — concurrency = throughput × latency), **Tail Latency** (slowest requests in the distribution), **Head-of-Line Blocking** (slow request blocks subsequent ones), **Amdahl's Law** (parallel speedup limit).
+- **Latency vs Response Time** — Latency is the time the request spends waiting to be processed (queueing). Response time is latency + service time (actual processing). Total response time = queueing delay + processing time + network time. At high utilization, queueing delay dominates the total response time.
+- **Throughput Ceiling** — Every system has a maximum throughput determined by its slowest serial component. Throughput = 1 / (service time of critical path). Improving throughput requires either reducing service time or increasing parallelism of the critical path.
 
 ---
 
@@ -16,6 +18,8 @@
 - **Little's Law:** L = λ × W. Concurrency = Throughput × Latency. To increase throughput without increasing latency, you must increase concurrency. If latency increases, throughput must decrease or concurrency must increase.
 - **Tail Latency:** In distributed systems, a small percentage of requests take significantly longer (GC pauses, network packet loss, hot keys). Adding more servers makes tail latency worse (waiting for the slowest server).
 - **Trade-off:** Improving throughput often increases latency (batching groups requests). Reducing latency may reduce throughput (dedicated resources per request, less batching).
+- **The Utilization-Latency Curve** — Response time stays near baseline until utilization exceeds 70-80%, then grows asymptotically as `response_time = service_time / (1 - utilization)`. At 90% utilization, response time = 10× service time. At 99%, it's 100×. This non-linear relationship means small traffic increases near saturation cause massive latency spikes.
+- **Measuring Throughput Correctly** — Throughput must be measured under load, not at idle. A server handling 10 requests in 100ms each has throughput of 100 req/s. Under concurrency, measure throughput as completed requests over a fixed time window. Use Little's Law to validate: if concurrency is 50 and latency is 200ms, throughput should be 50/0.2 = 250 req/s.
 
 ```java
 // Measuring latency distribution with Micrometer
@@ -37,6 +41,8 @@ sample.stop(Timer.builder("http.server.requests")
 - **Infinite Queueing** — Unbounded queues grow latency non-linearly under load.
 - **Thread Pool Over-Subscription** — Too many threads increase context switching, reducing throughput and increasing latency.
 - **Ignoring the Coordination Penalty** — Adding servers doesn't linearly increase throughput (coordination overhead).
+- **Measuring Throughput Without Concurrency** — Testing throughput with a single client misses queueing effects. Always test under realistic concurrency levels that match production traffic patterns.
+- **Using Averages Instead of Percentiles** — Average latency hides problems: 99 requests at 10ms and 1 at 10s averages to 109ms. P99 correctly shows the 10-second experience. Always use percentiles for latency measurement.
 
 ---
 
@@ -47,6 +53,8 @@ sample.stop(Timer.builder("http.server.requests")
 - **Reducing Latency:** Optimize algorithms, use caching (in-memory → Redis → DB), async I/O, CDN, connection pooling, lock-free data structures, HTTP/2 multiplexing.
 - **Increasing Throughput:** Increase concurrency (more threads/instances), batch processing, pipeline operations, shard databases, eliminate bottleneck resources.
 - **Measuring Tools:** Micrometer `@Timed`, HDR Histogram for high-resolution percentiles, OpenTelemetry for distributed tracing, Prometheus for aggregation, Gatling/JMeter for load testing.
+- **Coordination Overhead in Distributed Systems** — As the number of services in a request path grows, throughput degrades due to serialization, network hops, and coordination. Each additional service adds network latency, serialization/deserialization overhead, and potential queueing. Use asynchronous communication and bulkheads to minimize coordination overhead.
+- **Optimizing for the Critical Path** — The critical path is the longest chain of sequential dependencies in a request. Reducing latency on the critical path directly improves overall response time. Optimizations off the critical path (parallel branches) improve throughput but don't reduce response time. Identify and focus on the critical path first.
 - **Capacity Planning:** `Throughput = 1 / (Latency × Concurrency Overhead)`. Use Little's Law to compute required concurrency from throughput and latency targets.
 
 ---
@@ -166,6 +174,7 @@ public ProducerFactory<String, Event> producerFactory() {
 - **Use separate thread pools for fast and slow operations** — A slow endpoint (e.g., report generation taking 10s) shares the same thread pool as fast endpoints (50ms). Under load, slow requests fill the pool and fast requests queue behind them. Separate pools ensure fast endpoints stay fast even when slow ones are saturated.
 
 - **Implement hedged requests to combat tail latency in distributed systems** — The probability of tail latency grows with the number of services in a call chain. With 10 services, each with 1% chance of being slow, the system has ~9.6% chance of being slow. Hedged requests: send a request to 2 instances, use the first response. This reduces tail latency from the slowest-of-N to the fastest-of-2, dramatically improving P99 at the cost of ~2× resource usage for the hedged calls.
+- **Optimize the critical path, not the noisiest component** — The critical path determines end-to-end latency. Shortening a non-critical path component (e.g., optimizing a parallel branch from 200ms to 50ms) doesn't improve overall latency if the critical path is 500ms. Use distributed tracing to identify the actual critical path before optimizing. Focus optimizations on the longest chain of sequential dependencies.
 
 ---
 

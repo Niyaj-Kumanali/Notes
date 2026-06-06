@@ -4,39 +4,28 @@
 
 ## Overview
 
-- **Definition:** A functional interface is an interface with exactly **one abstract method** (SAM — Single Abstract Method). They are the foundation of lambda expressions and method references in Java.
+- **Definition** — A functional interface is an interface with exactly one abstract method, known as the Single Abstract Method (SAM). They are the foundation of lambda expressions and method references in Java — every lambda implements a functional interface, and the compiler infers which interface a lambda targets based on context.
+- **@FunctionalInterface Annotation** — The annotation is optional but strongly recommended — it causes a compile error if a second abstract method is accidentally added, preserving the SAM contract. A functional interface can contain any number of `default` and `static` methods.
+- **Before Java 8** — Anonymous inner classes were the only way to pass behavior, requiring verbose boilerplate. Functional interfaces enable the lambda syntax, reducing ceremony and making behavior parameterization practical at scale.
+- **Standard Package** — The `java.util.function` package provides 43 standard functional interfaces covering most common use cases, so custom functional interfaces are rarely needed.
 
-- **Why It Exists:** Before Java 8, anonymous inner classes were the only way to pass behavior:
-  ```java
-  button.addActionListener(new ActionListener() {
-      @Override
-      public void actionPerformed(ActionEvent e) {
-          System.out.println("Clicked!");
-      }
-  });
-  ```
-  Functional interfaces enable lambda syntax:
-  ```java
-  button.addActionListener(e -> System.out.println("Clicked!"));
-  ```
-
-- **The @FunctionalInterface Annotation:**
-  - Optional but recommended — makes intent clear
-  - Compilation failure if a second abstract method is added
-  - ```java
-    @FunctionalInterface
-    public interface Predicate<T> {
-        boolean test(T t);
-    }
-    ```
-
-- **Default and Static Methods:** A functional interface can have `default` and `static` methods — only the single abstract method matters for the SAM contract. `Comparator` is a good example with many default and static methods but one abstract method (`compare`).
+```java
+@FunctionalInterface
+public interface Predicate<T> {
+    boolean test(T t);
+}
+```
 
 ---
 
 ## Core Functional Interfaces
 
-- **Definition:** The `java.util.function` package provides 43 functional interfaces. The six core ones cover most use cases.
+- **Predicate<T>** — Accepts an argument and returns a `boolean`, used for testing conditions and filtering (`test(T)`).
+- **Consumer<T>** — Accepts an argument and returns `void`, used for side effects like logging, printing, or saving (`accept(T)`).
+- **Function<T,R>** — Accepts an argument and returns a result of a potentially different type, used for value transformations (`apply(T)`).
+- **Supplier<T>** — Takes no arguments and returns a value, used for lazy initialization and factory patterns (`get()`).
+- **UnaryOperator<T>** — A specialization of `Function` where the input and output types are the same, commonly used for iterative transformations (`apply(T)`).
+- **BinaryOperator<T>** — A specialization of `BiFunction` where both arguments and the return type are the same, used for reduction operations like summing (`apply(T,T)`).
 
 | Interface | Signature | Purpose | Method |
 |-----------|-----------|---------|--------|
@@ -58,15 +47,18 @@ BinaryOperator<Integer> sum = (a, b) -> a + b;
 
 ### Bi-variants
 
-- **BiPredicate<T,U>:** `(T,U) → boolean`
-- **BiConsumer<T,U>:** `(T,U) → void`
-- **BiFunction<T,U,R>:** `(T,U) → R`
+- **BiPredicate<T,U>** — `(T,U) → boolean`, tests a condition on two arguments.
+- **BiConsumer<T,U>** — `(T,U) → void`, performs a side effect with two arguments.
+- **BiFunction<T,U,R>** — `(T,U) → R`, transforms two arguments into a result.
+- **Usage** — The bi-variants are essential for operations on map entries, combining two data sources, and callback patterns that need multiple parameters. There is no `BiSupplier` because a supplier by definition takes no arguments, and no `BiUnaryOperator` because a unary operator by definition operates on a single type.
 
 ---
 
 ## Primitive Specializations
 
-- **Definition:** Specialized functional interfaces that operate on primitives directly to avoid autoboxing overhead.
+- **Purpose** — Primitive-specialized functional interfaces operate directly on `int`, `long`, and `double` values, completely avoiding the boxing and unboxing overhead inherent in using generic interfaces like `Predicate<Integer>`. A `Predicate<Integer>` autoboxes each primitive `int` to an `Integer` object consuming 16-28 bytes of heap per value.
+- **Performance** — The equivalent `IntPredicate` operates on raw `int` values with zero allocation, making it 5-10x faster in performance-critical numeric processing. Each primitive type has specializations for predicates, consumers, functions, suppliers, and operators.
+- **Naming Conventions** — Specializations follow naming like `IntPredicate`, `LongConsumer`, `DoubleFunction`, `ToIntFunction`, and `IntToDoubleFunction`. In hot paths processing millions of elements, the difference between `Predicate<Integer>` and `IntPredicate` can be 50ms versus noticeable GC pauses.
 
 ```java
 // Avoid — autoboxing overhead in hot paths
@@ -90,7 +82,10 @@ IntPredicate p = x -> x > 5;
 
 ## Composition
 
-- **Definition:** Functional interfaces provide default methods for composing multiple operations together.
+- **Predicate Composition** — `Predicate` supports `and()`, `or()`, and `negate()` — logical operations that return new `Predicate` instances, enabling concise construction of complex conditions from simple building blocks.
+- **Function Composition** — `Function` supports `andThen()` (apply this function first, then the other) and `compose()` (apply the other first, then this one), allowing transformation pipelines that read left-to-right or right-to-left.
+- **Consumer Composition** — `Consumer` supports `andThen()` for chaining multiple side-effect operations in sequence, with each consumer receiving the same input value.
+- **Lightweight Wrappers** — These composition methods return new functional interface instances that delegate to the originals, meaning the composition is a lightweight wrapper — the original functions are not copied or modified.
 
 ```java
 // Predicate composition
@@ -114,7 +109,10 @@ Consumer<String> pipeline = log.andThen(save);
 
 ## Under the Hood: Lambda Compilation
 
-- **Definition:** Lambdas are NOT compiled as anonymous inner classes. Instead, Java uses `invokedynamic` (JVM instruction added in Java 7).
+- **invokedynamic Instruction** — Lambdas and method references are compiled using the `invokedynamic` JVM instruction (introduced in Java 7), not as anonymous inner classes. The Java compiler emits an `invokedynamic` call site referencing `LambdaMetafactory` as the bootstrap method.
+- **Runtime Generation** — At class load time or first invocation, the bootstrap method executes, generating the lambda's implementation class using `MethodHandle` APIs — not reflection — and linking it into a `CallSite` for permanent caching.
+- **Performance Trade-offs** — Non-capturing lambdas produce a single static instance reused forever with zero allocation per invocation. Anonymous inner classes allocate a new object on the heap every time they are instantiated.
+- **Memory Benefits** — No separate `.class` file per lambda, no classloader pressure, and captured values are handled through generated bytecode rather than reflection.
 
 ```
 Source:  list.filter(s -> s.length() > 3)
@@ -125,12 +123,6 @@ Runtime: LambdaMetafactory.metafactory()
          ↓
          Generates CallSite → Predicate<String> at runtime
 ```
-
-- **Benefits:**
-  - No separate .class file per lambda
-  - Lambda is generated once and cached
-  - Lower memory footprint than anonymous classes
-  - Captured variables use `MethodHandle` not reflection
 
 | Mechanism | Memory | Speed | Notes |
 |-----------|--------|-------|-------|
@@ -143,13 +135,10 @@ Runtime: LambdaMetafactory.metafactory()
 
 ## Common Mistakes
 
-- **Creating custom functional interfaces when standard ones suffice** — often `Consumer<T>` or `Function<T,R>` replaces a custom interface
-- **Not using primitive specializations in hot paths** — autoboxing penalty with `Predicate<Integer>` vs `IntPredicate`
-- **Checked exceptions in lambdas** — no standard functional interface declares checked exceptions; requires wrapper
-- **Variable capture with mutable state** — captured variables must be effectively final
-- **Lambda serialization** — lambdas are not serializable by default; requires cast to `Serializable`
-- **Ambiguous method overloads** — overloaded methods accepting different functional interfaces cause compilation ambiguity
-- **Overusing composition** — long chains of `.andThen()` can reduce readability
+- **Creating Custom Interfaces Unnecessarily** — Creating custom functional interfaces like `Transformer<T,R>` when `Function<T,R>` would suffice introduces incompatibility with standard APIs. A custom type cannot be used directly with `Stream.map()`, `Optional.map()`, or `CompletableFuture.thenApply()` without wrapping.
+- **Neglecting Primitive Specializations** — Neglecting primitive specializations in hot paths causes invisible autoboxing overhead. `Predicate<Integer>` boxes every value, while `IntPredicate` avoids allocation entirely — in a stream processing 10 million integers, the difference is 280 MB of garbage versus zero.
+- **Checked Exceptions in Standard Interfaces** — Handling checked exceptions inside lambdas using standard functional interfaces is impossible because no standard interface declares checked exceptions. The common workaround of wrapping in try-catch and rethrowing as `RuntimeException` is acceptable, but the original exception is preserved as the cause.
+- **Overusing Composition** — Composing too many operations with `andThen()` or `compose()` reduces readability and makes debugging difficult because stack traces from composed functions do not identify which stage failed. Beyond 3-4 compositions, extract to named intermediate variables.
 
 ---
 
@@ -157,7 +146,7 @@ Runtime: LambdaMetafactory.metafactory()
 
 ### Scenario 1: Configurable Validation Pipeline
 
-A user registration system must validate input against multiple rules. Each rule is a `Predicate<String>` that can be combined dynamically. Rules are loaded from a database and can change without code deployment.
+A user registration system validates input against multiple rules that are loaded from a database and can change without code deployment. Each rule is a `Predicate<String>` that can be combined dynamically, and the rules must short-circuit — if the input is empty, the email regex and breach check should never execute. The system must also return a list of all failed rules for the user to see, not just the first failure.
 
 ```java
 public class ValidationEngine {
@@ -187,11 +176,11 @@ Predicate<String> notPwned = s -> !breachedPasswords.contains(s);
 engine.addRule(notEmpty.and(validEmail).and(notPwned));
 ```
 
-`Predicate.and()` short-circuits — if input is empty, the email regex and breach check never run. `Predicate` composition allows building complex validation trees from simple, testable building blocks. The rules are stored in a `List<Predicate<String>>` so new rules can be added without modifying the engine.
+`Predicate.and()` short-circuits naturally — if the input is empty, `validEmail` and `notPwned` are never evaluated, preserving the fail-fast behavior. The `getFailures()` method uses a different terminal operation (`filter` + `collect`) to evaluate all rules and return every failure. Predicate composition allows building complex validation trees from simple, testable building blocks that are loaded dynamically from configuration.
 
 ### Scenario 2: Pluggable Cache Loading Strategy
 
-A caching layer needs different loading strategies: load from database, load from remote API, or compute on the fly. Each strategy is a `Supplier<Data>` that the cache uses when a key is missing. The strategy is chosen at configuration time.
+A caching layer supports different loading strategies — load from a database, fetch from a remote API, or compute on the fly. Each strategy is a `Supplier<Data>` that the cache invokes when a key is missing. The strategy is chosen at configuration time, and the cache must guarantee that the supplier runs at most once per key even under concurrent access.
 
 ```java
 public class CacheManager<K, V> {
@@ -216,11 +205,11 @@ new CacheManager<>(dbLoader);
 new CacheManager<>(apiLoader);
 ```
 
-The `Supplier<T>` abstracts the loading mechanism. The cache manager doesn't know whether it's loading from DB, API, or computation. Each supplier captures the dependencies it needs (database connection, REST client) and can be tested independently. The `computeIfAbsent` method guarantees the supplier runs at most once per key.
+The `Supplier<T>` abstracts the loading mechanism entirely — the cache manager has no knowledge of whether it is loading from a database, a remote API, or computing from scratch. Each supplier captures the specific dependencies it needs (database connection, REST client, computation parameters) and can be unit tested independently. The `computeIfAbsent` method guarantees the supplier runs at most once per key across all concurrent threads, making this pattern safe for high-concurrency environments.
 
 ### Scenario 3: Event Processing with Consumer Chain
 
-A monitoring system receives raw log events, processes them through a pipeline (parse, enrich, filter, persist), and sends alerts. Each stage is a `Consumer<Event>` that can be composed.
+A monitoring system receives raw log events and processes them through a multistage pipeline: parse raw data, enrich with metadata, filter low-severity events, persist to the database, and send alerts for critical events. Each stage is a `Consumer<Event>` that can be composed into a single pipeline, and stages should be independently testable.
 
 ```java
 public class EventPipeline {
@@ -242,243 +231,203 @@ public class EventPipeline {
 }
 ```
 
-`Consumer.andThen()` creates a composed consumer that executes stages in order. Each stage is focused and testable. The `filter` stage uses `Consumer` as a side-effect operation (setting `suppressed` flag) — this is appropriate because we're mutating event state. The pipeline is O(1) overhead regardless of the number of stages.
+`Consumer.andThen()` creates a composed consumer that executes all stages in order for each event. Each stage is a focused, independently testable consumer — you can test `parse` with a mock event and verify the parsed fields without involving the database. The `filter` stage uses `Consumer` as a side-effect operation by setting a `suppressed` flag on the event, which is appropriate here because we are mutating event state rather than transforming values. The pipeline introduces O(1) overhead regardless of the number of stages because `andThen()` creates a lightweight delegating wrapper, not a copy of the stages.
 
 ---
 
 ## Scenario-Based Questions
 
-1. **Q: You are designing an API where users pass filtering logic as a `Predicate<T>`. Some users pass lambdas that throw checked exceptions (e.g., a database lookup in the predicate). The current `Predicate<T>` interface doesn't support checked exceptions. How do you design a filtering API that handles checked exceptions without forcing all callers to write try-catch blocks?**
-   A: Create a custom `ThrowingPredicate<T>` and provide a bridge method:
-   ```java
-   @FunctionalInterface
-   public interface ThrowingPredicate<T> {
-       boolean test(T t) throws Exception;
-   }
+**Q: You are designing an API where users pass filtering logic as a `Predicate<T>`. Some users pass lambdas that throw checked exceptions (e.g., a database lookup in the predicate). The current `Predicate<T>` interface doesn't support checked exceptions. How do you design a filtering API that handles checked exceptions without forcing all callers to write try-catch blocks?**
 
-   public <T> Stream<T> filter(Stream<T> stream, ThrowingPredicate<T> predicate) {
-       return stream.filter(t -> {
-           try { return predicate.test(t); }
-           catch (Exception e) { throw new RuntimeException(e); }
-       });
-   }
-   ```
-   Callers who don't need checked exceptions use standard lambdas (auto-boxed to `ThrowingPredicate` via lambda compatibility). Callers who need checked exceptions write the same lambda — the wrapping happens inside the API. For callers who need detailed exception handling, provide an overload that accepts `Predicate<T>` and `Consumer<Exception>`.
+A: Create a custom `ThrowingPredicate<T>` interface that declares `throws Exception` on its single abstract method, then provide an adapter method that wraps the throwing predicate into a standard `Predicate<T>`:
+```java
+@FunctionalInterface
+public interface ThrowingPredicate<T> {
+    boolean test(T t) throws Exception;
+}
 
-2. **Q: A method accepts `Consumer<String>` for logging. In production, the consumer writes to a file. In tests, the consumer captures messages for assertion. A developer accidentally passes a consumer that blocks indefinitely on the first message. How do you make this API safe?**
-   A: Wrap the consumer with a timeout decorator:
-   ```java
-   public static <T> Consumer<T> withTimeout(Consumer<T> delegate, long timeout, TimeUnit unit) {
-       return t -> {
-           var future = CompletableFuture.runAsync(() -> delegate.accept(t));
-           try { future.get(timeout, unit); }
-           catch (TimeoutException e) { future.cancel(true); throw new RuntimeException("Consumer timed out", e); }
-       };
-   }
-   ```
-   Better: the API should accept `Consumer<String>` but execute it in a managed context with a timeout. For production, always wrap third-party consumers with error handling and timeouts. A blocking consumer can hang a thread in the pool — use `CompletableFuture.orTimeout()` or a `ScheduledExecutorService` to enforce deadlines.
+public <T> Stream<T> filter(Stream<T> stream, ThrowingPredicate<T> predicate) {
+    return stream.filter(t -> {
+        try { return predicate.test(t); }
+        catch (Exception e) { throw new RuntimeException(e); }
+    });
+}
+```
+Callers who do not need checked exceptions use standard lambdas that are compatible with `ThrowingPredicate` via lambda type inference. Callers who need to call a checked-exception-throwing method write the same lambda without any try-catch boilerplate — the wrapping happens inside the API method. For callers who need fine-grained exception handling, provide an overload that accepts both a `ThrowingPredicate<T>` and a `Consumer<Exception>` error handler.
 
-3. **Q: A configuration service returns `Optional<Config>`. Multiple callers use `.orElseGet(() -> loadDefaultConfig())` for fallback. The `loadDefaultConfig()` is expensive (reads a file). Some callers also need to differentiate between "config not found" and "error loading default". How do you design a `Supplier`-based fallback that handles both cases?**
-   A: Create a richer `Fallback<T>` abstraction:
-   ```java
-   public sealed interface Fallback<T> permits Value, Error, Lazy {
-       record Value<T>(T value) implements Fallback<T> {}
-       record Error<T>(Exception exception) implements Fallback<T> {}
-       record Lazy<T>(Supplier<T> supplier) implements Fallback<T> {}
-   }
+**Q: A method accepts `Consumer<String>` for logging. In production, the consumer writes to a file. In tests, the consumer captures messages for assertion. A developer accidentally passes a consumer that blocks indefinitely on the first message. How do you make this API safe?**
 
-   public Fallback<Config> getConfig(String key) {
-       Optional<Config> config = configRepo.find(key);
-       if (config.isPresent()) return new Fallback.Value<>(config.get());
-       try {
-           return new Fallback.Value<>(loadDefaultConfig());
-       } catch (Exception e) {
-           return new Fallback.Error<>(e);
-       }
-   }
-   ```
-   The pure `Supplier` approach loses error semantics. The `Fallback` sealed interface gives callers pattern-matching capability: `switch (result) { case Value v -> ...; case Error e -> ...; }`. The `Lazy` variant wraps `Supplier` for deferred evaluation. This is more explicit than `Optional.orElseGet()` and handles the 3-state outcome (value, fallback, error).
-
-4. **Q: You have a `Function<String, String>` that normalizes text (lowercase, trim, remove accents). This function is passed to 20 different stream pipelines. A developer modifies the function to also strip HTML tags, which breaks 15 of the 20 pipelines. How do you prevent this with functional interfaces?**
-   A: Use distinct functional interface types for distinct operations — don't reuse `Function<String, String>` for different semantic meanings:
-   ```java
-   // Instead of:
-   Function<String, String> normalize = s -> s.toLowerCase().trim();
-   Function<String, String> sanitize = s -> s.replaceAll("<[^>]*>", "");
-
-   // Use:
-   @FunctionalInterface interface Normalizer extends Function<String, String> {}
-   @FunctionalInterface interface Sanitizer extends Function<String, String> {}
-
-   Normalizer normalizer = s -> s.toLowerCase().trim();
-   Sanitizer sanitizer = s -> s.replaceAll("<[^>]*>", "");
-
-   // Now method signatures carry intent:
-   public String process(String input, Normalizer normalizer) { ... }
-   public String render(String input, Sanitizer sanitizer) { ... }
-   ```
-   The distinct types prevent accidentally passing a sanitizer where a normalizer is expected. The `extends Function<String, String>` ensures interoperability with stream APIs. This follows the "make illegal states unrepresentable" principle.
-
-5. **Q: A `BinaryOperator<BigDecimal>` is used in a `reduce()` operation. Parallel execution gives different results than sequential execution. The operation is `(a, b) -> a.multiply(b).setScale(2, RoundingMode.HALF_UP)`. What is wrong?**
-   A: The rounding mode makes this operation non-associative. `round(round(a × b) × c) ≠ round(a × round(b × c))` in general due to intermediate rounding. Fix: perform the reduction without rounding, then round at the end:
-   ```java
-   // Bad — non-associative due to intermediate rounding
-   BinaryOperator<BigDecimal> bad = (a, b) -> a.multiply(b).setScale(2, HALF_UP);
-
-   // Good — associative, round at the end
-   BinaryOperator<BigDecimal> good = BigDecimal::multiply;
-
-   BigDecimal total = amounts.stream()
-       .reduce(BigDecimal.ONE, good)
-       .setScale(2, HALF_UP);
-   ```
-   The broader lesson: any `BinaryOperator` or combiner function with state, rounding, or truncation is likely non-associative. Test with: `op(op(a, b), c) == op(a, op(b, c))` for all inputs. If not, the operation is unsuitable for parallel streams.
-
-6. **Q: A method returns `Supplier<Connection>` that lazily creates database connections. The supplier is stored in a static map and reused across requests. Over time, connections are never closed — the supplier creates a new one each time `get()` is called. How do you design a `Supplier` that manages resource lifecycle?**
-   A: Don't use `Supplier` for resources that need cleanup. Instead, use `AutoCloseable` with try-with-resources:
-   ```java
-   // Bad — Supplier creates but never closes
-   Supplier<Connection> connSupplier = () -> createConnection();
-
-   // Good — use try-with-resources pattern
-   public <T> T withConnection(Function<Connection, T> callback) {
-       try (Connection conn = createConnection()) {
-           return callback.apply(conn);
-       }
-   }
-   ```
-   If you must use `Supplier`, wrap it in a managed supplier that tracks and closes resources:
-   ```java
-   public class ManagedSupplier<T extends AutoCloseable> implements Supplier<T>, AutoCloseable {
-       private final List<T> resources = new ArrayList<>();
-       private final Supplier<T> delegate;
-       public ManagedSupplier(Supplier<T> delegate) { this.delegate = delegate; }
-       @Override public T get() { T resource = delegate.get(); resources.add(resource); return resource; }
-       @Override public void close() { resources.forEach(this::closeQuietly); }
-   }
-   ```
-   The lesson: `Supplier<T>` is for value production, not resource management. If lifecycle matters, use `Function<Consumer<T>, R>` or the execute-around pattern.
-
-7. **Q: A rate limiter accepts `Runnable` tasks and throttles execution to 10 QPS. A developer submits `() -> database.query("DELETE FROM users")` — the lambda captures a dangerous SQL string and executes it later. How do you design the API to make destructive operations more visible?**
-   A: Use distinct functional interfaces for read vs write operations:
-   ```java
-   // Instead of:
-   void submit(Runnable task); // Both reads and writes look the same
-
-   // Use:
-   @FunctionalInterface interface ReadOperation { void execute(); }
-   @FunctionalInterface interface WriteOperation { void execute(); }
-
-   void submitRead(ReadOperation op);
-   void submitWrite(WriteOperation op);
-   ```
-   This forces callers to think about the operation type:
-   ```java
-   rateLimiter.submitWrite(() -> database.delete("users")); // Explicit: this is a write
-   rateLimiter.submitRead(() -> database.query("SELECT *")); // Explicit: this is a read
-   ```
-   The two interface types have the same signature but different semantics. The rate limiter can apply different throttling, queuing, and error handling for reads vs writes. This pattern (phantom types / type-safe tagging) uses functional interfaces to encode semantic intent in the type system.
-
-8. **Q: A `UnaryOperator<BigDecimal>` that applies tax is passed to a processing pipeline. The tax rate changes daily. The operator is created once at startup and cached — it always uses the old tax rate. How do you make it dynamic without recreating the operator?**
-   A: Use a `Supplier<BigDecimal>` for the tax rate inside the `UnaryOperator`:
-   ```java
-   // Static — never updates
-   UnaryOperator<BigDecimal> staticTax = price -> price.multiply(BigDecimal.valueOf(0.2));
-
-   // Dynamic — reads current rate every time
-   Supplier<BigDecimal> taxRateSupplier = () -> configService.getTaxRate();
-   UnaryOperator<BigDecimal> dynamicTax = price -> price.multiply(taxRateSupplier.get());
-   ```
-   The `dynamicTax` operator captures a `Supplier`, not a value. Each invocation calls `taxRateSupplier.get()` to get the current rate. The `Supplier` abstraction decouples the "what" (apply tax) from the "when" (which rate). For caching with TTL, wrap the supplier: `Supplier<BigDecimal> cachedTax = Suppliers.memoizeWithDuration(taxRateSupplier, Duration.ofHours(1))`.
-
-9. **Q: You have a chain `Function<A, B>.andThen(Function<B, C>).andThen(Function<C, D>)`. One of the functions throws NullPointerException intermittently. Stack traces only show the outer caller, not which function in the chain failed. How do you debug composition chains?**
-   A: Create a debugging wrapper that captures the function identity:
-   ```java
-   public static <T, R> Function<T, R> traced(String name, Function<T, R> fn) {
-       return t -> {
-           try {
-               return fn.apply(t);
-           } catch (Exception e) {
-               throw new RuntimeException("Function '" + name + "' failed with input: " + t, e);
-           }
-       };
-   }
-
-   // Usage
-   Function<A, B> step1 = traced("parse", this::parse);
-   Function<B, C> step2 = traced("validate", this::validate);
-   Function<C, D> step3 = traced("enrich", this::enrich);
-
-   Function<A, D> pipeline = step1.andThen(step2).andThen(step3);
-   ```
-   The traced wrapper preserves the original exception as the cause and adds context about which function in the chain failed and what the input was. For production, use a `java.util.function` decorator with structured logging. Without tracing, a composition chain of 5+ functions becomes impossible to debug when an intermediate step fails.
-
-10. **Q: A `BiConsumer<HttpRequest, HttpResponse>` is used as a middleware handler. The first middleware modifies the request, passes it to the next, and modifies the response. The handler is: `(req, res) -> { audit.log(req); next.accept(req, res); encrypt(res); }`. What concurrency issues arise with this `BiConsumer` chain?**
-    A: The `BiConsumer` captures `next` and `audit` via `this`. If multiple requests are processed concurrently, `encrypt(res)` may modify the response while the next handler is still reading it. Fix: ensure each middleware creates copies of mutable state:
-    ```java
-    // Instead of mutating in place:
-    BiConsumer<HttpRequest, HttpResponse> handler = (req, res) -> {
-        audit.log(req);
-        next.accept(req, res); // res may still be modified by next
-        encrypt(res); // Race: next may still be writing to res
+A: Wrap the consumer with a decorator that enforces a timeout on each `accept()` call, so that a blocking consumer cannot hang the calling thread indefinitely:
+```java
+public static <T> Consumer<T> withTimeout(Consumer<T> delegate, long timeout, TimeUnit unit) {
+    return t -> {
+        var future = CompletableFuture.runAsync(() -> delegate.accept(t));
+        try { future.get(timeout, unit); }
+        catch (TimeoutException e) { future.cancel(true); throw new RuntimeException("Consumer timed out", e); }
     };
+}
+```
+For production use, the API should never blindly trust externally provided consumers — always wrap them with error handling and timeout enforcement using `CompletableFuture.orTimeout()` or a dedicated `ScheduledExecutorService`. A blocking consumer can hang a thread in the thread pool indefinitely, eventually exhausting the pool and causing cascading failures across the application.
 
-    // Use CompletableFuture chaining for pipeline isolation:
-    Function<HttpRequest, CompletableFuture<HttpResponse>> handler = req ->
-        auditAsync(req)
-            .thenCompose(v -> next.apply(req))
-            .thenApply(res -> encrypt(res));
-    ```
-    The `BiConsumer` side-effect pattern is inherently problematic for concurrent pipelines. Each stage shares mutable `req` and `res` references. Prefer `Function<T, CompletableFuture<R>>` where each stage produces a new value rather than mutating shared state.
+**Q: A configuration service returns `Optional<Config>`. Multiple callers use `.orElseGet(() -> loadDefaultConfig())` for fallback. The `loadDefaultConfig()` is expensive (reads a file). Some callers also need to differentiate between "config not found" and "error loading default". How do you design a `Supplier`-based fallback that handles both cases?**
+
+A: Create a sealed `Fallback<T>` hierarchy that explicitly models the three possible outcomes — a value, a fallback produced from a supplier, or an error with the captured exception:
+```java
+public sealed interface Fallback<T> permits Value, Error, Lazy {
+    record Value<T>(T value) implements Fallback<T> {}
+    record Error<T>(Exception exception) implements Fallback<T> {}
+    record Lazy<T>(Supplier<T> supplier) implements Fallback<T> {}
+}
+
+public Fallback<Config> getConfig(String key) {
+    Optional<Config> config = configRepo.find(key);
+    if (config.isPresent()) return new Fallback.Value<>(config.get());
+    try {
+        return new Fallback.Value<>(loadDefaultConfig());
+    } catch (Exception e) {
+        return new Fallback.Error<>(e);
+    }
+}
+```
+The pure `Supplier` approach loses error semantics — a supplier that throws is indistinguishable from a supplier that returns null or an empty optional. The sealed interface gives callers pattern-matching capability with `switch` expressions in Java 21+: `switch (result) { case Value v -> ...; case Error e -> log.warn("Fallback failed", e.exception()); }`. The `Lazy` variant wraps a `Supplier` for deferred evaluation, giving the caller control over when the fallback is computed.
+
+**Q: You have a `Function<String, String>` that normalizes text (lowercase, trim, remove accents). This function is passed to 20 different stream pipelines. A developer modifies the function to also strip HTML tags, which breaks 15 of the 20 pipelines. How do you prevent this with functional interfaces?**
+
+A: Use distinct functional interface types for semantically different operations, even when they share the same type signature. Create extended interfaces that carry semantic meaning:
+```java
+@FunctionalInterface interface Normalizer extends Function<String, String> {}
+@FunctionalInterface interface Sanitizer extends Function<String, String> {}
+
+Normalizer normalizer = s -> s.toLowerCase().trim();
+Sanitizer sanitizer = s -> s.replaceAll("<[^>]*>", "");
+
+// Now method signatures carry intent:
+public String process(String input, Normalizer normalizer) { ... }
+public String render(String input, Sanitizer sanitizer) { ... }
+```
+The distinct types prevent accidentally passing a sanitizer where a normalizer is expected, because the compiler enforces the type distinction. Extending `Function<String, String>` preserves full interoperability with standard stream APIs. This follows the "make illegal states unrepresentable" principle — the type system encodes the semantic distinction rather than relying on documentation or naming conventions.
+
+**Q: A `BinaryOperator<BigDecimal>` is used in a `reduce()` operation. Parallel execution gives different results than sequential execution. The operation is `(a, b) -> a.multiply(b).setScale(2, RoundingMode.HALF_UP)`. What is wrong?**
+
+A: The intermediate rounding makes this operation non-associative — `round(round(a × b) × c) ≠ round(a × round(b × c))` in general due to precision loss at each intermediate step. `reduce()` requires the combiner to be associative, and when the stream is parallelized, the JVM partitions the data and applies the reduction in an arbitrary tree structure, exposing the non-associativity:
+```java
+// Bad — non-associative due to intermediate rounding
+BinaryOperator<BigDecimal> bad = (a, b) -> a.multiply(b).setScale(2, HALF_UP);
+
+// Good — associative, round at the end
+BinaryOperator<BigDecimal> good = BigDecimal::multiply;
+
+BigDecimal total = amounts.stream()
+    .reduce(BigDecimal.ONE, good)
+    .setScale(2, HALF_UP);
+```
+The broader lesson: any `BinaryOperator` with state, rounding, truncation, or side effects is likely non-associative and will produce non-deterministic results in parallel streams. Test with `op(op(a, b), c) == op(a, op(b, c))` for all inputs to verify associativity.
+
+**Q: A method returns `Supplier<Connection>` that lazily creates database connections. The supplier is stored in a static map and reused across requests. Over time, connections are never closed — the supplier creates a new one each time `get()` is called. How do you design a `Supplier` that manages resource lifecycle?**
+
+A: `Supplier<T>` is designed for value production, not resource management, and has no concept of lifecycle or cleanup. Do not use `Supplier` for resources that must be explicitly closed. Instead, use the execute-around pattern with `Function<Connection, R>` that guarantees the resource is closed in a finally block:
+```java
+public <T> T withConnection(Function<Connection, T> callback) {
+    try (Connection conn = createConnection()) {
+        return callback.apply(conn);
+    }
+}
+```
+If you truly need a supplier-like API for closeable resources, create a `ManagedSupplier<T extends AutoCloseable>` that tracks all created resources and implements `AutoCloseable` itself. The broader lesson: choose the abstraction that matches the lifecycle. `Supplier<T>` is appropriate for stateless value production; `Function<T, R>` with execute-around is appropriate for resources that need cleanup.
+
+**Q: A rate limiter accepts `Runnable` tasks and throttles execution to 10 QPS. A developer submits `() -> database.query("DELETE FROM users")` — the lambda captures a dangerous SQL string and executes it later. How do you design the API to make destructive operations more visible?**
+
+A: Use distinct functional interface types for read versus write operations, even though both have the same method signature of `() → void`. The type distinction forces callers to explicitly choose which operation category they intend:
+```java
+@FunctionalInterface interface ReadOperation { void execute(); }
+@FunctionalInterface interface WriteOperation { void execute(); }
+
+void submitRead(ReadOperation op);
+void submitWrite(WriteOperation op);
+
+// Usage:
+rateLimiter.submitWrite(() -> database.delete("users")); // Explicit: this is a write
+rateLimiter.submitRead(() -> database.query("SELECT *")); // Explicit: this is a read
+```
+The two interface types have identical method signatures but encode different semantics in the type system. The rate limiter can apply different throttling policies, queuing strategies, and error handling for reads versus writes. This pattern — sometimes called phantom types or type-safe tagging — uses functional interfaces to encode semantic intent that the compiler enforces.
+
+**Q: A `UnaryOperator<BigDecimal>` that applies tax is passed to a processing pipeline. The tax rate changes daily. The operator is created once at startup and cached — it always uses the old tax rate. How do you make it dynamic without recreating the operator?**
+
+A: Rather than capturing the tax rate as a value at creation time, capture a `Supplier<BigDecimal>` that reads the current rate every time the operator is applied:
+```java
+// Static — never updates
+UnaryOperator<BigDecimal> staticTax = price -> price.multiply(BigDecimal.valueOf(0.2));
+
+// Dynamic — reads current rate every time
+Supplier<BigDecimal> taxRateSupplier = () -> configService.getTaxRate();
+UnaryOperator<BigDecimal> dynamicTax = price -> price.multiply(taxRateSupplier.get());
+```
+The `dynamicTax` operator captures a `Supplier`, not a fixed value, so each invocation calls `taxRateSupplier.get()` to fetch the latest rate from the configuration service. The `Supplier` abstraction decouples the "what to do" (apply tax) from the "what value to use" (the current rate). For performance-sensitive scenarios, wrap the supplier with time-based caching: `Supplier<BigDecimal> cachedTax = Suppliers.memoizeWithDuration(taxRateSupplier, Duration.ofHours(1))` from a library like Guava.
+
+**Q: You have a chain `Function<A, B>.andThen(Function<B, C>).andThen(Function<C, D>)`. One of the functions throws NullPointerException intermittently. Stack traces only show the outer caller, not which function in the chain failed. How do you debug composition chains?**
+
+A: Create a tracing wrapper decorator that captures the function's identity and the input value when an exception occurs:
+```java
+public static <T, R> Function<T, R> traced(String name, Function<T, R> fn) {
+    return t -> {
+        try {
+            return fn.apply(t);
+        } catch (Exception e) {
+            throw new RuntimeException("Function '" + name + "' failed with input: " + t, e);
+        }
+    };
+}
+
+Function<A, B> step1 = traced("parse", this::parse);
+Function<B, C> step2 = traced("validate", this::validate);
+Function<C, D> step3 = traced("enrich", this::enrich);
+
+Function<A, D> pipeline = step1.andThen(step2).andThen(step3);
+```
+The traced wrapper preserves the original exception as the cause and adds contextual information about which function name and input caused the failure. Without tracing, a composition chain of five or more functions becomes nearly impossible to debug because the stack trace from a composed `Function` does not include which stage threw the exception. For production, consider AOP-based instrumentation or structured logging that records the pipeline stage with each invocation.
+
+**Q: A `BiConsumer<HttpRequest, HttpResponse>` is used as a middleware handler. The first middleware modifies the request, passes it to the next, and modifies the response. The handler is: `(req, res) -> { audit.log(req); next.accept(req, res); encrypt(res); }`. What concurrency issues arise with this `BiConsumer` chain?**
+
+A: The `BiConsumer` captures `next` and `audit` via `this`, and when multiple requests are processed concurrently, `encrypt(res)` may modify the response while the next middleware is still reading or writing to it, creating a data race. The shared mutable `req` and `res` references violate the principle that each stage should produce new values rather than mutating shared state. Fix this by using `Function<HttpRequest, CompletableFuture<HttpResponse>>` where each stage produces a new, immutable response rather than mutating a shared reference:
+```java
+Function<HttpRequest, CompletableFuture<HttpResponse>> handler = req ->
+    auditAsync(req)
+        .thenCompose(v -> next.apply(req))
+        .thenApply(res -> encrypt(res));
+```
+In this functional pipeline, `encrypt()` receives the response from the previous stage and produces a new encrypted response, leaving the original untouched. The `CompletableFuture` chaining provides thread isolation and backpressure naturally. The `BiConsumer` side-effect pattern is inherently problematic for concurrent middleware pipelines because it assumes single-threaded, sequential execution.
 
 ---
 
 ## Interview Questions
 
-1. **What is a functional interface in Java?**
-   A: A functional interface is an interface with exactly one abstract method (SAM — Single Abstract Method). It may contain any number of `default` and `static` methods. The `@FunctionalInterface` annotation is optional but recommended — it causes a compile error if a second abstract method is added. Functional interfaces are the target type for lambda expressions and method references.
+**What is a functional interface in Java?** A functional interface is an interface with exactly one abstract method (SAM — Single Abstract Method). It may contain any number of `default` and `static` methods without affecting its functional status. The `@FunctionalInterface` annotation is optional but recommended — it causes a compile error if a second abstract method is added. Functional interfaces are the compilation target for lambda expressions and method references.
 
-2. **What are the core functional interfaces in `java.util.function`?**
-   A: The six core interfaces are: `Predicate<T>` (T → boolean, method: `test()`), `Consumer<T>` (T → void, method: `accept()`), `Function<T,R>` (T → R, method: `apply()`), `Supplier<T>` (() → T, method: `get()`), `UnaryOperator<T>` (T → T, method: `apply()`), and `BinaryOperator<T>` (T,T → T, method: `apply()`). Each also has bi-variants (`BiPredicate`, `BiConsumer`, `BiFunction`).
+**What are the core functional interfaces in `java.util.function`?** The six core interfaces are `Predicate<T>` (T → boolean), `Consumer<T>` (T → void), `Function<T,R>` (T → R), `Supplier<T>` (() → T), `UnaryOperator<T>` (T → T), and `BinaryOperator<T>` (T,T → T). Each has bi-variants: `BiPredicate<T,U>`, `BiConsumer<T,U>`, and `BiFunction<T,U,R>`. The package contains 43 total interfaces including primitive specializations.
 
-3. **What is the difference between `Consumer<T>` and `Function<T, R>`?**
-   A: `Consumer<T>` takes an argument and returns no result — it's used for side effects (logging, printing, saving). `Function<T, R>` takes an argument and returns a result — it's used for transformations. Use `Consumer` when the purpose is an action; use `Function` when the purpose is a mapping. `Consumer` supports composition via `andThen()`; `Function` supports `andThen()` and `compose()`.
+**What is the difference between `Consumer<T>` and `Function<T, R>`?** `Consumer<T>` accepts a single argument and returns no result, making it suitable for side-effect operations like logging, printing, sending notifications, or mutating object state. `Function<T, R>` accepts an argument and returns a result, making it suitable for pure transformations. `Consumer` supports composition via `andThen()`, while `Function` supports both `andThen()` (left-to-right) and `compose()` (right-to-left).
 
-4. **What is `Supplier<T>` used for?**
-   A: `Supplier<T>` represents a function that takes no arguments and returns a value. It's used for: lazy initialization (`Optional.orElseGet(() -> expensiveLoad())`), factory patterns (`Supplier<Connection> = () -> createConnection()`), generating sequences (`Stream.generate(supplier)`), and deferring computation to a later time or thread.
+**What is `Supplier<T>` used for?** `Supplier<T>` takes no arguments and returns a value. Common use cases include lazy evaluation in `Optional.orElseGet(() -> expensiveLoad())`, factory patterns where the caller controls when an object is created, stream generation via `Stream.generate(supplier)`, and deferring computation to a different thread or execution context. Suppliers should typically be idempotent or at least side-effect-free.
 
-5. **What is the difference between `andThen()` and `compose()` in `Function`?**
-   A: `f.andThen(g)` means apply `f` first, then `g` — equivalent to `g(f(x))`. `f.compose(g)` means apply `g` first, then `f` — equivalent to `f(g(x))`. `andThen()` is left-to-right; `compose()` is right-to-left. In most codebases, `andThen()` is more common because it reads naturally in method-chaining style.
+**What is the difference between `andThen()` and `compose()` in `Function`?** `f.andThen(g)` applies `f` first and then `g`, equivalent to `g(f(x))`. `f.compose(g)` applies `g` first and then `f`, equivalent to `f(g(x))`. `andThen()` reads left-to-right (natural for method chaining), while `compose()` reads right-to-left (natural for mathematical notation). In practice, `andThen()` is far more common in Java codebases.
 
-6. **Why are primitive specializations like `IntPredicate` important?**
-   A: Primitive specializations avoid autoboxing overhead. `Predicate<Integer>` boxes each `int` to `Integer` (28 bytes), while `IntPredicate` uses `int` directly (4 bytes). In hot paths with millions of operations, autoboxing causes allocation pressure and GC pauses. Always use `IntPredicate`, `IntFunction`, `ToIntFunction`, etc. when working with primitives in performance-sensitive code.
+**Why are primitive specializations like `IntPredicate` important?** Primitive specializations eliminate autoboxing overhead — `IntPredicate` operates on raw `int` values (4 bytes each), while `Predicate<Integer>` wraps each value in an `Integer` object (16-28 bytes on the heap). For pipelines processing millions of values, the boxed variant creates megabytes of garbage that trigger GC pauses. The difference between `sum()` on `IntStream` versus `reduce()` on `Stream<Integer>` can be 5-10x in throughput.
 
-7. **Can a functional interface extend another functional interface?**
-   A: Yes, but a functional interface with a SAM that matches the parent's SAM is still functional. If the child interface declares a new abstract method, it's no longer a functional interface. `Comparator<T>` is an example that extends `Serializable` with many default/static methods but only one abstract method (`compare`). This is also how to create type aliases: `@FunctionalInterface interface Transformer<T,R> extends Function<T,R> {}`.
+**Can a functional interface extend another functional interface?** Yes, as long as the child interface does not add a new abstract method. If the parent and child both declare the same single abstract method signature, the child remains a functional interface. This is how to create type-safe aliases: `@FunctionalInterface interface Transformer<T,R> extends Function<T,R> {}`. If the child declares any new abstract method beyond the parent's SAM, the child is no longer a functional interface and will be flagged by `@FunctionalInterface`.
 
-8. **How do functional interfaces enable method references?**
-   A: Method references (`String::length`, `System.out::println`) are compiled to the same `invokedynamic` instruction as lambdas. The method reference's signature must match the functional interface's SAM. For `Function<String, Integer>`, `String::length` matches because `length()` takes no args and returns `int`. Method references are resolved at compile time — if the method signature doesn't match, it's a compile error, not a runtime failure.
+**How do functional interfaces enable method references?** Method references (`String::length`, `Integer::parseInt`) are compiled to the same `invokedynamic` instruction as lambdas. The compiler resolves the method reference's signature against the target functional interface's SAM — for `Function<String, Integer>`, `String::length` matches because `length()` takes no arguments and returns `int`. If the method signature does not match, the error is caught at compile time, not at runtime.
 
-9. **What is the relationship between `Comparator<T>` and functional interfaces?**
-   A: `Comparator<T>` is a functional interface with SAM `int compare(T o1, T o2)`. It has many `default` methods (`reversed()`, `thenComparing()`, `thenComparingInt()`) and `static` methods (`comparing()`, `naturalOrder()`, `nullsFirst()`). These composition methods return `Comparator` instances, enabling fluent comparator construction: `Comparator.comparing(Person::age).thenComparing(Person::name).reversed()`.
+**What is the relationship between `Comparator<T>` and functional interfaces?** `Comparator<T>` is a functional interface with SAM `int compare(T o1, T o2)`. It has many `default` methods like `reversed()`, `thenComparing()`, and `thenComparingInt()` for fluent comparator construction, and `static` methods like `comparing()`, `naturalOrder()`, and `nullsFirst()`. These composition methods return new `Comparator` instances, enabling declarative sorting: `Comparator.comparing(Person::age).thenComparing(Person::name).reversed()`.
 
-10. **How do you create a custom functional interface correctly?**
-    A: Annotate with `@FunctionalInterface`, ensure exactly one abstract method, and consider extending a standard interface if possible. Example: `@FunctionalInterface interface ThrowingFunction<T,R> { R apply(T t) throws Exception; }`. If the standard `Function<T,R>` would work with a wrapper, prefer that over a custom interface. Custom interfaces should only be created when the standard ones lack necessary semantics (like checked exception support or multiple parameters with meaningful names).
+**How do you create a custom functional interface correctly?** Annotate with `@FunctionalInterface`, ensure exactly one abstract method, and strongly consider extending a standard interface for interoperability. Standard functional interfaces should be preferred over custom ones in most cases — create a custom interface only when necessary for checked exceptions, multiple parameters with meaningful names, or type-safe semantic tagging. Example: `@FunctionalInterface interface ThrowingFunction<T,R> { R apply(T t) throws Exception; }`.
 
 ---
 
 ## Developer Recommendations
 
-- **Prefer standard functional interfaces over custom ones** — The `java.util.function` package has 43 interfaces covering most use cases. Creating custom interfaces (`Transformer`, `Converter`, `Mapper`) causes incompatibility with standard APIs (Streams, CompletableFuture). If you need semantic clarity, extend the standard interface: `interface Transformer<T,R> extends Function<T,R> {}` This gives type safety while preserving interoperability.
-
-- **Use primitive specializations in performance-sensitive code** — `IntPredicate` avoids boxing 1M integers. `Predicate<Integer>` creates 28 bytes of garbage per element via autoboxing. In a loop processing 1M transactions, that's 28MB of unnecessary allocations. The primitive variants (`IntPredicate`, `LongConsumer`, `ToDoubleFunction`) are 5-10x faster for numeric operations.
-
-- **Compose `Predicate` with `and()`/`or()`/`negate()` instead of writing custom logic** — `predicate.and(other).negate()` is more readable and testable than `x -> predicate.test(x) && !other.test(x)`. Composition methods short-circuit naturally — `and()` stops at the first `false`, `or()` stops at the first `true`. Extract complex combinations to named intermediate predicates for clarity.
-
-- **Use `Consumer` for side effects, `Function` for transformations, `Supplier` for lazy values** — Each functional interface encodes intent. A method taking `Consumer<T>` should perform an action with side effect. A method taking `Function<T,R>` should transform without side effects. Mixing them (e.g., `Function` that prints to console) violates the principle of least surprise and makes the code harder to reason about.
-
-- **Avoid checked exceptions in functional interfaces by wrapping, not by creating multiple custom interfaces** — Instead of creating `ThrowingFunction`, `ThrowingPredicate`, `ThrowingConsumer` (each for every checked exception type), create a single `Unchecked` utility: `Function<T,R> unchecked(ThrowingFunction<T,R> fn)`. This keeps the API surface small and callers can use standard `Function<T,R>` with the wrapper.
-
-- **Use `BinaryOperator<T>` over `BiFunction<T,T,T>` when both args are the same type** — `BinaryOperator<T>` extends `BiFunction<T,T,T>` and adds `minBy()` and `maxBy()` static methods. It also better communicates intent: the operation combines two values of the same type into one. Use `BinaryOperator` for reduction operations, accumulators, and combiners in stream `reduce()` and `collect()`.
-
-- **Prefer `UnaryOperator<T>` over `Function<T,T>` for same-type transformations** — `UnaryOperator<T>` extends `Function<T,T>` and communicates that the input and output types are the same. This matters for identity operations (`UnaryOperator.identity()`) and makes signatures more readable: `List<T> transform(List<T> input, UnaryOperator<T> op)` is clearer than using `Function<T,T>`.
+- **Prefer standard functional interfaces over custom ones** — The `java.util.function` package provides 43 interfaces covering the vast majority of lambda use cases. Creating custom interfaces like `Transformer` or `Mapper` introduces incompatibility with standard APIs — `Stream.map()`, `Optional.map()`, and `CompletableFuture.thenApply()` all accept `Function<T,R>`. If you need semantic clarity, extend the standard interface: `interface Transformer<T,R> extends Function<T,R> {}`.
+- **Use primitive specializations in performance-sensitive numeric code** — `IntPredicate` avoids boxing one million integers, while `Predicate<Integer>` creates 28 bytes of garbage per element through autoboxing. For a pipeline processing 10 million transactions, that is 280 MB of unnecessary allocation pressure. The primitive variants are typically 5-10x faster for numeric operations.
+- **Compose Predicate with and(), or(), and negate()** — Composition methods are more readable, naturally short-circuiting, and individually testable compared to manual logical expressions. `predicate.and(other).negate()` clearly communicates "not (this and that)" without the mental parsing needed for `x -> predicate.test(x) && !other.test(x)`. Extract complex composed predicates to named fields for documentation and reuse.
+- **Use Consumer exclusively for side effects, Function for transformations, Supplier for lazy values** — Each functional interface encodes intent in its type signature. A method accepting `Consumer<T>` should perform actions with side effects; a method accepting `Function<T,R>` should transform without side effects. Violating this convention violates the principle of least surprise.
+- **Avoid checked exceptions in functional interfaces** — Create a single `Unchecked` utility rather than a proliferation of custom interfaces for each exception type. One utility method `Function<T,R> unchecked(ThrowingFunction<T,R> fn)` covers all cases without requiring `ThrowingFunction`, `ThrowingPredicate`, `ThrowingConsumer`, and so on.
+- **Use BinaryOperator<T> over BiFunction<T,T,T>** — `BinaryOperator` additionally provides `minBy()` and `maxBy()` static methods and more clearly communicates reduction semantics. Similarly, prefer `UnaryOperator<T>` over `Function<T,T>` for same-type transformations because it provides `identity()` for no-op transformations.

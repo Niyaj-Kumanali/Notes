@@ -7,6 +7,8 @@
 - **Definition:** An architectural style that structures an application as a collection of small, loosely coupled, independently deployable services, each owning its own domain logic and data store.
 - **Why It Exists:** Monoliths become difficult to scale, deploy, and maintain as they grow. Microservices enable independent scaling, deployment, and team ownership, allowing organizations to develop and deliver features faster and more reliably.
 - **Key Concepts:** **API Gateway** (single entry point for routing, auth, rate limiting), **Service Discovery** (Eureka, Consul, Kubernetes DNS), **Database per Service** (each service owns its data), **Synchronous Communication** (REST, gRPC), **Asynchronous Communication** (Kafka, RabbitMQ), **Circuit Breaker** (resilience), **Saga** (distributed transactions), **CQRS** (separate read/write models), **Strangler Fig** (incremental migration), **BFF** (Backend for Frontend)
+- **Modular Monolith as a Starting Point** — Before splitting into microservices, organize code as a modular monolith: clear package boundaries, separate database schemas per module, well-defined internal APIs, and independent testing per module. This provides development speed without distributed systems complexity. Extract to microservices only when you hit specific scaling or team autonomy bottlenecks.
+- **BFF (Backend for Frontend) Pattern** — Create separate API surfaces for web, mobile, and third-party clients. Each BFF is owned by the corresponding frontend team and handles client-specific concerns: data aggregation, response shaping, and device-specific logic. Without BFF, the API Gateway becomes bloated with client-specific transformations.
 
 ---
 
@@ -17,6 +19,8 @@
 - **API Gateway Pattern:** Single entry point for all client requests handling routing, authentication/authorization, rate limiting, request/response transformation, and aggregation of responses from multiple services.
 - **Database per Service:** Each microservice owns its private database, accessed only through its API. Data sharing via service API calls (sync), event publishing (async), CQRS with materialized views, or API composition in the gateway.
 - **Communication Patterns:** REST/gRPC for synchronous request-response where the caller needs an immediate answer. Messaging (Kafka, RabbitMQ) for asynchronous event-driven communication where eventual consistency is acceptable.
+- **Service Mesh** — An infrastructure layer (Istio, Linkerd) that handles service-to-service communication via sidecar proxies: load balancing, service discovery, traffic management, mTLS, circuit breaking, and observability — without modifying application code. The control plane manages proxy configuration; the data plane (proxies) handles actual traffic.
+- **Containerization and Orchestration** — Microservices are typically deployed in containers (Docker) and orchestrated by Kubernetes. Kubernetes provides service discovery (DNS), load balancing, auto-scaling, rolling updates, self-healing, and secret management. Each service is deployed as a Deployment with a ClusterIP Service for internal communication.
 
 ```java
 // Feign Client — declarative REST
@@ -58,6 +62,9 @@ public Tracer tracer() {
 - **Ignoring Distributed Transactions** — using distributed transactions (XA) across services hurts scalability. Use Sagas with compensating actions.
 - **Tight Coupling via Shared Libraries** — sharing domain objects between services creates coupling. Each service should have its own DTOs.
 - **Not Handling Partial Failures** — without circuit breakers, a failing downstream service cascades failure to the entire system.
+- **Synchronous Dependency Chains** — Service A calls B, B calls C, C calls D. If D slows down, all upstream services block. Replace synchronous chains with async messaging or at least implement timeouts and circuit breakers at each hop.
+- **Premature Extraction** — Extracting services before the boundaries are well-understood leads to frequent, costly rearchitecting. Start monolithic; extract when the module has stable interfaces and clear ownership.
+- **Not Automating Deployment Pipeline** — Without CI/CD per service, microservices add deployment complexity without benefits. Each service must have: automated build, automated tests, container image, deployment pipeline, and rollback capability.
 
 ---
 
@@ -68,6 +75,8 @@ public Tracer tracer() {
 - **Resilience Patterns** — Circuit Breaker (fail fast), Retry (transient recovery), Timeout (limit wait time), Bulkhead (resource isolation), Saga (distributed transactions), CQRS (read/write separation). Layer these patterns for comprehensive protection.
 - **Deployment Strategies** — Blue-Green (full environment switch, instant rollback), Canary (gradual traffic shift, metrics-based), Rolling (sequential pod replacement), Feature Flags (toggle features without deployment).
 - **API Versioning** — URL path versioning (`/v1/orders`, `/v2/orders`), header versioning (`Accept: application/vnd.company.v1+json`), or query parameter versioning. Header versioning follows REST principles best. Maintain multiple versions until migration completes.
+- **Data Consistency Strategies** — Eventual consistency via events is the default. For critical read-your-write scenarios, the writing service can expose a read API that its own service reads from (bypassing eventual consistency). For transactions spanning services, use the Saga pattern with compensating actions.
+- **Monitoring and Alerting Per Service** — Each service exports: health check endpoints (liveness + readiness), RED metrics (Rate, Errors, Duration), and business metrics. Centralized dashboards per service. Alerts on: error rate spikes, latency degradation, consumer lag, and health check failures.
 
 ---
 
@@ -186,3 +195,5 @@ public RouteLocator customRouteLocator(RouteLocatorBuilder builder) {
 - **Use circuit breakers, retries, and timeouts on every inter-service call** — Every synchronous call between services can fail. Layer resilience: timeout (cap wait time), retry (3 attempts with backoff), circuit breaker (stop calling failing services), bulkhead (isolate resources per service). Without these, a single slow service cascades failures across the entire system.
 
 - **Design for failure, not for success** — Assume every service call will fail, every message will be delayed, and every database will go down. Design accordingly: graceful degradation (return cached data when a service is down), fallbacks (return defaults for non-critical data), async processing where possible (queue messages instead of blocking), and health check endpoints for every service.
+- **Use contract testing to enable independent deployments** — Without contract testing, each service deployment requires integration tests against all dependencies. Use Pact or Spring Cloud Contract to define API contracts. The provider runs contract tests in its CI — as long as contracts pass, both sides deploy independently. This decouples deployment schedules across teams.
+- **Align service boundaries with team boundaries (Conway's Law)** — Conway's Law states that system architecture mirrors communication structure. If two teams need to coordinate for every deployment, their services are too coupled. Organize services so each team owns end-to-end ownership of their services, with well-defined APIs for cross-team communication.

@@ -6,150 +6,143 @@
 
 **Spring Boot Actuator** provides production-ready monitoring and management endpoints for Spring Boot applications. It exposes operational information about your running application — health, metrics, environment properties, thread dumps, and more — via HTTP or JMX.
 
-### Key Concepts:
+### Common Endpoints
 
-1. **Common Endpoints**:
+- **`/actuator/health`** — Application health status (UP/DOWN). Used by container orchestrators (Kubernetes, Docker) for liveness and readiness probes to determine pod health.
+- **`/actuator/info`** — Custom application information (version, build time, contact info). Exposes metadata defined in `application.properties` or `build-info.properties`.
+- **`/actuator/metrics`** — JVM and application metrics (memory, CPU, thread count, GC pauses). Integrates with Micrometer for detailed metric collection and analysis.
+- **`/actuator/prometheus`** — Metrics in Prometheus format for scraping and alerting. Requires `micrometer-registry-prometheus` on the classpath.
+- **`/actuator/loggers`** — View and change log levels at runtime without restart. Invaluable for debugging production issues on the fly.
+- **`/actuator/threaddump`** — Thread stack dump for diagnosing deadlocks and thread contention. Captures the state of every thread in the JVM at the time of the request.
+- **`/actuator/heapdump`** — JVM heap dump for memory analysis. Useful for finding memory leaks but exposes all data in memory including PII.
+- **`/actuator/env`** — Environment properties from all property sources. Shows configuration values including secrets — must be secured.
+- **`/actuator/configprops`** — All `@ConfigurationProperties` beans with their current values. Useful for auditing configuration at runtime.
+- **`/actuator/mappings`** — All request mappings in the application. Shows which URLs map to which controller methods.
+- **`/actuator/beans`** — All Spring beans in the container. Shows bean names, scopes, types, and dependencies.
+- **`/actuator/scheduledtasks`** — All scheduled tasks and their configuration. Displays cron expressions, fixed rates, and fixed delays.
 
-   - **`/actuator/health`** — Application health status (UP/DOWN). Used by container orchestrators (Kubernetes, Docker) for liveness and readiness probes.
-   - **`/actuator/info`** — Custom application information (version, build time, contact info).
-   - **`/actuator/metrics`** — JVM and application metrics (memory, CPU, thread count, GC pauses).
-   - **`/actuator/prometheus`** — Metrics in Prometheus format for scraping and alerting.
-   - **`/actuator/loggers`** — View and change log levels at runtime without restart.
-   - **`/actuator/threaddump`** — Thread stack dump for diagnosing deadlocks and thread contention.
-   - **`/actuator/heapdump`** — JVM heap dump for memory analysis.
-   - **`/actuator/env`** — Environment properties from all property sources.
-   - **`/actuator/configprops`** — All `@ConfigurationProperties` beans with their current values.
-   - **`/actuator/mappings`** — All request mappings in the application.
-   - **`/actuator/beans`** — All Spring beans in the container.
-   - **`/actuator/scheduledtasks`** — All scheduled tasks and their configuration.
+### Configuration
 
-2. **Configuration**:
-
-   ```yaml
-   management:
-     endpoints:
-       web:
-         exposure:
-           include: health,info,metrics,prometheus,loggers,env
-           exclude: threaddump,heapdump  # sensitive
-         base-path: /actuator
-     endpoint:
-       health:
-         show-details: when-authorized
-         show-components: when-authorized
-     info:
-       env:
-         enabled: true
-     metrics:
-       tags:
-         application: ${spring.application.name}
-   ```
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,loggers,env
+        exclude: threaddump,heapdump  # sensitive
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: when-authorized
+      show-components: when-authorized
+  info:
+    env:
+      enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+```
 
 ---
 
 ## Core Concepts
 
-### 1. Custom Health Indicator
+### Custom Health Indicator
 
-   Monitor the health of specific dependencies:
+Monitor the health of specific dependencies:
 
-   ```java
-   @Component
-   public class DatabaseHealthIndicator implements HealthIndicator {
-       private final DataSource dataSource;
+```java
+@Component
+public class DatabaseHealthIndicator implements HealthIndicator {
+    private final DataSource dataSource;
 
-       @Override
-       public Health health() {
-           try (Connection conn = dataSource.getConnection()) {
-               if (!conn.isValid(2)) {
-                   return Health.down()
-                       .withDetail("database", "Connection validation failed")
-                       .build();
-               }
-               return Health.up()
-                   .withDetail("database", "Connected")
-                   .withDetail("validationQuery", conn.getMetaData().getURL())
-                   .build();
-           } catch (Exception e) {
-               return Health.down(e)
-                   .withDetail("database", "Connection failed: " + e.getMessage())
-                   .build();
-           }
-       }
-   }
-   ```
+    @Override
+    public Health health() {
+        try (Connection conn = dataSource.getConnection()) {
+            if (!conn.isValid(2)) {
+                return Health.down()
+                    .withDetail("database", "Connection validation failed")
+                    .build();
+            }
+            return Health.up()
+                .withDetail("database", "Connected")
+                .withDetail("validationQuery", conn.getMetaData().getURL())
+                .build();
+        } catch (Exception e) {
+            return Health.down(e)
+                .withDetail("database", "Connection failed: " + e.getMessage())
+                .build();
+        }
+    }
+}
+```
 
-### 2. Custom Metrics with Micrometer
+### Custom Metrics with Micrometer
 
-   Track business-specific metrics:
+Track business-specific metrics:
 
-   ```java
-   @Component
-   public class OrderMetrics {
-       private final Counter orderCreated;
-       private final Counter paymentFailed;
-       private final Timer orderProcessingTime;
+```java
+@Component
+public class OrderMetrics {
+    private final Counter orderCreated;
+    private final Counter paymentFailed;
+    private final Timer orderProcessingTime;
 
-       public OrderMetrics(MeterRegistry registry) {
-           this.orderCreated = registry.counter("orders.created");
-           this.paymentFailed = registry.counter("orders.payment.failed");
-           this.orderProcessingTime = registry.timer("orders.processing.time");
-       }
+    public OrderMetrics(MeterRegistry registry) {
+        this.orderCreated = registry.counter("orders.created");
+        this.paymentFailed = registry.counter("orders.payment.failed");
+        this.orderProcessingTime = registry.timer("orders.processing.time");
+    }
 
-       public void recordOrderCreated() {
-           orderCreated.increment();
-       }
+    public void recordOrderCreated() {
+        orderCreated.increment();
+    }
 
-       public void recordPaymentFailed() {
-           paymentFailed.increment();
-       }
+    public void recordPaymentFailed() {
+        paymentFailed.increment();
+    }
 
-       public <T> T measureProcessingTime(Supplier<T> action) {
-           return orderProcessingTime.record(action);
-       }
-   }
-   ```
+    public <T> T measureProcessingTime(Supplier<T> action) {
+        return orderProcessingTime.record(action);
+    }
+}
+```
 
-### 3. Custom Actuator Endpoint
+### Custom Actuator Endpoint
 
-   Create custom management endpoints:
+Create custom management endpoints:
 
-   ```java
-   @Component
-   @Endpoint(id = "feature-flags")
-   public class FeatureFlagEndpoint {
+```java
+@Component
+@Endpoint(id = "feature-flags")
+public class FeatureFlagEndpoint {
 
-       @ReadOperation
-       public Map<String, Boolean> getFeatureFlags() {
-           return Map.of(
-               "new-checkout", true,
-               "recommendations", false,
-               "dark-mode", true
-           );
-       }
+    @ReadOperation
+    public Map<String, Boolean> getFeatureFlags() {
+        return Map.of(
+            "new-checkout", true,
+            "recommendations", false,
+            "dark-mode", true
+        );
+    }
 
-       @WriteOperation
-       public void toggleFeature(@Selector String flag, boolean enabled) {
-           // Toggle feature flag at runtime
-       }
-   }
-   ```
+    @WriteOperation
+    public void toggleFeature(@Selector String flag, boolean enabled) {
+        // Toggle feature flag at runtime
+    }
+}
+```
 
 ---
 
 ## Common Mistakes
 
-1. **Exposing sensitive endpoints in production** — Endpoints like `heapdump`, `env`, and `threaddump` expose sensitive information. Always restrict exposure to only needed endpoints.
-
-2. **Not securing actuator endpoints** — Actuator endpoints are HTTP-accessible and should be protected with Spring Security or network-level restrictions.
-
-3. **Leaving `show-details: always`** — Exposes detailed health information to anyone. Use `when-authorized` to restrict detailed health data.
-
-4. **Not creating custom health indicators** — The default health check only covers basic Spring components. Add custom health checks for external services (databases, message queues, third-party APIs).
-
-5. **Not exposing metrics to Prometheus** — Without Prometheus-formatted metrics, you cannot set up proper monitoring and alerting in production.
-
-6. **No metrics tags** — Without consistent tags (application name, environment), metrics from multiple instances cannot be correlated.
+- **Exposing sensitive endpoints in production** — Endpoints like `heapdump`, `env`, and `threaddump` expose sensitive information including PII and secrets. Always restrict exposure to only the endpoints your operations team actually needs.
+- **Not securing actuator endpoints** — Actuator endpoints are HTTP-accessible by default and should be protected with Spring Security or network-level restrictions. Unsecured endpoints can leak sensitive data about your application internals.
+- **Leaving `show-details: always`** — Exposes detailed health information to anyone who can reach the endpoint. Use `when-authorized` to restrict detailed health data to authenticated users with specific roles.
+- **Not creating custom health indicators** — The default health check only covers basic Spring components like DataSource. Add custom health checks for all critical external services including third-party APIs, message queues, and custom services.
+- **Not exposing metrics to Prometheus** — Without Prometheus-formatted metrics, you cannot set up proper monitoring dashboards and alerting rules for production operations.
+- **No metrics tags** — Without consistent tags (application name, environment, instance), metrics from multiple instances and environments cannot be correlated or filtered in dashboards.
 
 ---
 

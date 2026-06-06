@@ -4,11 +4,11 @@
 
 ## Overview
 
-- **Definition:** Lambda expressions introduce functional programming constructs to Java — anonymous functions that can be treated as values (passed as arguments, returned from methods, stored in variables).
+- **Purpose** — Lambda expressions, introduced in Java 8, are anonymous functions that can be treated as first-class values — passed as arguments to methods, returned from methods, and stored in variables. They enable declarative, functional programming styles and are the foundation for the Stream API, `Optional`, and `CompletableFuture`.
+- **Before Lambdas** — Java required verbose anonymous inner classes to achieve behavior parameterization, making functional patterns like callbacks, event handlers, and sorting unnecessarily verbose with boilerplate class declarations.
+- **Syntax Forms** — Full block syntax `(parameters) -> { body; return value; }`, single-expression syntax `param -> expression` where the expression is automatically returned, and no-parameter syntax `() -> expression`. They are used throughout the JDK for collection operations, stream pipelines, optional fallbacks, async callbacks, and thread creation.
 
-- **Why It Exists:** Before lambdas, Java required verbose anonymous inner classes for passing behavior. Lambdas enable concise code, functional programming with Stream API, behavior parameterization, and easier parallel processing.
-
-- **Syntax:**
+### Syntax Examples
 
 ```java
 // Full syntax
@@ -31,13 +31,6 @@ param -> expression
 }
 ```
 
-- **Where Lambdas Are Used:**
-  - Collections: `list.sort((a, b) -> a.compareTo(b))`
-  - Streams: `list.stream().filter(x -> x > 5).map(x -> x * 2)`
-  - Optionals: `optional.orElseGet(() -> expensiveDefault())`
-  - CompletableFuture: `future.thenApply(result -> transform(result))`
-  - Threads: `new Thread(() -> doWork()).start()`
-
 ---
 
 ## Lambda vs Anonymous Inner Class
@@ -55,11 +48,18 @@ button.addActionListener(new ActionListener() {
 button.addActionListener(e -> System.out.println("Clicked at " + e.getWhen()));
 ```
 
+- **Compilation Difference** — Lambdas are compiled using the `invokedynamic` JVM instruction and do not produce a separate `.class` file, while anonymous inner classes compile into individual class files that must be loaded by the classloader.
+- **this Reference** — In a lambda, `this` refers to the enclosing class instance, whereas in an anonymous inner class, `this` refers to the anonymous class instance itself — a distinction that causes subtle bugs during migration.
+- **Memory Characteristics** — Non-capturing lambdas are cached as static singletons by the JVM and never allocate after the first invocation, while every use of an anonymous inner class creates a new instance on the heap.
+- **Capabilities** — Anonymous inner classes can declare fields, methods, and constructors, and they can implement multiple methods of the interface — capabilities that lambdas fundamentally lack.
+
 ---
 
 ## Type Inference
 
-- **Definition:** The compiler infers the target type of a lambda from the context (assignment, method parameter, return type).
+- **Compiler Inference** — The Java compiler infers the target type of a lambda from the context in which it appears — the assignment target, the method parameter type, or the return type. In `Function<String, Integer> f = s -> Integer.parseInt(s)`, the compiler knows `s` is `String` and the return type is `Integer`.
+- **Reduced Boilerplate** — Type inference makes lambda expressions significantly more concise than anonymous inner class equivalents, but it can cause ambiguity when a method is overloaded with different functional interface parameters.
+- **Disambiguation** — When inference fails, provide explicit parameter types: `(String s) -> Integer.parseInt(s)`, or cast the lambda to the desired functional interface.
 
 ```java
 // Explicit types
@@ -69,18 +69,13 @@ Function<String, Integer> f = (String s) -> Integer.parseInt(s);
 Function<String, Integer> f = s -> Integer.parseInt(s);
 ```
 
-The compiler determines the parameter types, return type, and the functional interface from the context. Type inference reduces boilerplate but can sometimes lead to ambiguity with overloaded methods.
-
 ---
 
 ## Variable Capture
 
-- **Definition:** Lambdas can access variables from the enclosing scope. The captured variables must be effectively final (not reassigned after initialization).
-
-- **Rules:**
-  - **Effectively final local variables** — captured by value (copied into the lambda)
-  - **Instance fields** — captured via `this` reference
-  - **Static fields** — accessible anytime
+- **Local Variable Rules** — Lambdas can access variables from the enclosing scope. Local variables and method parameters must be effectively final — their value must not change after initialization — because they are copied into the lambda object when it is created.
+- **Instance Fields** — Instance fields are captured via the `this` reference, meaning the lambda holds a reference to the enclosing object and can access its mutable state directly. Static fields have no capture cost.
+- **Memory Implications** — Capturing local variables copies their values into the lambda's heap-allocated implementation object, while capturing instance fields prevents the enclosing object from being garbage collected as long as the lambda is reachable — a common source of memory leaks.
 
 ```java
 public class Example {
@@ -96,13 +91,13 @@ public class Example {
 }
 ```
 
-- **Important:** Captured local variables are copied into the lambda object (stored on heap). Instance fields capture the `this` reference, which can cause memory leaks if the lambda outlives the enclosing object.
-
 ---
 
 ## Scope
 
-- **Definition:** Lambdas don't introduce a new scope — `this` refers to the enclosing class, not the lambda itself.
+- **Lexical Scoping** — Lambdas do not introduce a new lexical scope — the `this` keyword inside a lambda refers to the enclosing class instance, not to the lambda itself. This is fundamentally different from anonymous inner classes where `this` refers to the anonymous class instance.
+- **Variable Shadowing** — Because lambdas share their scope with the enclosing method, they cannot declare local variables with the same name as variables in the enclosing scope — attempting to do so causes a compile error about duplicate definitions.
+- **Consistency** — This scoping behavior means lambdas are more consistent with surrounding code (no unexpected `this` changes) but cannot replace anonymous inner classes when the handler needs to refer to itself by `this`.
 
 ```java
 public class ScopeExample {
@@ -117,13 +112,14 @@ public class ScopeExample {
 }
 ```
 
-This is different from anonymous inner classes where `this` refers to the inner class instance. In lambdas, `this` is the same as in the enclosing method.
-
 ---
 
 ## Under the Hood: invokedynamic
 
-- **Definition:** Lambdas are compiled using the `invokedynamic` JVM instruction (added in Java 7), not as anonymous inner classes.
+- **Compilation** — Lambda expressions are compiled using the `invokedynamic` JVM instruction (introduced in Java 7), not as anonymous inner classes. The Java compiler generates an `invokedynamic` call site in the bytecode that points to a bootstrap method in `LambdaMetafactory`.
+- **Runtime Behavior** — At runtime, the first invocation of the lambda triggers the bootstrap method, which uses `MethodHandle` (not reflection) to generate the lambda's implementation class on the fly, creating a `CallSite` that is permanently linked to the generated implementation.
+- **Performance** — Subsequent invocations of the same lambda call point call the linked method handle directly without any bootstrap overhead, reflection, or intermediate allocation. Non-capturing lambdas are generated once and cached forever.
+- **Benefits** — No separate `.class` files per lambda (reducing deployment size and classloader pressure), the implementation is generated once and cached, and the memory footprint is significantly lower than anonymous inner classes.
 
 ```
 Source: Supplier<String> s = () -> "hello";
@@ -138,12 +134,6 @@ Bootstrap method (LambdaMetafactory):
 - Subsequent calls invoke linked handle directly (no reflection)
 ```
 
-- **Benefits:**
-  - No separate .class file per lambda
-  - Lambda is generated once and cached (for non-capturing lambdas)
-  - Bootstrap method only runs once
-  - Lower memory footprint than anonymous classes
-
 ---
 
 ## Memory Characteristics
@@ -155,13 +145,20 @@ Bootstrap method (LambdaMetafactory):
 | Capturing (this) | New per call | No | `this` reference |
 | Method reference (static) | Single static | Yes | Nothing |
 
-Non-capturing lambdas are essentially free — a single static instance is reused forever. Capturing lambdas allocate a new instance each time they're created in a method call.
+- **Non-Capturing Lambdas** — Essentially free in terms of allocation cost — the JVM creates a single static instance on first invocation and reuses it forever, making the allocation cost zero after the first use.
+- **Capturing Lambdas** — Allocate a new instance on the heap every time the lambda expression is evaluated, which occurs each time the enclosing method is called.
+- **Method References** — A method reference to a static method like `Integer::parseInt` is always non-capturing and cached, while an instance method reference like `this::process` captures `this` and allocates per call.
 
 ---
 
 ## Method References
 
-- **Definition:** A shorthand for lambdas that call an existing method.
+- **Shorthand Notation** — Method references use the `::` operator with four distinct forms as a shorthand for lambdas that simply call an existing method. They are more concise and often more readable than equivalent lambdas.
+- **Class::staticMethod** — `Math::max` translates to `(a, b) -> Math.max(a, b)` and is always non-capturing and cached.
+- **instance::instanceMethod** — `System.out::println` translates to `x -> System.out.println(x)` and captures the instance reference.
+- **Class::instanceMethod** — `String::length` translates to `s -> s.length()` where the first argument becomes the receiver of the method call.
+- **Class::new** — `ArrayList::new` translates to `() -> new ArrayList()` and invokes the constructor corresponding to the functional interface's parameter list.
+- **Compile-Time Safety** — Method references fail at compile time if the method signature does not match the functional interface, providing earlier error detection than lambdas.
 
 ```java
 // Lambda
@@ -177,20 +174,14 @@ Class::instanceMethod       // String::length      s -> s.length()
 Class::new                  // ArrayList::new      () -> new ArrayList()
 ```
 
-Method references are more concise and often more readable than lambdas for simple method delegation.
-
 ---
 
 ## Common Mistakes
 
-- **Too complex lambda bodies** — extract multi-line lambdas into named methods
-- **Mutable captures** — variable must be effectively final or compile error
-- **Checked exceptions** — Stream functional interfaces don't declare checked exceptions, need try-catch wrapper
-- **Ambiguous overloads** — if method is overloaded with different functional interfaces, cast to disambiguate
-- **this reference confusion** — in lambdas, `this` refers to enclosing class, not the lambda
-- **Performance assumptions** — capturing lambdas allocate each invocation; non-capturing are cached
-- **Debugging difficulty** — lambda stack traces are less readable than named method traces
-- **Overusing** — sometimes a simple for-each loop is clearer than a stream pipeline
+- **Overly Complex Lambda Bodies** — A lambda with 10+ lines, multiple conditionals, and try-catch blocks is harder to debug (stack traces show `lambda$methodName$N` instead of a meaningful method name) and cannot be unit tested. Extract such logic into a named private method and use a method reference instead.
+- **Mutating Captured Local Variables** — Attempting to mutate a captured local variable causes a compile-time error because the variable must be effectively final. If you need mutable local state inside a lambda, use a mutable container like an array with one element or an `AtomicReference`.
+- **Checked Exceptions in Lambdas** — Calling a method that throws a checked exception inside a standard functional interface lambda produces a compile error because interfaces like `Function<T,R>` do not declare checked exceptions. Workarounds include wrapping in a try-catch that rethrows as `RuntimeException`, creating a custom `@FunctionalInterface` that declares the checked exception, or using a utility method that adapts a throwing function.
+- **Overloaded Method Ambiguity** — Using lambdas with overloaded methods that take different functional interfaces causes ambiguity that the compiler cannot resolve. The fix is to rename one method, cast the lambda, or assign the lambda to a typed variable before passing it.
 
 ---
 
@@ -198,7 +189,7 @@ Method references are more concise and often more readable than lambdas for simp
 
 ### Scenario 1: Dynamic Pricing Engine
 
-An e-commerce platform adjusts prices in real-time based on demand, competitor pricing, and inventory. The pricing logic changes frequently and is configured via business rules. Different strategies (percentage markup, competitor-match, clearance) must be pluggable.
+An e-commerce platform adjusts product prices in real-time based on demand levels, competitor pricing feeds, and current inventory positions. The pricing logic changes frequently as the business team deploys new rules, and different product categories use different strategies. The system must support pluggable strategies without requiring code changes for each new rule.
 
 ```java
 public class PricingEngine {
@@ -216,11 +207,11 @@ public class PricingEngine {
 }
 ```
 
-Each pricing strategy is a `Function<Double, Double>` that can be tested independently. New strategies are added by inserting into the map — no switch statements or if-else chains. The lambda captures configuration (like `competitorService`) at creation time, and the JVM caches non-capturing strategies (like `CLEARANCE`) as a single instance.
+Each pricing strategy is a `Function<Double, Double>` that can be tested independently, and new strategies are added by inserting a new entry into the map with no switch statements or if-else chains required. The `CLEARANCE` strategy is a non-capturing lambda that the JVM caches as a single static instance with zero allocation per invocation, while `COMPETITOR_MATCH` captures the `competitorService` instance (via `this`) and the `productId` parameter. This pattern demonstrates the power of treating functions as values — the pricing logic becomes data that can be configured, tested, and composed.
 
 ### Scenario 2: Event Bus with Listener Filtering
 
-A GUI framework needs to dispatch mouse events to registered listeners. Listeners can filter by event type, region, or modifier keys. Using lambdas avoids creating anonymous inner classes for each listener, reducing memory pressure.
+A GUI framework dispatches mouse events to registered listeners, where each listener specifies a filter predicate (e.g., only left-click events in a specific region) and a handler that processes matching events. Using lambdas avoids creating anonymous inner classes for each listener registration, reducing memory pressure in UI-heavy applications.
 
 ```java
 public class EventBus {
@@ -236,19 +227,13 @@ public class EventBus {
         listeners.forEach(listener -> listener.accept(event));
     }
 }
-
-// Usage
-eventBus.onEvent(
-    e -> e.getType() == MouseEvent.CLICK && e.getButton() == 1,
-    e -> statusBar.setText("Clicked at " + e.getPoint())
-);
 ```
 
-Each `onEvent()` call creates a capturing lambda that holds references to `filter` and `handler`. The `CopyOnWriteArrayList` ensures thread-safe iteration. The real cost: if `onEvent()` is called in a hot loop, each call allocates a new lambda object — a price worth paying for the expressive API.
+Each `onEvent()` call creates a capturing lambda that holds references to `filter` and `handler` — the lambda captures both parameters because they are used in its body and they are effectively final. The `CopyOnWriteArrayList` ensures thread-safe iteration when dispatching events to listeners, providing lock-free reads at the cost of copying the array on each listener registration. If `onEvent()` is called in a hot loop (e.g., registering hundreds of listeners per frame), each call allocates a new lambda object — a cost that is acceptable for the readability and expressiveness it provides over anonymous inner classes.
 
 ### Scenario 3: Microservice Request Circuit Breaker
 
-A circuit breaker wraps calls to downstream services. When failures exceed a threshold, the circuit opens and redirects to a fallback. The fallback logic varies per service and is passed as a lambda.
+A circuit breaker wraps calls to downstream services, tracking failure counts and opening the circuit when failures exceed a configurable threshold. Once the circuit is open, subsequent calls immediately route to a fallback function without attempting the primary operation, preventing cascading failures in a microservice topology.
 
 ```java
 public class CircuitBreaker {
@@ -283,157 +268,95 @@ CircuitBreaker cb = new CircuitBreaker(
 );
 ```
 
-The lambdas capture the `order` variable (effectively final) and the `paymentClient` reference (instance field, captured via `this`). A capturing lambda in a framework like this is fine — the circuit breaker is created once per request, not in a hot loop. The key is knowing when capturing is acceptable (per-request) vs problematic (hot loop).
+The lambdas capture the `order` variable (effectively final) and the `paymentClient` reference (an instance field captured via `this`). This capturing behavior is acceptable because the circuit breaker is created once per request, not in a hot loop — the allocation cost is negligible compared to the downstream HTTP call. The key design insight is knowing when capturing is acceptable (per-request framework objects) versus problematic (hot-loop iteration where millions of lambdas would be allocated per second).
 
 ---
 
 ## Scenario-Based Questions
 
-1. **Q: You are building a batch processing framework where the user defines transformation steps as lambdas. Each step processes 10M records. The user writes `records.stream().map(s -> process(s)).collect(toList())` but the lambda captures a large configuration object that's created for each batch. The batch runs once per minute and memory grows unbounded. What's happening?**
-   A: The lambda captures the configuration object via `this` (if `process()` is an instance method of the configuration). Each batch creates a new `Stream` object, a new lambda instance, and the captured configuration keeps references to per-batch data that can't be GC'd. Fix: extract `process` to a static method or pass the configuration parameter explicitly: `records.stream().map(record -> ConfigProcessor.process(config, record))` — now only `config` and `record` are captured, and `config` can be reused across batches. Better: use method reference `ConfigProcessor::process` with a `BiFunction`.
+**Q: You are building a batch processing framework where the user defines transformation steps as lambdas. Each step processes 10M records. The user writes `records.stream().map(s -> process(s)).collect(toList())` but the lambda captures a large configuration object that's created for each batch. The batch runs once per minute and memory grows unbounded. What's happening?**
 
-2. **Q: You have a high-frequency trading system that processes 1M order book updates per second. Each update triggers a lambda that checks price thresholds and sends alerts. The system creates millions of short-lived lambda instances. JVM GC pauses spike to 500ms every few seconds. How do you reduce allocation pressure?**
-   A: Non-capturing lambdas are cached as static singletons — they never allocate. Capturing lambdas allocate per invocation. Audit all lambdas in the hot path: (1) Extract instance method references — `orderBook::update` is non-capturing and cached. (2) For lambdas that need parameters, create `Function` constants: `private static final Function<Trade, Boolean> IS_LARGE_TRADE = t -> t.getQuantity() > 10000;`. (3) In hot loops, replace lambdas with direct calls or pre-allocated `Consumer` instances. The 500ms GC pauses are from allocating millions of lambda objects — making them non-capturing eliminates 90% of the garbage.
+A: The lambda captures the configuration object via `this` because `process()` is an instance method of the configuration class. Each batch creates a new `Stream` object, a new lambda instance that holds a reference to the configuration, and the captured configuration keeps references to per-batch data that prevents garbage collection. The fix is to make the transformation logic static: extract `process` to a static method and pass the configuration as an explicit parameter: `records.stream().map(record -> ConfigProcessor.process(config, record))`. Now only `config` and `record` are captured, and `config` can be reused across batches and properly GC'd. The deeper issue is that capturing `this` in a lambda prevents the entire enclosing object from being reclaimed — an easy mistake when migrating instance methods to lambdas without considering the capture semantics.
 
-3. **Q: A lambda passed to `CompletableFuture.supplyAsync()` captures a JDBC connection. The async operation runs 30 seconds later, by which time the connection is closed. The lambda throws `SQLException`. How do you prevent this?**
-   A: The lambda captured the connection reference, but the connection was closed by the time the lambda executed. Fix: open the connection inside the lambda or pass connection parameters (not the connection itself):
-   ```java
-   // Bad — captures connection that may close
-   ResultSet process(Connection conn, String query) {
-       return CompletableFuture.supplyAsync(() -> {
-           return conn.executeQuery(query); // conn may be closed!
-       }).join();
-   }
+**Q: You have a high-frequency trading system that processes 1M order book updates per second. Each update triggers a lambda that checks price thresholds and sends alerts. The system creates millions of short-lived lambda instances. JVM GC pauses spike to 500ms every few seconds. How do you reduce allocation pressure?**
 
-   // Good — capture connection parameters, create connection inside
-   ResultSet process(DataSource ds, String query) {
-       return CompletableFuture.supplyAsync(() -> {
-           try (Connection conn = ds.getConnection()) {
-               return conn.executeQuery(query);
-           }
-       }).join();
-   }
-   ```
-   The rule: always capture the factory (DataSource), not the resource (Connection). Resources are time-bound and may be closed before the lambda executes in a different thread.
+A: Non-capturing lambdas are cached as static singletons by the `LambdaMetafactory` and allocate exactly zero heap objects per invocation after the first bootstrap. Capturing lambdas allocate a new instance on every evaluation of the lambda expression, which in a hot loop means millions of allocations per second. Audit every lambda in the hot path: extract instance methods to static where possible, use method references like `orderBook::update` which are non-capturing and cached, and create `Function` constants as `private static final` fields for frequently used transformations. For the extreme hot path, replace lambdas with direct method calls or pre-allocated `Consumer` instances stored in fields. The 500ms GC pauses are a direct symptom of the allocation rate exceeding the young generation collection budget — making lambdas non-capturing eliminates 90% of the garbage and restores predictable latency.
 
-4. **Q: A team is migrating from anonymous inner classes to lambdas. They find that some `this` references behave differently. In an anonymous class, `this.getStatus()` returns the listener's status; with a lambda, it returns the enclosing class's status. How do you document and mitigate this?**
-   A: Document the scoping rule: in lambdas, `this` refers to the enclosing instance; in anonymous classes, `this` refers to the anonymous class instance. For migration: (1) Replace `this.method()` with `EnclosingClass.this.method()` in anonymous inner classes before converting to lambdas — this disambiguates. (2) After conversion, verify that `this` references still work correctly. (3) For event handlers that need `this` to refer to the handler itself, keep anonymous inner classes or extract named inner classes. The rule: if the anonymous class overrides methods besides the SAM (rare), it can't be replaced with a lambda.
+**Q: A lambda passed to `CompletableFuture.supplyAsync()` captures a JDBC connection. The async operation runs 30 seconds later, by which time the connection is closed. The lambda throws `SQLException`. How do you prevent this?**
 
-5. **Q: A service processes webhook callbacks. Each callback has a unique signature (event type + source). The handler for each signature is a lambda stored in a `Map<String, Consumer<WebhookEvent>>`. Over time, memory usage grows as handlers accumulate. What's the issue?**
-   A: Each handler lambda captures the context in which it was created (often `this`). If the map holds references to these lambdas, it also holds references to the objects that created them, preventing GC. Fix: make handlers non-capturing where possible: (1) Register handlers as static method references: `register("payment.success", PaymentHandler::onSuccess)`. (2) If the handler needs instance state, store the state in the handler object itself, not captured from the registration context. (3) Use a weak-valued map (`new WeakHashMap<>)`) for handler registrations so that GC can reclaim unused handler contexts.
+A: The lambda captured a reference to the `Connection` object, but that connection was opened in the calling thread and likely closed in a `try-with-resources` block or connection pool return before the async task executed. Never capture resources that are time-bound — always capture the factory or datasource and create the resource inside the lambda body:
+```java
+// Good — capture connection parameters, create connection inside
+ResultSet process(DataSource ds, String query) {
+    return CompletableFuture.supplyAsync(() -> {
+        try (Connection conn = ds.getConnection()) {
+            return conn.executeQuery(query);
+        }
+    }).join();
+}
+```
+The rule is to capture the factory (DataSource), not the resource (Connection). Resources are time-bound and may be closed before the lambda executes — especially in async contexts where the lambda runs on a different thread and potentially after the calling method has returned.
 
-6. **Q: A sorting API accepts `Comparator<Person>` as a lambda. Users write `list.sort((a, b) -> a.age() - b.age())`. This fails for large age values due to integer overflow. How do you prevent this anti-pattern across the codebase?**
-   A: Integer subtraction as comparator is an overflow bug — `Integer.MAX_VALUE - (-1)` overflows to negative. Fix: enforce `Comparator.comparingInt(Person::age)` instead:
-   ```java
-   // Anti-pattern — integer overflow bug
-   list.sort((a, b) -> a.age() - b.age()); // Overflow for extreme values
+**Q: A team is migrating from anonymous inner classes to lambdas. They find that some `this` references behave differently. In an anonymous class, `this.getStatus()` returns the listener's status; with a lambda, it returns the enclosing class's status. How do you document and mitigate this?**
 
-   // Correct — no overflow
-   list.sort(Comparator.comparingInt(Person::age));
+A: The scoping difference is the most common migration pitfall. In anonymous inner classes, `this` refers to the anonymous class instance itself — calling `this.getStatus()` calls the listener's own `getStatus()` method if it exists. In lambdas, `this` refers to the enclosing class instance, so `this.getStatus()` calls the enclosing object's method. Before migration, audit all `this` references in the anonymous inner class: replace `this.method()` with `EnclosingClass.this.method()` in the anonymous class to make them explicit, then convert to a lambda. After conversion, verify that any `this` references that were intended to refer to the inner class itself (for example, passing `this` to another method) are replaced with the appropriate enclosing reference. If the anonymous class overrides methods beyond the single abstract method of the functional interface, it cannot be replaced with a lambda at all.
 
-   // For multi-field: chaining
-   list.sort(Comparator.comparingInt(Person::age)
-       .thenComparing(Person::name));
-   ```
-   Use static lint rules (ErrorProne, SpotBugs) to flag subtraction-based comparators. The `Comparator` utility methods are not only safer but also more readable and potentially faster (JVM intrinsics for comparing primitives).
+**Q: A service processes webhook callbacks. Each callback has a unique signature (event type + source). The handler for each signature is a lambda stored in a `Map<String, Consumer<WebhookEvent>>`. Over time, memory usage grows as handlers accumulate. What's the issue?**
 
-7. **Q: A logging framework uses `Supplier<String>` for lazy message evaluation: `log.debug(() -> expensiveToString())`. A developer accidentally calls `log.debug(expensiveToString())` (eager evaluation), causing performance degradation. How do you make the API foolproof?**
-   A: This is a lambda vs method reference confusion. The eager call `log.debug(expensiveToString())` evaluates the expression before passing it. Several approaches: (1) Use overloaded methods where the eager version takes `String` and the lazy takes `Supplier<String>` — overload resolution picks the eager version for `debug("literal")` and the lazy for `debug(someObject::toString)`. (2) Use a distinct method name: `log.debugLazy(() -> expensiveToString())`. (3) Add a parameter annotation processor (Checker Framework) that flags eager calls with `@Lazy` annotated parameters. The `Supplier` pattern is correct — the problem is the caller's mental model of "pass a lambda" vs "call a method and pass the result."
+A: Each handler lambda captures the context in which it was registered — typically the `this` reference of the registering object or some other scope containing resources. As long as these lambdas are held in the map, they prevent the captured objects from being garbage collected, creating a retention chain. The fix involves making handlers non-capturing where possible: register static method references like `register("payment.success", PaymentHandler::onSuccess)` which capture nothing and are cached forever. If handlers require instance state, store the state in the handler object itself rather than capturing it from the registration context, or use a `WeakHashMap<HandlerKey, Consumer<WebhookEvent>>` so that GC can reclaim unused handler contexts when the registering object is no longer strongly reachable.
 
-8. **Q: You have a function `public void process(Consumer<String> handler)` that is called thousands of times per second. Each call creates a new lambda `s -> doSomething(s)`. The allocation rate causes GC pressure. How do you optimize without changing the API?**
-   A: Pre-allocate the lambda as a constant. If `doSomething` is stateless, the lambda is non-capturing and can be a static field:
-   ```java
-   // Before — allocates per call
-   service.process(s -> doSomething(s));
+**Q: A sorting API accepts `Comparator<Person>` as a lambda. Users write `list.sort((a, b) -> a.age() - b.age())`. This fails for large age values due to integer overflow. How do you prevent this anti-pattern across the codebase?**
 
-   // After — single instance, cached forever
-   private static final Consumer<String> HANDLER = s -> doSomething(s);
-   service.process(HANDLER);
-   ```
-   If `doSomething` depends on instance state, extract state to a method parameter and use a `BiConsumer` applied via currying, or use an instance method reference: `service.process(this::doSomething)` captures `this` but is still cached (method references to instance methods are cached per method per class).
+A: The subtraction-based comparator `a.age() - b.age()` has an integer overflow bug: if `a.age()` is `Integer.MAX_VALUE` and `b.age()` is `-1`, the result wraps around to a negative value, incorrectly reporting that the maximum age is less than -1. Enforce the use of `Comparator.comparingInt(Person::age)` through static analysis tools (ErrorProne, SpotBugs, or Checkstyle rules). The `Comparator` utility methods are not only safe from integer overflow but also more readable and potentially faster because the JVM can intrinsify primitive comparison operations. For multi-field sorting, chain comparators: `Comparator.comparingInt(Person::age).thenComparing(Person::name)`. Add a lint rule that rejects subtraction-based comparators with an error message explaining the overflow risk.
 
-9. **Q: A lambda `x -> compute(x)` is used in a `Stream.flatMap()`. `compute()` returns `Stream.empty()` for some inputs, which is correct behavior. However, the stream is sometimes `null` instead of empty, causing NPE. How do you enforce the contract?**
-   A: `flatMap()` throws NPE if the lambda returns `null`. Fix: use `flatMap(x -> compute(x) != null ? compute(x) : Stream.empty())` but this calls `compute()` twice. Better:
-   ```java
-   // Correct — single evaluation with null guard
-   items.stream()
-       .flatMap(item -> {
-           Stream<Result> stream = compute(item);
-           return stream != null ? stream : Stream.empty();
-       })
-       .collect(toList());
+**Q: A logging framework uses `Supplier<String>` for lazy message evaluation: `log.debug(() -> expensiveToString())`. A developer accidentally calls `log.debug(expensiveToString())` (eager evaluation), causing performance degradation. How do you make the API foolproof?**
 
-   // Even better — use Optional
-   items.stream()
-       .map(this::compute)
-       .filter(Objects::nonNull)
-       .flatMap(Function.identity())
-       .collect(toList());
-   ```
-   The broader lesson: lambdas that can return `null` violate the `flatMap()` contract. Always document in the method JavaDoc that non-null is required, and use the `Optional` pattern to make the contract explicit.
+A: The distinction between `log.debug(() -> expensiveToString())` (lazy, lambda) and `log.debug(expensiveToString())` (eager, method call) is subtle and easily missed in code review. Several approaches help: overload the `debug()` method so one version takes `String` (eager) and another takes `Supplier<String>` (lazy), relying on overload resolution to pick the right one. For added safety, give the lazy version a distinct method name like `debugLazy()`. In the overloaded version, the eager call `log.debug(expensiveToString())` evaluates the string eagerly before passing it, which the overload resolution correctly routes to the `String`-taking overload — the developer doesn't get lazy evaluation but also doesn't accidentally degrade performance. The `Supplier` pattern itself is correct; the challenge is making the API hard to misuse through naming and overloading.
 
-10. **Q: A team writes lambdas that access mutable instance fields without synchronization. Under load, the fields have wrong values. The team blames lambdas for not being thread-safe. Is the lambda the problem?**
-    A: The lambda itself is not the problem — it's code that captures `this` and accesses mutable state. Lambdas don't introduce any thread-safety guarantees (or lack thereof) beyond anonymous inner classes. The issue is shared mutable state accessed from multiple threads:
-    ```java
-    // Problematic — lambda captures this, accesses mutable list
-    List<String> results = new ArrayList<>();
-    items.parallelStream().forEach(item -> results.add(process(item)));
+**Q: You have a function `public void process(Consumer<String> handler)` that is called thousands of times per second. Each call creates a new lambda `s -> doSomething(s)`. The allocation rate causes GC pressure. How do you optimize without changing the API?**
 
-    // Fix — use collection that belongs to the lambda
-    List<String> results = items.parallelStream()
-        .map(item -> process(item))
-        .collect(toList());
-    ```
-    The lambda is a function, not a transaction. Thread safety depends on what the lambda does, not the lambda itself. Prefer stateless lambdas and let the stream framework handle accumulation.
+A: Extract the lambda to a static final field so that it is created once and cached forever by the `LambdaMetafactory`. If `doSomething` is a static method, the lambda is non-capturing: `private static final Consumer<String> HANDLER = s -> doSomething(s);`. Now every call to `process(HANDLER)` passes the same cached instance with zero allocation. If `doSomething` is an instance method, use an instance method reference `this::doSomething` — it captures `this` but may still be cached more effectively than a capturing lambda, or extract the instance state into the method parameter so the lambda becomes non-capturing. The optimization principle is: if the same lambda behavior is used repeatedly, store it in a field rather than recreating it at every call site.
+
+**Q: A lambda `x -> compute(x)` is used in a `Stream.flatMap()`. `compute()` returns `Stream.empty()` for some inputs, which is correct behavior. However, the stream is sometimes `null` instead of empty, causing NPE. How do you enforce the contract?**
+
+A: The `flatMap()` method throws `NullPointerException` if the mapping function returns `null` because the `Stream` contract prohibits null elements. The lambda must never return `null` from a `flatMap()` mapping function — use `Stream.empty()` for the no-result case. The safer approach is to separate the mapping and flattening: `.map(this::compute).filter(Objects::nonNull).flatMap(Function.identity())`, where `compute()` is allowed to return `null` (meaning no result) and the filter removes nulls before flattening. This pattern makes the null possibility explicit in the code and prevents the NPE from propagating through the stream pipeline. If `compute()` is controlled by a different team, document the contract clearly: the function must return non-null `Stream` instances, using `Stream.empty()` for empty results.
+
+**Q: A team writes lambdas that access mutable instance fields without synchronization. Under load, the fields have wrong values. The team blames lambdas for not being thread-safe. Is the lambda the problem?**
+
+A: Lambdas themselves are not the problem — they are just syntax for anonymous functions and introduce no thread-safety guarantees beyond what the underlying code provides. The bug is shared mutable state accessed from multiple threads without synchronization, regardless of whether the access happens in a lambda, an anonymous inner class, or a regular method. In the common anti-pattern `items.parallelStream().forEach(item -> results.add(process(item)))`, the lambda captures `results` which is a shared `ArrayList` with no thread-safe semantics — multiple threads call `add()` concurrently, corrupting the list's internal structure. The fix is to use a stateless approach: `items.parallelStream().map(item -> process(item)).collect(toList())`, which lets the stream framework handle thread-safe accumulation. The lambda is not the source of the thread-safety problem; it is merely the vehicle that exposes the existing unsynchronized access.
 
 ---
 
 ## Interview Questions
 
-1. **What is a lambda expression in Java?**
-   A: A lambda expression is an anonymous function that can be treated as a value — passed as an argument, returned from a method, or stored in a variable. It provides a concise syntax for implementing single-method interfaces (functional interfaces). Syntax: `(parameters) -> { body }`.
+**What is a lambda expression in Java?** A lambda expression is an anonymous function that can be treated as a first-class value — passed as an argument, returned from a method, or stored in a variable. It provides concise syntax for implementing the single abstract method of a functional interface using the form `(parameters) -> { body }`. Lambdas enable functional programming patterns like behavior parameterization and are the foundation for the Stream API, `Optional`, and `CompletableFuture`.
 
-2. **What is the difference between a lambda and an anonymous inner class?**
-   A: Lambdas are compiled using `invokedynamic` (no separate `.class` file); anonymous inner classes are compiled to separate class files. Lambdas cannot have instance fields or methods; anonymous classes can. `this` in a lambda refers to the enclosing class; in an anonymous class, `this` refers to the anonymous class instance. Non-capturing lambdas are cached as singletons; anonymous inner classes allocate per use.
+**What is the difference between a lambda and an anonymous inner class?** Lambdas use `invokedynamic` compilation (no separate `.class` file, lower memory footprint) while anonymous inner classes compile to individual class files. Lambdas cannot declare instance fields or additional methods; anonymous classes can. The `this` keyword in a lambda refers to the enclosing class, whereas in an anonymous inner class it refers to the anonymous instance. Non-capturing lambdas are cached as singletons with zero allocation per use; anonymous inner classes allocate a new instance every time.
 
-3. **What does "effectively final" mean in the context of lambdas?**
-   A: A variable is effectively final if its value is never changed after initialization — even without the `final` keyword. Lambdas can only capture local variables that are effectively final. This prevents race conditions in concurrent lambda execution and makes the captured value predictable. Instance fields and static fields can be captured regardless of mutability because they are stored on the heap (visible to all threads).
+**What does "effectively final" mean in the context of lambdas?** A variable is effectively final if its value is never changed after initialization, even without the `final` keyword. Lambdas can only capture local variables that are effectively final because the captured value is copied into the lambda's heap object when created — if the local variable could change, the lambda and the enclosing method would have inconsistent copies. Instance fields and static fields do not have this restriction because they are always accessed through their declaring class rather than being copied.
 
-4. **What is variable capture and how does it work under the hood?**
-   A: Variable capture is when a lambda accesses variables from its enclosing scope. Local variables are copied into the lambda's object when it's created (they must be effectively final). Instance fields are captured via the `this` reference. Under the hood, the JVM uses `invokedynamic` with `LambdaMetafactory` — it generates a class at runtime that holds captured values as fields and implements the functional interface. Capturing local variables copies them into the generated class's fields.
+**What is variable capture and how does it work under the hood?** Variable capture occurs when a lambda accesses variables from the enclosing lexical scope. Local variables are copied into the lambda's generated implementation class fields when the lambda is created. Instance fields are captured via the enclosing `this` reference, meaning the generated class holds a reference to the enclosing object. Under the hood, the `LambdaMetafactory` generates an implementation class at runtime that holds captured values as instance fields and implements the functional interface by calling the lambda body with those captured values available.
 
-5. **How are lambdas compiled and executed?**
-   A: The Java compiler generates an `invokedynamic` instruction (Java 7+) pointing to `LambdaMetafactory`. At runtime, the first invocation triggers the bootstrap method, which generates the lambda implementation class using `MethodHandle` (not reflection). Subsequent calls invoke the cached implementation directly. Non-capturing lambdas generate a single static instance; capturing lambdas create a new instance on every call.
+**How are lambdas compiled and executed?** The Java compiler translates each lambda expression into an `invokedynamic` instruction in the bytecode with a reference to `LambdaMetafactory` as the bootstrap method. At runtime, the first invocation triggers the bootstrap method which uses `MethodHandle` APIs to spin the lambda implementation class, link it into a `CallSite`, and cache it permanently. Subsequent invocations jump directly to the linked method handle without any bootstrap overhead, reflection, or allocation for non-capturing lambdas.
 
-6. **What is a method reference and how does it differ from a lambda?**
-   A: A method reference (`String::length`) is a shorthand for a lambda that calls an existing method. It's more concise and often more readable. Types: `Class::staticMethod`, `instance::instanceMethod`, `Class::instanceMethod`, `Class::new` (constructor). Method references are typically non-capturing (if static) or capture `this` (if instance method reference). They share the same invocation mechanism as lambdas.
+**What is a method reference and how does it differ from a lambda?** A method reference (`String::length`, `Integer::parseInt`) is a shorthand for a lambda that delegates directly to an existing method. It is more concise than an equivalent lambda and fails at compile time if the method signature does not match the functional interface. The four types are `Class::staticMethod`, `instance::instanceMethod`, `Class::instanceMethod` (where the first parameter becomes the receiver), and `Class::new` (constructor reference). Method references are typically non-capturing when static and share the same `invokedynamic` compilation mechanism as lambdas.
 
-7. **Can lambdas have checked exceptions? How do you handle them?**
-   A: No functional interface in `java.util.function` declares checked exceptions. To call a method that throws a checked exception inside a lambda, you must either: (1) wrap in try-catch and rethrow as unchecked (`RuntimeException`), (2) create a custom `@FunctionalInterface` that declares the exception, or (3) use a utility wrapper that converts checked to unchecked: `Function<T, R> unchecked(ThrowingFunction<T, R> f)`.
+**Can lambdas have checked exceptions? How do you handle them?** No standard functional interface in `java.util.function` declares checked exceptions in its abstract method signature, so lambdas that throw checked exceptions produce compile errors. Common solutions include wrapping the checked-exception-throwing call in a try-catch block that rethrows as an unchecked `RuntimeException`, creating a custom `@FunctionalInterface` that declares the checked exception, or using a utility adapter method that converts a throwing function into a standard lambda-friendly one.
 
-8. **What is the difference between a capturing and non-capturing lambda, and why does it matter for performance?**
-   A: A non-capturing lambda doesn't access any variables from the enclosing scope and is cached as a singleton (zero allocation per call). A capturing lambda accesses local variables, parameters, or instance fields and creates a new instance each time it's evaluated. In hot loops, capturing lambdas cause allocation pressure and GC pauses. Method references to static methods are always non-capturing. Prefer non-capturing lambdas in performance-critical code.
+**What is the difference between a capturing and non-capturing lambda, and why does it matter for performance?** A non-capturing lambda does not reference any variables from the enclosing scope beyond its parameters and is cached by the JVM as a single static instance with zero allocation per invocation. A capturing lambda references local variables, parameters, or `this`, and creates a new instance on the heap each time the lambda expression is evaluated. In performance-critical hot paths, capturing lambdas create allocation pressure that can cause GC pauses, while non-capturing lambdas have zero allocation cost.
 
-9. **How do you make a lambda serializable?**
-   A: Lambdas are not serializable by default. To make one serializable, cast it to the intersection type: `(Function<String, Integer> & Serializable) s -> s.length()`. For distributed systems (Spark, Hazelcast), extract the logic to a class that implements `Serializable` and use method references: `(Function<String, Integer> & Serializable) String::length`. Serializable lambdas capture their enclosing scope, which must also be serializable.
+**How do you make a lambda serializable?** Lambdas are not serializable by default because the generated implementation class does not implement `Serializable`. To make a lambda serializable, cast it to the intersection type: `(Function<String, Integer> & Serializable) s -> s.length()`. For distributed systems like Apache Spark or Hazelcast, extract the logic to a class that implements `Serializable` and use method references: `(Function<String, Integer> & Serializable) String::length`. Serializable lambdas capture their enclosing scope, which must also be fully serializable.
 
-10. **What are the limitations of lambdas compared to anonymous inner classes?**
-    A: Lambdas cannot: (1) have instance fields or methods (anonymous classes can), (2) define new variables in the same scope as enclosing variables (shadowing), (3) implement multiple methods (must be a functional interface), (4) refer to `this` as the lambda itself, (5) have the same flexibility with generic type parameters. Use anonymous inner classes when you need state or multiple methods; use lambdas for stateless behavior passing.
+**What are the limitations of lambdas compared to anonymous inner classes?** Lambdas cannot declare instance fields or additional methods, cannot shadow enclosing variables (no new scope), can only implement single-method interfaces (functional interfaces), cannot refer to `this` as the lambda instance itself, and have less flexibility with generic type parameters. Anonymous inner classes are still the correct choice when the implementation requires additional state, multiple interface methods, or `this`-referential behavior.
 
 ---
 
 ## Developer Recommendations
 
-- **Prefer non-capturing lambdas in hot paths** — Non-capturing lambdas are cached as static singletons (zero allocation per invocation). Capturing lambdas allocate a new object every time. In a loop processing 1M items, a capturing lambda creates 1M garbage objects, causing GC pauses. Extract instance state to method parameters and use method references: `items.forEach(this::process)` instead of `items.forEach(item -> process(item, config))`.
-
-- **Use method references over lambdas for single-method delegation** — `list.sort(Comparator.comparingInt(Order::getTotal))` is more readable and has better allocation characteristics than `list.sort((a, b) -> Integer.compare(a.getTotal(), b.getTotal()))`. Method references also fail at compile time if the method signature doesn't match (unlike lambdas which may compile but fail at runtime).
-
-- **Extract multi-line lambdas into named methods** — A lambda with 5+ lines, multiple conditions, or try-catch blocks is harder to debug (stack traces show `lambda$methodName$N`) and harder to test. Extract to a private method and use method reference: `stream.map(this::processOrder)` instead of `stream.map(order -> { ... 10 lines ... })`. This improves stack trace readability and allows unit testing the method directly.
-
-- **Keep lambdas stateless for parallel streams** — Parallel streams distribute elements across threads. Lambdas with shared mutable state (e.g., incrementing a counter, adding to a shared list) cause race conditions. Prefer `map()` with stateless transformations and let `collect()` handle accumulation: `stream.map(this::transform).collect(toList())` instead of `stream.forEach(item -> { synchronized(lock) { results.add(item); } })`.
-
-- **Avoid ambiguous overloads with functional interfaces** — Overloading methods with `Predicate<T>` and `Function<T,R>` causes compilation errors when callers use lambdas. Use distinct method names: `filter(Predicate)` vs `transform(Function)`. If overloading is necessary, document which functional interface takes precedence and advise callers to use explicit casts.
-
-- **Use `IntStream.range()` over loop-based lambda capture** — When creating lambdas in a loop (e.g., submitting tasks to an executor), copying the loop variable to an effectively-final local variable is error-prone. Use `IntStream.range(0, n).forEach(i -> executor.submit(() -> process(items.get(i))))` — the `i` variable in the lambda is unique per iteration, eliminating the need for manual copying.
-
-- **Profile lambda allocation before optimizing** — Lambda allocation is often irrelevant compared to I/O, database, or network costs. Use a profiler (Async Profiler, JFR) to confirm lambdas are a bottleneck before optimizing. For capturing lambdas in non-hot paths, the readability benefit far outweighs the allocation cost. The rule: optimize only after measuring.
+- **Prefer non-capturing lambdas in hot paths** — The JVM caches them as static singletons with zero allocation after the first invocation. Capturing lambdas allocate a new object every time the lambda expression is evaluated, which in a loop processing 1 million items creates 1 million garbage objects. Transform capturing lambdas by extracting instance state into method parameters and using method references: `items.forEach(this::process)` instead of `items.forEach(item -> process(item, config))`.
+- **Use method references over lambdas for single-method delegation** — They are more readable, fail earlier at compile time with clearer error messages, and often have better allocation characteristics. `list.sort(Comparator.comparingInt(Order::getTotal))` communicates intent more directly than `list.sort((a, b) -> Integer.compare(a.getTotal(), b.getTotal()))`. Method references also survive refactoring better — renaming the referenced method produces a compile error.
+- **Extract multi-line lambdas into named methods** — Debug stack traces show `lambda$methodName$N` for inline lambdas, making it difficult to identify which lambda threw the exception. A lambda with five or more lines, multiple conditionals, or try-catch blocks should be a named method referenced as `stream.map(this::processOrder)`. This improves stack trace readability, allows unit testing, and documents the transformation with a meaningful method name.
+- **Keep lambdas stateless with parallel streams** — The stream framework partitions data across multiple threads, and a lambda that increments a shared counter or adds to a shared list introduces data races. Use `map()` for stateless transformations and `collect()` for thread-safe accumulation: `stream.map(this::transform).collect(toList())` is correct and performant.
+- **Avoid ambiguous method overloads with different functional interfaces** — Lambdas rely on target-type inference. If a class overloads `filter(Predicate<T>)` and `filter(Function<T,R>)`, calling `filter(x -> doSomething(x))` fails to compile due to ambiguity. Use distinct method names: `filterByCondition(Predicate)` and `transform(Function)`.
+- **Profile lambda allocation before investing in optimization** — Many developers assume lambdas are expensive when they are actually negligible compared to I/O, database, or network costs. Use a profiler (Async Profiler, Java Flight Recorder) to confirm that lambda allocation appears as a significant fraction of CPU time or GC pressure before refactoring.
+- **Use IntStream.range() to avoid loop variable capture** — Instead of `for (int i = 0; i < n; i++) { int copy = i; executor.submit(() -> process(copy)); }`, use `IntStream.range(0, n).forEach(i -> executor.submit(() -> process(items.get(i))))` where `i` is unique per iteration by virtue of being a lambda parameter.

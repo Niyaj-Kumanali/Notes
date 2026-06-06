@@ -7,6 +7,8 @@
 - **Definition:** A software development approach introduced by Eric Evans that emphasizes modeling software to closely reflect the business domain using a shared language between developers and domain experts.
 - **Why It Exists:** Complex business domains require a model that evolves with business understanding. DDD provides strategic patterns (bounded contexts, context maps) and tactical patterns (entities, value objects, aggregates) to manage complexity and align software with business goals.
 - **Key Concepts:** **Ubiquitous Language** (shared language between devs and domain experts), **Bounded Context** (logical boundary for a domain model), **Entity** (object with identity), **Value Object** (immutable, defined by attributes), **Aggregate** (cluster of objects with a root entity), **Repository** (persistence abstraction), **Domain Event** (something the business cares about), **Domain Service** (stateless domain logic), **Anti-Corruption Layer** (translation between contexts)
+- **DDD vs CRUD** — CRUD treats all operations as Create, Read, Update, Delete on data. DDD models behavior: `order.submit()`, not `order.setStatus(SUBMITTED)`. CRUD is appropriate for simple admin screens where the user directly manipulates data. DDD is essential for complex domains with business rules, invariants, and workflows (finance, insurance, logistics).
+- **Context Map Relationships** — Partnership (two contexts cooperate), Shared Kernel (shared subset of model), Customer-Supplier (upstream/downstream dependency), Conformist (downstream conforms to upstream model), Anticorruption Layer (translation layer), Open Host Service (published API), Separate Ways (no relationship). Choose the relationship based on team dynamics and integration requirements.
 
 ---
 
@@ -18,6 +20,8 @@
 - **Domain Service:** Stateless service that holds domain logic that doesn't naturally fit in an entity or value object. Different from Application Service which orchestrates use cases.
 - **Domain Event:** An immutable fact about something that happened in the domain that domain experts care about. Published after aggregate changes are persisted. Used for cross-aggregate and cross-context communication.
 - **Strategic Design Patterns:** Core Domain (competitive advantage, invest heavily), Supporting Subdomain (necessary but not core), Generic Subdomain (common — buy or use open source). Bounded Contexts and Context Maps define inter-context relationships.
+- **Hexagonal Architecture (Ports and Adapters)** — The domain layer is at the center, with ports (interfaces) that define how the domain interacts with the outside world. Adapters implement these ports for specific technologies: REST controllers, JPA repositories, Kafka producers. The domain has zero dependencies on infrastructure — it only knows about its own interfaces. This enforces DIP and keeps the domain pure.
+- **Domain Events vs Integration Events** — Domain events represent something that happened within an aggregate (`OrderSubmitted`). Integration events communicate across bounded contexts (`PaymentProcessed`). Domain events are consumed within the same context; integration events cross context boundaries. The distinction prevents coupling between contexts — an integration event should not expose internal domain details.
 
 ```java
 // Value Object — immutable, no identity
@@ -70,6 +74,8 @@ public interface OrderRepository {
 - **Large Aggregates** — loading hundreds of entities per aggregate causes performance issues. Keep aggregates small (usually fewer than 10 entities).
 - **Ignoring Bounded Contexts** — using the same "User" model across all contexts instead of context-specific models tailored to each bounded context's needs.
 - **Infrastructure Coupling in Domain** — domain layer depending on JPA, Spring, or database concerns. Domain should be plain Java objects with no framework annotations.
+- **Using Events to Communicate Instead of Commands** — Publishing `SendEmail` (a command) instead of `OrderSubmitted` (an event) couples the producer to the consumer's behavior. Events should be past-tense business facts that multiple consumers can interpret independently.
+- **Over-engineering with Value Objects** — Replacing every `String` with a type-safe value object adds ceremony. Apply value objects to concepts that have validation rules, formatting, or behavior. `EmailAddress` (validates format) is justified. `FirstName` (no rules beyond not null) is over-engineering.
 
 ---
 
@@ -80,6 +86,9 @@ public interface OrderRepository {
 - **Aggregate Design Rules** — reference other aggregates by ID only; keep aggregates small; one transaction per aggregate; use eventual consistency across aggregates; enforce invariants within aggregate boundaries; use domain events for cross-aggregate communication.
 - **Anti-Corruption Layer** — a translation layer that prevents a legacy system's model from corrupting the new domain model. Translates between the legacy model and the domain model at the bounded context boundary.
 - **Layered Architecture** — Application layer (orchestrates, thin), Domain layer (business logic, core), Infrastructure layer (persistence, messaging, external APIs), Presentation layer (REST controllers, DTOs).
+- **Specification Pattern** — Encapsulates a business rule that can be evaluated against an entity. Example: `OrderIsOverdue`, `CustomerIsVip`. Specifications can be combined with AND/OR for complex rules. Useful for filtering, validation, and business rule extraction from domain objects.
+- **Domain Primitive Pattern** — A value object that wraps a primitive type with domain-specific validation and behavior. `Email` ensures format validity, `PositiveAmount` ensures value > 0. Domain primitives push validation to the edges — invalid states are impossible to represent in the domain model.
+- **Event Sourcing with DDD** — Stores aggregate state as a sequence of domain events. Current state is derived by replaying events. Benefits: complete audit trail, temporal queries (state at any point in time), and event-driven communication. Trade-offs: higher storage, eventual consistency, and the complexity of event schema evolution.
 
 ---
 
@@ -227,3 +236,5 @@ public class LegacyOrderTranslator {
 - **Don't use DDD everywhere** — DDD is for complex business domains where the model provides competitive advantage. For simple CRUD screens, reporting dashboards, and generic functionality, DDD adds ceremony without benefit. Reserve tactical patterns (Entities, Value Objects, Aggregates) for core domains; use simpler approaches for supporting and generic subdomains.
 
 - **Build an Anti-Corruption Layer when integrating with legacy systems** — Without an ACL, the legacy system's bad design choices, confusing terminology, and tangled relationships leak into your new domain model. The ACL is a one-time investment that preserves the integrity of your domain model for the lifetime of the system.
+- **Invest heavily in the Core Domain, but not in Supporting or Generic subdomains** — The Core Domain is your competitive advantage — build it in-house with the best engineers, apply full DDD tactical patterns, and invest in rich domain models. Supporting subdomains (necessary but not differentiating) can use simpler approaches (CRUD, services). Generic subdomains (logging, email, payments) should use existing solutions (SaaS, open source) without custom domain models.
+- **Use Event Storming to discover the domain model collaboratively** — Event Storming brings domain experts and developers together to model the business process using sticky notes. Start with domain events (orange), then add commands (blue), aggregates (yellow), and bounded context boundaries. A single workshop session can reveal the entire domain model in hours rather than weeks of document analysis.

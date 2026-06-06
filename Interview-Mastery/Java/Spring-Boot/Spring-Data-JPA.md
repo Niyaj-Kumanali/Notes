@@ -6,226 +6,217 @@
 
 **Spring Data JPA** is a framework that dramatically simplifies data access by automatically generating repository implementations at runtime. It builds on top of **JPA (Jakarta Persistence)** and **Hibernate**, providing a consistent, declarative approach to database access without writing boilerplate code.
 
-### Key Concepts:
+### Repository Hierarchy
 
-1. **Repository Hierarchy**:
+- **`Repository<T, ID>`** — The marker interface at the top of the hierarchy. It is a central interface that Spring Data uses to identify repositories and enable scanning.
+- **`CrudRepository<T, ID>`** — Provides basic CRUD operations: `save()`, `findById()`, `findAll()`, `count()`, `deleteById()`, `existsById()`. This is the minimum interface for most use cases.
+- **`PagingAndSortingRepository<T, ID>`** — Extends `CrudRepository` with pagination and sorting via `findAll(Pageable)` and `findAll(Sort)`. Use when you need paginated data access.
+- **`JpaRepository<T, ID>`** — Extends `PagingAndSortingRepository` with JPA-specific methods like `flush()`, `saveAndFlush()`, and batch operations. This is the recommended interface for most Spring Boot applications.
 
-   - **`Repository<T, ID>`** — The marker interface at the top of the hierarchy. It is a central interface that Spring Data uses to identify repositories.
-   - **`CrudRepository<T, ID>`** — Provides basic CRUD operations: `save()`, `findById()`, `findAll()`, `count()`, `deleteById()`, `existsById()`.
-   - **`PagingAndSortingRepository<T, ID>`** — Extends `CrudRepository` with pagination and sorting via `findAll(Pageable)` and `findAll(Sort)`.
-   - **`JpaRepository<T, ID>`** — Extends `PagingAndSortingRepository` with JPA-specific methods like `flush()`, `saveAndFlush()`, and batch operations.
+### Query Derivation from Method Names
 
-2. **Query Derivation from Method Names**:
+Spring Data JPA parses method names to automatically generate JPQL queries. The method name follows a strict pattern:
 
-   Spring Data JPA parses method names to automatically generate JPQL queries. The method name follows a strict pattern:
+```java
+public interface UserRepository extends JpaRepository<User, Long> {
 
-   ```java
-   public interface UserRepository extends JpaRepository<User, Long> {
+    // SELECT u FROM User u WHERE u.email = ?1
+    Optional<User> findByEmail(String email);
 
-       // SELECT u FROM User u WHERE u.email = ?1
-       Optional<User> findByEmail(String email);
+    // WHERE u.lastName = ?1 AND u.firstName = ?2
+    List<User> findByLastNameAndFirstName(String lastName, String firstName);
 
-       // WHERE u.lastName = ?1 AND u.firstName = ?2
-       List<User> findByLastNameAndFirstName(String lastName, String firstName);
+    // WHERE u.active = true ORDER BY u.createdAt DESC
+    List<User> findByActiveTrueOrderByCreatedAtDesc();
 
-       // WHERE u.active = true ORDER BY u.createdAt DESC
-       List<User> findByActiveTrueOrderByCreatedAtDesc();
+    // WHERE u.createdAt > ?1
+    List<User> findByCreatedAtAfter(LocalDateTime date);
 
-       // WHERE u.createdAt > ?1
-       List<User> findByCreatedAtAfter(LocalDateTime date);
+    // WHERE u.email LIKE %?1%
+    List<User> findByEmailContaining(String partial);
 
-       // WHERE u.email LIKE %?1%
-       List<User> findByEmailContaining(String partial);
+    // WHERE u.department IN ?1
+    List<User> findByDepartmentIn(List<String> departments);
 
-       // WHERE u.department IN ?1
-       List<User> findByDepartmentIn(List<String> departments);
+    // Paginated query
+    Page<User> findByActive(boolean active, Pageable pageable);
 
-       // Paginated query
-       Page<User> findByActive(boolean active, Pageable pageable);
+    // Lazy pagination (no count query)
+    Slice<User> findByRole(String role, Pageable pageable);
+}
+```
 
-       // Lazy pagination (no count query)
-       Slice<User> findByRole(String role, Pageable pageable);
-   }
-   ```
+### `@Query` — Custom JPQL and Native Queries
 
-3. **`@Query` — Custom JPQL and Native Queries**:
+When method naming is insufficient, use `@Query` for explicit JPQL or native SQL:
 
-   When method naming is insufficient, use `@Query` for explicit JPQL or native SQL:
+```java
+public interface OrderRepository extends JpaRepository<Order, Long> {
 
-   ```java
-   public interface OrderRepository extends JpaRepository<Order, Long> {
+    @Query("SELECT o FROM Order o WHERE o.status = :status ORDER BY o.createdAt DESC")
+    List<Order> findByStatus(@Param("status") OrderStatus status);
 
-       @Query("SELECT o FROM Order o WHERE o.status = :status ORDER BY o.createdAt DESC")
-       List<Order> findByStatus(@Param("status") OrderStatus status);
+    @Query(value = "SELECT * FROM orders WHERE total > :minTotal",
+           nativeQuery = true)
+    List<Order> findLargeOrders(@Param("minTotal") BigDecimal minTotal);
 
-       @Query(value = "SELECT * FROM orders WHERE total > :minTotal",
-              nativeQuery = true)
-       List<Order> findLargeOrders(@Param("minTotal") BigDecimal minTotal);
-
-       @Modifying
-       @Query("UPDATE Order o SET o.status = :status WHERE o.createdAt < :date")
-       int bulkUpdateStatus(@Param("status") OrderStatus status,
-                            @Param("date") LocalDateTime date);
-   }
-   ```
+    @Modifying
+    @Query("UPDATE Order o SET o.status = :status WHERE o.createdAt < :date")
+    int bulkUpdateStatus(@Param("status") OrderStatus status,
+                         @Param("date") LocalDateTime date);
+}
+```
 
 ---
 
 ## Core Concepts
 
-### 1. Entity State Transitions
+### Entity State Transitions
 
-   Understanding entity states is critical for correct JPA usage:
+Understanding entity states is critical for correct JPA usage:
 
-   ```
-   NEW (transient)          — not persisted, no ID assigned
-       ↓ persist() / merge()
-   MANAGED (persistent)     — associated with PersistenceContext
-       ↓ close() / clear() / evict()
-   DETACHED                 — not associated, has ID
-       ↓ merge()
-   MANAGED (persistent)
-       ↓ remove()
-   REMOVED (deleted)
-   ```
+```
+NEW (transient)          — not persisted, no ID assigned
+    ↓ persist() / merge()
+MANAGED (persistent)     — associated with PersistenceContext
+    ↓ close() / clear() / evict()
+DETACHED                 — not associated, has ID
+    ↓ merge()
+MANAGED (persistent)
+    ↓ remove()
+REMOVED (deleted)
+```
 
-   - **NEW** — Entity created with `new`, but not yet known to JPA.
-   - **MANAGED** — Entity is associated with a persistence context. Changes are automatically tracked and synchronized.
-   - **DETACHED** — Entity was once managed but the persistence context has closed. JPA no longer tracks changes.
-   - **REMOVED** — Entity marked for deletion. Removed from the database on flush.
+- **NEW** — Entity created with `new`, but not yet known to JPA. No database identity assigned.
+- **MANAGED** — Entity is associated with a persistence context. Changes are automatically tracked and synchronized to the database on flush.
+- **DETACHED** — Entity was once managed but the persistence context has closed. JPA no longer tracks changes, and you must call `merge()` to re-attach.
+- **REMOVED** — Entity marked for deletion. Removed from the database on the next flush or transaction commit.
 
-### 2. Page vs Slice
+### Page vs Slice
 
-   - **`Page<T>`** — Includes total count (executes a COUNT query). Best when you need total pages for navigation UI.
-   - **`Slice<T>`** — No COUNT query. Only knows if there is a next page via `hasNext()`. Better performance for infinite scroll.
+- **`Page<T>`** — Includes total count (executes a COUNT query). Best when you need total pages for navigation UI with page numbers.
+- **`Slice<T>`** — No COUNT query. Only knows if there is a next page via `hasNext()`. Significantly better performance for infinite scroll patterns on large datasets.
 
-### 3. N+1 Query Problem
+### N+1 Query Problem
 
-   The N+1 problem occurs when you fetch entities and then access their lazy-loaded associations in a loop:
+The N+1 problem occurs when you fetch entities and then access their lazy-loaded associations in a loop:
 
-   ```java
-   // BAD: N+1 queries — 1 for customers + N for each customer's orders
-   List<Customer> customers = customerRepository.findAll();
-   for (Customer c : customers) {
-       System.out.println(c.getOrders().size()); // N extra queries!
-   }
+```java
+// BAD: N+1 queries — 1 for customers + N for each customer's orders
+List<Customer> customers = customerRepository.findAll();
+for (Customer c : customers) {
+    System.out.println(c.getOrders().size()); // N extra queries!
+}
 
-   // GOOD: JOIN FETCH
-   @Query("SELECT DISTINCT c FROM Customer c JOIN FETCH c.orders")
-   List<Customer> findAllWithOrders();
+// GOOD: JOIN FETCH
+@Query("SELECT DISTINCT c FROM Customer c JOIN FETCH c.orders")
+List<Customer> findAllWithOrders();
 
-   // GOOD: Entity Graph
-   @EntityGraph(attributePaths = {"orders"})
-   @Query("SELECT c FROM Customer c")
-   List<Customer> findAllWithOrders();
-   ```
+// GOOD: Entity Graph
+@EntityGraph(attributePaths = {"orders"})
+@Query("SELECT c FROM Customer c")
+List<Customer> findAllWithOrders();
+```
 
-### 4. Auditing
+### Auditing
 
-   Spring Data JPA provides automatic auditing of `createdAt`, `updatedAt`, `createdBy`, and `updatedBy`:
+Spring Data JPA provides automatic auditing of `createdAt`, `updatedAt`, `createdBy`, and `updatedBy`:
 
-   ```java
-   @EntityListeners(AuditingEntityListener.class)
-   @MappedSuperclass
-   public abstract class Auditable {
+```java
+@EntityListeners(AuditingEntityListener.class)
+@MappedSuperclass
+public abstract class Auditable {
 
-       @CreatedDate
-       @Column(updatable = false)
-       private LocalDateTime createdAt;
+    @CreatedDate
+    @Column(updatable = false)
+    private LocalDateTime createdAt;
 
-       @LastModifiedDate
-       private LocalDateTime updatedAt;
+    @LastModifiedDate
+    private LocalDateTime updatedAt;
 
-       @CreatedBy
-       @Column(updatable = false)
-       private String createdBy;
+    @CreatedBy
+    @Column(updatable = false)
+    private String createdBy;
 
-       @LastModifiedBy
-       private String updatedBy;
-   }
+    @LastModifiedBy
+    private String updatedBy;
+}
 
-   @Configuration
-   @EnableJpaAuditing
-   public class JpaConfig {
-       @Bean
-       public AuditorAware<String> auditorProvider() {
-           return () -> Optional.ofNullable(
-               SecurityContextHolder.getContext().getAuthentication())
-               .map(auth -> auth.getName())
-               .orElse("SYSTEM");
-       }
-   }
-   ```
+@Configuration
+@EnableJpaAuditing
+public class JpaConfig {
+    @Bean
+    public AuditorAware<String> auditorProvider() {
+        return () -> Optional.ofNullable(
+            SecurityContextHolder.getContext().getAuthentication())
+            .map(auth -> auth.getName())
+            .orElse("SYSTEM");
+    }
+}
+```
 
-### 5. Specifications (Dynamic Queries)
+### Specifications (Dynamic Queries)
 
-   The `Specification` pattern enables building dynamic queries programmatically:
+The `Specification` pattern enables building dynamic queries programmatically:
 
-   ```java
-   public class UserSpecifications {
+```java
+public class UserSpecifications {
 
-       public static Specification<User> hasEmail(String email) {
-           return (root, query, cb) ->
-               email == null ? null : cb.equal(root.get("email"), email);
-       }
+    public static Specification<User> hasEmail(String email) {
+        return (root, query, cb) ->
+            email == null ? null : cb.equal(root.get("email"), email);
+    }
 
-       public static Specification<User> activeOnly() {
-           return (root, query, cb) -> cb.isTrue(root.get("active"));
-       }
+    public static Specification<User> activeOnly() {
+        return (root, query, cb) -> cb.isTrue(root.get("active"));
+    }
 
-       public static Specification<User> createdBetween(LocalDate from, LocalDate to) {
-           return (root, query, cb) -> {
-               if (from == null && to == null) return null;
-               if (from == null) return cb.lessThan(root.get("createdAt"), to.atStartOfDay());
-               if (to == null) return cb.greaterThan(root.get("createdAt"), from.atStartOfDay());
-               return cb.between(root.get("createdAt"), from.atStartOfDay(), to.atStartOfDay());
-           };
-       }
-   }
+    public static Specification<User> createdBetween(LocalDate from, LocalDate to) {
+        return (root, query, cb) -> {
+            if (from == null && to == null) return null;
+            if (from == null) return cb.lessThan(root.get("createdAt"), to.atStartOfDay());
+            if (to == null) return cb.greaterThan(root.get("createdAt"), from.atStartOfDay());
+            return cb.between(root.get("createdAt"), from.atStartOfDay(), to.atStartOfDay());
+        };
+    }
+}
 
-   // Usage
-   Specification<User> spec = Specification
-       .where(UserSpecifications.hasEmail(request.getEmail()))
-       .and(UserSpecifications.activeOnly());
-   Page<User> users = userRepository.findAll(spec, pageable);
-   ```
+// Usage
+Specification<User> spec = Specification
+    .where(UserSpecifications.hasEmail(request.getEmail()))
+    .and(UserSpecifications.activeOnly());
+Page<User> users = userRepository.findAll(spec, pageable);
+```
 
-### 6. Projections (DTO, not Entity)
+### Projections (DTO, not Entity)
 
-   Avoid loading full entities when you only need a subset of fields:
+Avoid loading full entities when you only need a subset of fields:
 
-   ```java
-   // Interface projection — no full entity load
-   public interface UserSummary {
-       Long getId();
-       String getEmail();
-       String getFullName();
-   }
+```java
+// Interface projection — no full entity load
+public interface UserSummary {
+    Long getId();
+    String getEmail();
+    String getFullName();
+}
 
-   // Class projection with JPQL
-   @Query("SELECT new com.example.UserDto(u.id, u.email, u.name) FROM User u")
-   List<UserDto> findAllDto();
-   ```
+// Class projection with JPQL
+@Query("SELECT new com.example.UserDto(u.id, u.email, u.name) FROM User u")
+List<UserDto> findAllDto();
+```
 
 ---
 
 ## Common Mistakes
 
-1. **N+1 queries** — Fetching entities in a loop causes N extra SQL queries. Fix with `JOIN FETCH` or `@EntityGraph`.
-
-2. **`LazyInitializationException`** — Accessing a lazy-loaded association outside a transaction. Fix by loading eagerly within the transaction or using `JOIN FETCH`.
-
-3. **Not using `@Transactional` on modifying queries** — Without it, lazy loading fails and changes are not flushed. Always add `@Transactional`.
-
-4. **Using entities as DTOs** — Over-fetching data, circular JSON references, and performance issues. Use DTO projections instead.
-
-5. **`CascadeType.ALL` everywhere** — Unintended cascading deletes. Be explicit about which cascade types you need.
-
-6. **`FetchType.EAGER` on associations** — Carthesian product joins that fetch massive amounts of data. Use `LAZY` + `@EntityGraph` for specific queries.
-
-7. **Not specifying `@Column`** — Unexpected column names and lengths. Always explicitly define columns.
-
-8. **`equals()` and `hashCode()` based on database ID** — Objects lose identity before persistence. Use a business key or UUID.
+- **N+1 queries** — Fetching entities in a loop causes N extra SQL queries, turning fast operations into slow ones. Fix with `JOIN FETCH` or `@EntityGraph` to eagerly load associations in a single query.
+- **`LazyInitializationException`** — Accessing a lazy-loaded association outside a transaction throws this exception. Fix by loading eagerly within the transaction, using `JOIN FETCH`, or switching to DTO projections.
+- **Not using `@Transactional` on modifying queries** — Without it, lazy loading fails and changes may not be flushed to the database. Always add `@Transactional` on service methods that modify data.
+- **Using entities as DTOs** — Over-fetching data, circular JSON references during serialization, and performance issues. Use DTO projections instead to select only the fields you need.
+- **`CascadeType.ALL` everywhere** — Unintended cascading deletes can wipe out large parts of the database accidentally. Be explicit about which cascade types you actually need (`PERSIST`, `MERGE`).
+- **`FetchType.EAGER` on associations** — Causes Cartesian product joins that fetch massive amounts of data even when not needed. Use `LAZY` as default and `@EntityGraph` for specific queries.
+- **Not specifying `@Column`** — Results in unexpected column names and default lengths that may not match your schema. Always explicitly define column names and constraints.
+- **`equals()` and `hashCode()` based on database ID** — Objects lose identity before persistence (ID is null for new entities). Use a business key or UUID that is stable across the entity lifecycle.
 
 ---
 
@@ -329,7 +320,7 @@ The projection approach used 15MB heap instead of 200MB with full entities.
    A: Use a distributed cache invalidation strategy: (a) Publish a `CacheInvalidationEvent` via RabbitMQ or Kafka when data changes, and have all replicas listen and evict their local caches. (b) Reduce TTL to a tolerance window (e.g., 60s) so drift is bounded. (c) Better yet, migrate to a shared distributed cache like Redis. For Hibernate second-level cache specifically, use Hazelcast or Redis as a shared store.
 
 6. **Q: Your `@OneToMany` collection uses `CascadeType.ALL` and a developer accidentally deletes an `Order` which cascades to delete `Customer`, `Address`, and `PaymentHistory`. How do you prevent this?**
-   A: Remove `CascadeType.ALL` and be explicit about cascade types. Never cascade `REMOVE` or `ALL` from parent to child unless you are certain. Use `CascadeType.PERSIST` and `CascadeType.MERGE` only. For delete operations, implement a soft-delete pattern:
+   A: Remove `CascadeType.ALL` and be explicit about cascade types. Never cascade `REMOVE` or `ALL` from parent to child unless you are certain about the consequences. Use `CascadeType.PERSIST` and `CascadeType.MERGE` only. For delete operations, implement a soft-delete pattern:
    ```java
    @Column(nullable = false)
    private boolean deleted = false;

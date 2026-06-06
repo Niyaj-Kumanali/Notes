@@ -7,6 +7,8 @@
 - **Definition:** A CDN is a geographically distributed network of proxy servers that delivers internet content to users from edge locations closest to them.
 - **Why It Exists:** Reduces latency, offloads origin servers, provides DDoS protection, and improves availability for static assets, dynamic content, video streams, and APIs.
 - **Key Concepts:** **Edge Server / PoP** (physical cache location), **Origin Server** (authoritative source), **Cache Hit/Miss**, **TTL** (time-to-live), **Purge/Invalidation** (forced removal), **Origin Shield** (aggregation layer preventing stampede), **Anycast Routing** (same IP advertised from multiple PoPs).
+- **CDN Tiers and Pricing Models** — CDNs charge by data transfer (egress), request count, and optional features (WAF, edge compute, image optimization). Pay-as-you-go for variable traffic; committed contracts for predictable volumes. Multi-CDN strategies use a primary CDN for most traffic with a secondary for failover or overflow during peaks.
+- **Edge Computing vs Traditional CDN** — Traditional CDNs only cache and serve static content. Edge computing (CloudFront Functions, Lambda@Edge, Cloudflare Workers) allows executing code at the edge for request transformation, A/B testing, authentication, and dynamic assembly. Edge compute reduces origin round-trips for semi-dynamic content.
 
 ---
 
@@ -16,6 +18,8 @@
 - **Caching Hierarchy:** Edge Node → Regional Hub → Origin Shield → Origin Server. Each layer reduces load on the next.
 - **Cache Key:** Default is full URL. Customize by ignoring query params (`?utm_*`), including headers (`Accept-Language`), or cookies. Poorly configured keys cause low hit ratio.
 - **Content Purging:** Exact URI, tag-based (surrogate keys), directory, or wildcard. Tag-based is most efficient for selective invalidation.
+- **Cache Key Design** — Default cache key is the full URL. Optimize by: ignoring irrelevant query parameters (`?utm_*`, `?_t`), including relevant headers (`Accept-Language`, `Accept-Encoding`), and adding custom cache key prefixes for versioning. Poor cache key design creates thousands of unique entries, cratering the hit ratio.
+- **Pre-warming** — Proactively populate CDN cache before expected traffic spikes (product launches, event ticketing, flash sales). Push content to all edge locations via CDN APIs. Monitor edge fill rate to verify pre-warming completed before the event starts. Pre-warm during off-peak hours to avoid origin load spikes.
 
 ```java
 // CDN cache invalidation via CloudFront API
@@ -39,6 +43,9 @@ public void invalidatePaths(List<String> paths) {
 - **Not Versioning Static Assets** — Content hash in filenames (`style.a1b2c3.css`) enables infinite TTL without stale issues.
 - **Origin Behind CDN Without IP Restrictions** — Anyone discovering origin IP bypasses CDN protection.
 - **Wrong Cache Key Configuration** — Cookies, query params, and headers can create thousands of variations, cratering hit ratio.
+- **Caching User-Specific Content at CDN Level** — Authenticated responses with user-specific data must use `Cache-Control: private` to prevent CDN caching. A misconfigured cache could serve User A's dashboard to User B, causing a data exposure incident.
+- **Not Using Origin Shield** — Without origin shield, every edge node that misses simultaneously requests the origin, causing a stampede. Origin shield aggregates misses and reduces origin load by 10-100x.
+- **No Compression at Edge** — Serving uncompressed content increases bandwidth costs and latency. Enable Brotli or Gzip compression at the CDN level. For images, enable automatic format conversion (WebP/AVIF) and resizing.
 
 ---
 
@@ -49,6 +56,8 @@ public void invalidatePaths(List<String> paths) {
 - **Edge Computing** — Lambda@Edge or CloudFront Functions for request transformation, device detection, A/B testing, and lightweight personalization without origin round-trip.
 - **Security** — DDoS absorption at edge, WAF, signed URLs for private content, origin IP allowlisting only CDN egress ranges.
 - **CDN Cost Optimization** — Enable compression, auto-format images (WebP), origin shield, pre-warm during off-peak, optimize cache key cardinality.
+- **Multi-CDN Strategy** — Use multiple CDN providers to avoid single-provider failure and improve global coverage. DNS-based failover for backup; latency-based routing for active-active. Monitor each CDN's performance (TTFB, availability) separately. Trade-off: higher complexity and management overhead.
+- **CDN for Dynamic API Acceleration** — CDNs can accelerate dynamic APIs through TCP optimizations (TLS 1.3, connection reuse, HTTP/2 multiplexing), edge caching with short TTLs and stale-while-revalidate, and origin offload via request collapsing. API responses with `Cache-Control: s-maxage=60` benefit from CDN-level caching even for dynamic content.
 
 ---
 
@@ -176,3 +185,5 @@ public ResponseEntity<Product> getProduct(@PathVariable String sku) {
 - **Implement tag-based cache invalidation for selective purging** — Setting `Surrogate-Key: product-123 category-electronics` on cached responses allows targeted invalidation. When a product price changes, purge by `product-123` instead of the entire cache. This is essential for e-commerce and content platforms with frequent updates.
 
 - **Monitor cache hit ratio and origin bandwidth as critical metrics** — Cache hit ratio below 90% indicates misconfiguration. Use CDN provider analytics dashboards. Set up alerts for sudden drops in hit ratio. Track origin bandwidth savings — if the CDN isn't reducing origin load by 80%+, investigate cache key configuration or TTL settings.
+- **Use surrogate keys for targeted cache invalidation** — Tag cached responses with `Surrogate-Key: product-{id} category-{catId}`. When content changes, purge by specific tags rather than entire cache. This enables surgical invalidation — changing one product price doesn't require purging all product pages. Essential for e-commerce and content platforms with frequent, targeted updates.
+- **Implement CDN failover for high availability** — Configure health checks on the origin. If the origin is unhealthy, the CDN serves stale content from cache (stale-while-revalidate) or routes to a backup origin. For multi-CDN setups, use DNS failover (route to secondary CDN) or client-side failover (JavaScript measures latency and switches). Test failover scenarios regularly to ensure they work.

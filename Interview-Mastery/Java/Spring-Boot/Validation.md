@@ -8,67 +8,49 @@
 
 ### Key Concepts:
 
-1. **Core Dependencies**:
+- **Core Dependencies:** Spring Boot includes validation support through `spring-boot-starter-validation`. Since Spring Boot 2.3, validation is no longer included in `spring-boot-starter-web`, so you must add this dependency explicitly.
 
-   Spring Boot includes validation support through `spring-boot-starter-validation`:
+  ```xml
+  <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-validation</artifactId>
+  </dependency>
+  ```
 
-   ```xml
-   <dependency>
-       <groupId>org.springframework.boot</groupId>
-       <artifactId>spring-boot-starter-validation</artifactId>
-   </dependency>
-   ```
+- **Bean Validation Annotations:** The Jakarta Bean Validation API provides a comprehensive set of annotations including `@NotNull` (value must not be null), `@NotEmpty` (must have at least one element), `@NotBlank` (must contain non-whitespace), `@Size(min, max)`, `@Min`/`@Max`, `@Positive`/`@Negative`, `@Email`, `@Pattern(regexp)`, `@Past`/`@Future`, `@Digits`, and `@AssertTrue`/`@AssertFalse`. These cover null checks, size constraints, numeric ranges, format validation, and temporal assertions.
 
-2. **Bean Validation Annotations**:
+- **Validation Groups:** Validation groups allow different validation rules for different operations (e.g., create vs update) using the same DTO class. Define marker interfaces like `Create` and `Update`, annotate fields with `groups = {Create.class}`, and use `@Validated(Create.class)` at the controller. This avoids duplicating DTOs for each operation while supporting operation-specific constraints.
 
-   - **`@NotNull`** — Value must not be null.
-   - **`@NotEmpty`** — String, collection, map, or array must not be null and must have at least one element.
-   - **`@NotBlank`** — String must not be null and must contain at least one non-whitespace character.
-   - **`@Size(min, max)`** — Length of string or size of collection must be within bounds.
-   - **`@Min` / `@Max`** — Numeric value must be at least / at most the specified value.
-   - **`@Positive` / `@PositiveOrZero`** — Must be positive (optionally including zero).
-   - **`@Negative` / `@NegativeOrZero`** — Must be negative (optionally including zero).
-   - **`@Email`** — Valid email format.
-   - **`@Pattern(regexp)`** — Must match the specified regular expression.
-   - **`@Past` / `@PastOrPresent`** — Date must be in the past.
-   - **`@Future` / `@FutureOrPresent`** — Date must be in the future.
-   - **`@Digits(integer, fraction)`** — Numeric value with specified digit limits.
-   - **`@AssertTrue` / `@AssertFalse`** — Boolean check.
+  ```java
+  public interface Create {}
+  public interface Update {}
 
-3. **Validation Groups**:
+  public class UserRequest {
 
-   Group validation rules for different operations (e.g., create vs update):
+      @Null(groups = Create.class)         // Must be null for create
+      @NotNull(groups = Update.class)      // Must be provided for update
+      private Long id;
 
-   ```java
-   public interface Create {}
-   public interface Update {}
+      @NotBlank(groups = {Create.class, Update.class})
+      private String name;
 
-   public class UserRequest {
+      @Email(groups = Create.class)        // Only validate on create
+      private String email;
+  }
 
-       @Null(groups = Create.class)         // Must be null for create
-       @NotNull(groups = Update.class)      // Must be provided for update
-       private Long id;
+  // Usage
+  @PostMapping
+  public User create(@Validated(Create.class) @RequestBody UserRequest request) { ... }
 
-       @NotBlank(groups = {Create.class, Update.class})
-       private String name;
-
-       @Email(groups = Create.class)        // Only validate on create
-       private String email;
-   }
-
-   // Usage
-   @PostMapping
-   public User create(@Validated(Create.class) @RequestBody UserRequest request) { ... }
-
-   @PutMapping("/{id}")
-   public User update(@Validated(Update.class) @RequestBody UserRequest request) { ... }
-   ```
+  @PutMapping("/{id}")
+  public User update(@Validated(Update.class) @RequestBody UserRequest request) { ... }
+  ```
 
 ---
 
 ## Core Concepts
 
-### 1. Request Validation in Controller
+### Request Validation in Controller
 
    Annotate request bodies with `@Valid` or `@Validated` to trigger validation:
 
@@ -101,7 +83,7 @@
    ) {}
    ```
 
-### 2. Validation Error Handling
+### Validation Error Handling
 
    Handle `MethodArgumentNotValidException` to return structured error responses:
 
@@ -136,7 +118,7 @@
    }
    ```
 
-### 3. Custom Validator
+### Custom Validator
 
    Create validators that can also inject Spring beans:
 
@@ -172,7 +154,7 @@
    }
    ```
 
-### 4. Path Variable and Query Parameter Validation
+### Path Variable and Query Parameter Validation
 
    Validate method parameters using `@Validated` at the class level:
 
@@ -200,25 +182,15 @@
 
 ## Common Mistakes
 
-1. **Not adding `@Valid` or `@Validated` to request body parameters** — Validation annotations on the DTO are ignored if the controller parameter is not annotated. The method receives an invalid object without any error.
+- **Not adding `@Valid` or `@Validated` to request body parameters** — Validation annotations on the DTO are ignored if the controller parameter is not annotated, and the method receives an invalid object without any error. Always annotate `@RequestBody` parameters with `@Valid` or `@Validated`.
 
-2. **Using entities as request/response DTOs** — Entities have JPA constraints and lazy-loaded associations that are inappropriate for API boundaries. Always use separate DTOs or records.
+- **Using entities as request/response DTOs** — JPA entities have lifecycle callbacks, lazy-loaded associations, and persistence constraints that are inappropriate for API boundaries. Always use separate DTOs or records to decouple the API contract from the database model.
 
-3. **No global validation exception handler** — Without a handler for `MethodArgumentNotValidException`, Spring returns a generic 400 with a default error message. Add a `@RestControllerAdvice` with structured error responses.
+- **No global validation exception handler** — Without a handler for `MethodArgumentNotValidException`, Spring returns a generic 400 with a default error message. Add a `@RestControllerAdvice` with structured field-level error responses for consistent API error formatting.
 
-4. **Not validating nested objects** — Nested objects in a request DTO are not validated unless annotated with `@Valid` on the nested field:
+- **Not validating nested objects** — Nested objects in a request DTO are not validated unless the field is annotated with `@Valid`. Without this annotation, validation annotations on nested object fields are silently skipped.
 
-```java
-public class OrderRequest {
-    @Valid  // Without this, Address validation is skipped
-    @NotNull
-    private Address shippingAddress;
-}
-```
-
-5. **Ignoring validation groups** — Without groups, the same validation rules apply to both create and update. Use groups to differentiate (e.g., ID is null on create, not null on update).
-
-6. **Over-messaging validation errors** — Exposing internal constraint details to the client. Define clear, user-friendly messages.
+- **Ignoring validation groups** — Without groups, the same validation rules apply to both create and update operations. Use groups to differentiate rules, such as ID being null on create but not null on update.
 
 ---
 
@@ -226,7 +198,7 @@ public class OrderRequest {
 
 ### Scenario 1: User Registration with Cross-Field Validation
 
-A registration form requires `password` and `confirmPassword` to match. The `email` must be unique (checked against the database). The `birthDate` must indicate age ≥ 18.
+A registration form requires `password` and `confirmPassword` to match. The `email` must be unique (checked against the database). The `birthDate` must indicate age >= 18.
 
 ```java
 @ValidDateRange
@@ -254,7 +226,7 @@ The custom `@ValidDateRange` annotation handles cross-field validation at the cl
 
 ### Scenario 2: Service-Layer Validation for Database Constraints
 
-A product import service receives bulk CSV data. Validation must check that category names exist in the database, SKUs are unique, and prices are non-negative. These constraints cannot be checked with simple annotations — they require database queries.
+A product import service receives bulk CSV data. Validation must check that category names exist in the database, SKUs are unique, and prices are non-negative. These constraints require database queries.
 
 ```java
 @Service
@@ -320,206 +292,86 @@ public class ValidationHandler {
 
 ## Scenario-Based Questions
 
-1. **Q: Your REST endpoint accepts a JSON payload. You add `@Valid @RequestBody` but validation errors are silently ignored — the method executes with an invalid object. What's wrong?**
-   A: Most likely you forgot to handle `MethodArgumentNotValidException` in your `@RestControllerAdvice`. Without a handler, Spring uses its default error response (which may be a 400 with a generic body) but the controller method may still execute if `Errors` / `BindingResult` is the next parameter. Check: (a) Is there a `BindingResult` parameter after `@Valid` — if so, validation errors are stored there and the method executes. (b) Is there a `@RestControllerAdvice` that handles validation exceptions? Always add explicit field-level error handling.
+- **Q: Your REST endpoint accepts a JSON payload. You add `@Valid @RequestBody` but validation errors are silently ignored — the method executes with an invalid object. What's wrong?**
+  A: Most likely you forgot to handle `MethodArgumentNotValidException` in your `@RestControllerAdvice`, or there is a `BindingResult` parameter after `@Valid` that stores errors and allows the method to execute. Always add explicit field-level error handling in a `@RestControllerAdvice` and remove any `BindingResult` parameter if you want automatic error responses.
 
-2. **Q: Your DTO has 20 fields. Most are required for CREATE but optional for UPDATE. You don't want to create two separate DTOs. How do you handle this with a single class?**
-   A: Use validation groups:
-   ```java
-   public interface Create {}
-   public interface Update {}
+- **Q: Your DTO has 20 fields. Most are required for CREATE but optional for UPDATE. You don't want to create two separate DTOs. How do you handle this with a single class?**
+  A: Use validation groups with marker interfaces `Create` and `Update`. Annotate fields with `groups = Create.class` for create-only rules, `groups = Update.class` for update-only rules, and `groups = {Create.class, Update.class}` for fields required in both operations. Use `@Validated(Create.class)` and `@Validated(Update.class)` at the controller methods.
 
-   public class UserRequest {
-       @Null(groups = Create.class)        // ID must be null for create
-       @NotNull(groups = Update.class)     // ID must be present for update
-       private Long id;
-       @NotBlank(groups = Create.class)
-       private String email;               // Optional on update — blank means no change
-       @NotBlank(groups = {Create.class, Update.class})
-       private String name;                // Required for both
-   }
+- **Q: You validate a `String` field with `@Email`. The field is optional — users can leave it blank. But `@Email` on a blank string returns validation error. How do you make the email optional yet validate format when provided?**
+  A: The `@Email` validator returns `true` for null values but `false` for blank strings. Do not annotate optional fields with `@NotBlank` and rely on `@Email` alone for null values. Alternatively, use `@Pattern` with a regex that allows empty strings as valid input.
 
-   @PostMapping
-   public User create(@Validated(Create.class) @RequestBody UserRequest request) { ... }
+- **Q: Your custom `ConstraintValidator` injects a `UserRepository` to check email uniqueness. The validator works in the controller but throws a `NullPointerException` when used in a `@Validated` service method. Why?**
+  A: In `@Validated` service methods, the `ConstraintValidator` must be a Spring bean for injection to work. Verify the validator class is annotated with `@Component`, the `MethodValidationPostProcessor` is configured (auto-configured in Spring Boot), and the service class has `@Validated` at the class level. Without `@Component`, Hibernate Validator creates the validator via `new` and dependencies are null.
 
-   @PutMapping("/{id}")
-   public User update(@Validated(Update.class) @RequestBody UserRequest request) { ... }
-   ```
-   This keeps a single DTO class with operation-specific validation rules.
+- **Q: Your JSON API returns 400 with `{"timestamp": "...", "status": 400, "error": "Bad Request", "path": "..."}` for validation errors. Your frontend team expects `{"field": "email", "message": "Invalid email"}`. How do you customize this?**
+  A: Override Spring's default error handling by adding a handler in `@RestControllerAdvice` for `MethodArgumentNotValidException` that extracts field errors from the `BindingResult` and returns a structured response with field-level error messages. Set `server.error.include-message=never` to suppress Spring Boot's default error attributes.
 
-3. **Q: You validate a `String` field with `@Email`. The field is optional — users can leave it blank. But `@Email` on a blank string returns validation error. How do you make the email optional yet validate format when provided?**
-   A: Use `@Email` with `@Size(min = 0)` or handle blank values in the validator. The best approach is to not annotate optional fields with `@NotBlank` and use `@Email` only — the `@Email` validator by default returns `true` for null values but `false` for blank strings. Use `@Pattern` with a regex that allows empty:
-   ```java
-   @Pattern(regexp = "^$|^[\\w-.]+@([\\w-]+\\.)+[\\w-]{2,4}$",
-            message = "Invalid email")
-   private String email; // Optional — blank allowed, if provided must be valid email
-   ```
+- **Q: You validate a list of items with `List<@Valid OrderItem> items`. The validation works, but for an item with `null` fields, the error message is "must not be null" without indicating which item in the list failed. How do you include the item index?**
+  A: The `FieldError.getField()` method already includes the index in the format `items[0].name`. In your `@RestControllerAdvice` handler, use the field path as returned by `getField()` which includes the list index, making it clear which item in the collection has the validation error.
 
-4. **Q: Your custom `ConstraintValidator` injects a `UserRepository` to check email uniqueness. The validator works in the controller but throws a `NullPointerException` when used in a `@Validated` service method. Why?**
-   A: In `@Validated` service methods, the validation is performed by a `MethodValidationPostProcessor`. The `ConstraintValidator` must be a Spring bean for injection to work. Verify: (a) The validator class is annotated with `@Component`. (b) The `MethodValidationPostProcessor` is configured (auto-configured in Spring Boot). (c) The service class has `@Validated` at the class level. If the validator is not a bean, Hibernate Validator creates it via `new` and dependencies are null.
+- **Q: Your Spring Boot application uses `spring-boot-starter-web` but validation annotations like `@NotBlank` are ignored — the application compiles but validation never runs. What's missing?**
+  A: Since Spring Boot 2.3, `spring-boot-starter-web` does NOT include `spring-boot-starter-validation`. You must add it explicitly as a dependency. Without it, Jakarta Bean Validation is not on the classpath and `@Valid` effectively does nothing.
 
-5. **Q: Your JSON API returns 400 with `{"timestamp": "...", "status": 400, "error": "Bad Request", "path": "..."}` for validation errors. Your frontend team expects `{"field": "email", "message": "Invalid email"}`. How do you customize this?**
-   A: Override Spring's default error handling by adding a proper handler in `@RestControllerAdvice`:
-   ```java
-   @ExceptionHandler(MethodArgumentNotValidException.class)
-   @ResponseStatus(HttpStatus.BAD_REQUEST)
-   public ErrorResponse handleValidation(MethodArgumentNotValidException ex) {
-       Map<String, List<String>> fieldErrors = ex.getBindingResult()
-           .getFieldErrors().stream()
-           .collect(Collectors.groupingBy(
-               FieldError::getField,
-               Collectors.mapping(FieldError::getDefaultMessage, Collectors.toList())
-           ));
-       return new ErrorResponse("VALIDATION_FAILED", "Input validation failed", fieldErrors);
-   }
-   ```
-   Set `server.error.include-message=never` to suppress Spring Boot's default error attributes and ensure only your custom handler returns error responses.
+- **Q: You have a DTO with 10 fields, each with multiple validation annotations. The error response is huge — every field has 3-4 error messages. You want Hibernate Validator to fail fast — stop validation at the first error. How?**
+  A: Configure `FailFast` by creating a `Validator` bean with `Validation.byProvider(HibernateValidator.class).configure().failFast(true)`. Be aware this returns only the first error, which may frustrate API clients that want all errors at once, so consider your API contract carefully before enabling this.
 
-6. **Q: You validate a list of items with `List<@Valid OrderItem> items`. The validation works, but for an item with `null` fields, the error message is "must not be null" without indicating which item in the list failed. How do you include the item index?**
-   A: The default error message doesn't include the list index. Customize by using a custom validator that adds the index to the property path, or extract it in the handler:
-   ```java
-   @ExceptionHandler(MethodArgumentNotValidException.class)
-   public ErrorResponse handleValidation(MethodArgumentNotValidException ex) {
-       Map<String, List<String>> errors = ex.getBindingResult()
-           .getFieldErrors().stream()
-           .collect(Collectors.groupingBy(
-               fe -> enhanceFieldPath(fe),  // Convert "items[].name" to "items[3].name"
-               Collectors.mapping(FieldError::getDefaultMessage, Collectors.toList())
-           ));
-       return new ErrorResponse("VALIDATION_FAILED", "Validation failed", errors);
-   }
+- **Q: You need to validate a request parameter that is a complex object. The validation errors should trigger a 400 with field-level details, but the default Spring behavior returns 500. How do you handle this?**
+  A: For `@RequestParam` validation of simple types, add `@Validated` at the controller class level and use validation annotations on method parameters. Handle `ConstraintViolationException` in `@RestControllerAdvice` separately from `MethodArgumentNotValidException` since they have different exception structures.
 
-   private String enhanceFieldPath(FieldError fe) {
-       // fe.getField() returns "items[0].name" including index
-       return fe.getField();
-   }
-   ```
-   The `FieldError.getField()` already includes the index in the format `items[0].name`.
-
-7. **Q: Your Spring Boot application uses `spring-boot-starter-web` but validation annotations like `@NotBlank` are ignored — the application compiles but validation never runs. What's missing?**
-   A: The `spring-boot-starter-web` does NOT include `spring-boot-starter-validation`. You must add it explicitly:
-   ```xml
-   <dependency>
-       <groupId>org.springframework.boot</groupId>
-       <artifactId>spring-boot-starter-validation</artifactId>
-   </dependency>
-   ```
-   Without this dependency, Jakarta Bean Validation is not on the classpath, and `@Valid` effectively does nothing. Spring Boot 2.3+ made validation an opt-in dependency. Always check that `hibernate-validator` is on the classpath.
-
-8. **Q: You have a DTO with 10 fields, each with multiple validation annotations. The error response is huge — every field has 3-4 error messages. You want Hibernate Validator to fail fast — stop validation at the first error. How?**
-   A: Configure `FailFast` in the validator:
-   ```java
-   @Bean
-   public Validator validator() {
-       return Validation.byProvider(HibernateValidator.class)
-           .configure()
-           .failFast(true)  // Stop at first violation
-           .buildValidatorFactory()
-           .getValidator();
-   }
-   ```
-   Or, for Spring Boot:
-   ```yaml
-   spring:
-     jpa:
-       properties:
-         javax:
-           validation:
-             fail-fast: true
-   ```
-   Be aware: this returns only the first error, which may frustrate API clients that want all errors at once. Consider your API contract carefully.
-
-9. **Q: You need to validate a request parameter that is a complex object. The validation errors should trigger a 400 with field-level details, but the default Spring behavior returns 500. How do you handle this?**
-   A: For `@RequestParam` validation of simple types, add `@Validated` at the controller class level and use validation annotations on parameters. Handle `ConstraintViolationException` in `@RestControllerAdvice`:
-   ```java
-   @RestController
-   @Validated
-   public class SearchController {
-       @GetMapping("/search")
-       public List<Result> search(
-               @RequestParam @Size(min = 3, max = 100) String query,
-               @RequestParam @Min(0) int page,
-               @RequestParam @Min(1) @Max(100) int size) { ... }
-   }
-   ```
-   Handle `ConstraintViolationException` separately from `MethodArgumentNotValidException` — they have different structures.
-
-10. **Q: Your microservice receives a request with a nested object that has its own validation. The nested object's validation passes, but a business rule requires a relationship between two nested objects (e.g., `shippingAddress.country` must match `billingAddress.country`). How do you validate this?**
-    A: Use a class-level custom constraint on the root object:
-    ```java
-    @Target(TYPE)
-    @Retention(RUNTIME)
-    @Constraint(validatedBy = CountryMatchValidator.class)
-    public @interface CountriesMatch {
-        String message() default "Shipping and billing countries must match";
-        Class<?>[] groups() default {};
-        Class<? extends Payload>[] payload() default {};
-    }
-
-    @Component
-    public class CountryMatchValidator
-            implements ConstraintValidator<CountriesMatch, OrderRequest> {
-        @Override
-        public boolean isValid(OrderRequest request, ConstraintValidatorContext ctx) {
-            if (request.shippingAddress() == null || request.billingAddress() == null) {
-                return true; // Let @NotNull handle null checks
-            }
-            return Objects.equals(
-                request.shippingAddress().country(),
-                request.billingAddress().country());
-        }
-    }
-    ```
-    Class-level constraints have access to the entire object and can validate cross-field rules that span nested objects.
+- **Q: Your microservice receives a request with a nested object that has its own validation. The nested object's validation passes, but a business rule requires a relationship between two nested objects (e.g., `shippingAddress.country` must match `billingAddress.country`). How do you validate this?**
+  A: Use a class-level custom constraint on the root object. Class-level constraints have access to the entire object and can validate cross-field rules that span nested objects. Implement `ConstraintValidator` with the root request type and access all fields to compare values across nested objects.
 
 ---
 
 ## Interview Questions
 
-1. **What is the difference between `@Valid` and `@Validated`?** 
-   A: `@Valid` is the Jakarta Bean Validation standard annotation that triggers validation. `@Validated` is Spring's variant that additionally supports validation groups. Use `@Valid` for simple cases and `@Validated` when you need to specify different validation rules for different operations (e.g., create vs update).
+- **What is the difference between `@Valid` and `@Validated`?**
+  A: `@Valid` is the Jakarta Bean Validation standard annotation that triggers validation. `@Validated` is Spring's variant that additionally supports validation groups. Use `@Valid` for simple cases and `@Validated` when you need different validation rules for different operations (e.g., create vs update).
 
-2. **What Bean Validation annotations does Spring Boot support?** 
-   A: Core annotations: `@NotNull`, `@NotEmpty`, `@NotBlank`, `@Size`, `@Min`/`@Max`, `@Positive`/`@Negative`, `@Email`, `@Pattern`, `@Past`/`@Future`, `@Digits`, `@AssertTrue`/`@AssertFalse`. Custom validators can be created with `@Constraint`.
+- **What Bean Validation annotations does Spring Boot support?**
+  A: Core annotations include `@NotNull`, `@NotEmpty`, `@NotBlank`, `@Size`, `@Min`/`@Max`, `@Positive`/`@Negative`, `@Email`, `@Pattern`, `@Past`/`@Future`, `@Digits`, and `@AssertTrue`/`@AssertFalse`. Custom validators can be created with `@Constraint` for application-specific rules.
 
-3. **What is the difference between `@NotNull`, `@NotEmpty`, and `@NotBlank`?** 
-   A: `@NotNull` — value is not null. `@NotEmpty` — value is not null AND has at least one element (for strings: length > 0; for collections: size > 0). `@NotBlank` — value is not null AND contains at least one non-whitespace character (strings only). Use `@NotBlank` for string fields that must have meaningful content.
+- **What is the difference between `@NotNull`, `@NotEmpty`, and `@NotBlank`?**
+  A: `@NotNull` checks the value is not null. `@NotEmpty` checks the value is not null AND has at least one element (for strings: length > 0; for collections: size > 0). `@NotBlank` checks the value is not null AND contains at least one non-whitespace character (strings only). Use `@NotBlank` for string fields that must have meaningful content.
 
-4. **How do you create a custom validator?** 
-   A: (1) Create an annotation with `@Constraint(validatedBy = YourValidator.class)`. (2) Implement `ConstraintValidator<YourAnnotation, FieldType>`. (3) Annotate the implementation with `@Component` if it needs dependency injection. (4) Use the annotation on fields/classes.
+- **How do you create a custom validator?**
+  A: Create an annotation with `@Constraint(validatedBy = YourValidator.class)`, implement `ConstraintValidator<YourAnnotation, FieldType>`, annotate the implementation with `@Component` if it needs dependency injection, and use the annotation on fields or classes.
 
-5. **What are validation groups and when do you use them?** 
-   A: Validation groups allow different validation rules for different operations. Define marker interfaces (`Create`, `Update`), annotate fields with `groups = {Create.class}`, and use `@Validated(Create.class)` at the controller. Use groups when the same DTO has different validation rules for create vs update.
+- **What are validation groups and when do you use them?**
+  A: Validation groups allow different validation rules for different operations. Define marker interfaces (`Create`, `Update`), annotate fields with `groups = {Create.class}`, and use `@Validated(Create.class)` at the controller. Use groups when the same DTO has different validation rules for create vs update operations.
 
-6. **How do you validate path variables and request parameters?** 
-   A: Add `@Validated` at the controller class level. Annotate method parameters with validation annotations (`@Min`, `@Size`). Handle `ConstraintViolationException` in `@RestControllerAdvice`. This is separate from `@RequestBody` validation.
+- **How do you validate path variables and request parameters?**
+  A: Add `@Validated` at the controller class level and annotate method parameters with validation annotations (`@Min`, `@Size`). Handle `ConstraintViolationException` in `@RestControllerAdvice`. This validation is separate from `@RequestBody` validation.
 
-7. **How do you validate nested objects in a request body?** 
-   A: Annotate the nested field with `@Valid` to trigger validation of its fields:
-   ```java
-   public record OrderRequest(@Valid @NotNull Address shippingAddress) {}
-   public record Address(@NotBlank String street, @NotBlank String city) {}
-   ```
-   Without `@Valid`, the nested object's validation annotations are ignored.
+- **How do you validate nested objects in a request body?**
+  A: Annotate the nested field with `@Valid` to trigger validation of its fields. Without `@Valid`, the nested object's validation annotations are ignored even if the parent object is validated.
 
-8. **How do you internationalize validation error messages?** 
-   A: Create `ValidationMessages.properties` (and locale-specific variants like `ValidationMessages_fr.properties`) with keys like `javax.validation.constraints.NotBlank.message = {0} must not be blank`. Or use `message = "{my.custom.key}"` per annotation and define the key in a `messages.properties` file.
+- **How do you internationalize validation error messages?**
+  A: Create `ValidationMessages.properties` with locale-specific variants like `ValidationMessages_fr.properties` using keys such as `javax.validation.constraints.NotBlank.message`. Alternatively, define custom message keys per annotation and resolve them in a `messages.properties` file.
 
-9. **How do you handle validation errors in `@RestControllerAdvice`?** 
-   A: Handle `MethodArgumentNotValidException` for `@RequestBody` validation, `ConstraintViolationException` for parameter/path validation. Extract `FieldError` details and return a structured response with field-level error messages. Return HTTP 400.
+- **How do you handle validation errors in `@RestControllerAdvice`?**
+  A: Handle `MethodArgumentNotValidException` for `@RequestBody` validation and `ConstraintViolationException` for parameter/path validation. Extract `FieldError` details from the binding result and return a structured response with field-level error messages and HTTP 400 status.
 
-10. **What is `@AssertTrue` and how do you use it for cross-field validation?** 
-    A: `@AssertTrue` on a boolean method validates a custom condition. The method has access to all fields of the object, enabling cross-field validation (e.g., `password == confirmPassword`). Use it for simple cross-field rules within a single class. For complex rules, use class-level `@Constraint`.
+- **What is `@AssertTrue` and how do you use it for cross-field validation?**
+  A: `@AssertTrue` on a boolean method validates a custom condition with access to all fields of the object, enabling cross-field validation like password confirmation matching. Use it for simple cross-field rules within a single class; for complex rules spanning multiple objects, use a class-level `@Constraint`.
 
 ---
 
 ## Developer Recommendations
 
-- **Always add `spring-boot-starter-validation` as a dependency** — Since Spring Boot 2.3, validation is no longer included in `spring-boot-starter-web`. Without it, `@Valid` and validation annotations are silently ignored. Always verify the dependency is present.
-- **Use DTOs for request/response, never entities** — JPA entities have lifecycle callbacks, lazy associations, and JPA constraints that are inappropriate for API boundaries. A separate DTO decouples the API contract from the database model and prevents `LazyInitializationException`.
-- **Use validation groups for create vs update semantics** — A single DTO class with groups avoids duplication while supporting different rules: `Null` for ID on create, `NotNull` on update. Without groups, you'd need separate DTO classes or nullable fields everywhere.
-- **Always handle `MethodArgumentNotValidException` in `@RestControllerAdvice`** — Without a custom handler, Spring returns a generic 400 with a default structure. API clients need field-level error details to fix invalid input. Return `field → [error messages]` mapping.
+- **Always add `spring-boot-starter-validation` as a dependency** — Since Spring Boot 2.3, validation is no longer included in `spring-boot-starter-web`. Without it, `@Valid` and validation annotations are silently ignored, so verify the dependency is present in your build file.
+
+- **Use DTOs for request/response, never entities** — JPA entities have lifecycle callbacks, lazy associations, and JPA constraints that are inappropriate for API boundaries. A separate DTO decouples the API contract from the database model and prevents `LazyInitializationException` during serialization.
+
+- **Use validation groups for create vs update semantics** — A single DTO class with groups avoids duplication while supporting different rules: `Null` for ID on create, `NotNull` on update. Without groups, you would need separate DTO classes or nullable fields everywhere.
+
+- **Always handle `MethodArgumentNotValidException` in `@RestControllerAdvice`** — Without a custom handler, Spring returns a generic 400 with a default structure. API clients need field-level error details to fix invalid input, so return a `field` to `[error messages]` mapping.
+
 - **Use `@Validated` at the service layer for database-backed validation** — Annotations can check format but not existence (email uniqueness, category existence). Service-layer validation with `@Validated` and injected repositories provides database-aware validation while keeping controllers thin.
+
 - **Use class-level `@Constraint` for cross-field validation** — `@AssertTrue` works for simple cases but produces unclear error paths. A class-level custom constraint can add contextual error messages on multiple fields simultaneously using `ConstraintValidatorContext.buildConstraintViolationWithTemplate()`.
-- **Keep validation annotations on the DTO, not on entity fields** — Entity validation constraints (`@NotNull` on a database column) may differ from API validation (optional fields on update). Mixing them causes confusion. The DTO defines the API contract; the entity defines the database contract.
-- **Use `@Pattern` with regex for format validation beyond what `@Email` provides** — `@Email` follows Jakarta's strict regex which rejects some valid email addresses. For custom format rules, use `@Pattern` with a regex that suits your needs. Document the regex pattern so clients can replicate it.
+
+- **Keep validation annotations on the DTO, not on entity fields** — Entity validation constraints like `@NotNull` on a database column may differ from API validation where fields are optional on update. The DTO defines the API contract; the entity defines the database contract.
+
+- **Use `@Pattern` with regex for format validation beyond what `@Email` provides** — The `@Email` annotation follows Jakarta's strict regex that rejects some valid email addresses. For custom format rules, use `@Pattern` with a regex that suits your needs and document the pattern so clients can replicate it.

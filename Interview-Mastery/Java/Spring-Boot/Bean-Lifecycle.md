@@ -6,165 +6,157 @@
 
 The **Spring Bean Lifecycle** defines the sequence of steps every bean goes through from instantiation to destruction. Understanding this lifecycle is critical for proper initialization logic, resource cleanup, AOP proxy behavior, and troubleshooting startup issues.
 
-### Key Concepts:
+### Lifecycle Phases Overview
 
-1. **Lifecycle Phases Overview**:
+Every bean follows this path:
 
-   Every bean follows this path:
+```
+Bean Definition → FactoryPostProcessors → Instantiation →
+Populate Properties → Aware Interfaces → Before Init →
+@PostConstruct / init-method → After Init (AOP proxies created here) →
+Ready for Use → @PreDestroy / destroy-method → Destroyed
+```
 
-   ```
-   Bean Definition → FactoryPostProcessors → Instantiation →
-   Populate Properties → Aware Interfaces → Before Init →
-   @PostConstruct / init-method → After Init (AOP proxies created here) →
-   Ready for Use → @PreDestroy / destroy-method → Destroyed
-   ```
+### Step-by-Step Breakdown
 
-2. **Step-by-Step Breakdown**:
+- **Bean Definition** — Spring reads configuration (annotations, XML, or Java config) and creates `BeanDefinition` metadata objects for each bean. These definitions contain class names, scope, and property values.
+- **BeanFactoryPostProcessors** — These modify bean definitions before any beans are instantiated. For example, `PropertySourcesPlaceholderConfigurer` resolves `${...}` placeholders in property values.
+- **Instantiation** — The bean's constructor is called (with constructor arguments resolved via DI). The bean object comes into existence at this point.
+- **Populate Properties** — Spring injects dependencies via setters or `@Autowired` fields using reflection. After this, all dependencies are available.
+- **Aware Interfaces** — If the bean implements aware interfaces, Spring invokes them:
+  - `BeanNameAware` — Injects the bean's name as defined in the container.
+  - `BeanClassLoaderAware` — Injects the class loader used to load the bean class.
+  - `ApplicationContextAware` — Injects the `ApplicationContext` for programmatic access to the container.
+- **BeanPostProcessor#postProcessBeforeInitialization** — Called for ALL beans before initialization callbacks. Used for wrapping or modifying bean instances.
+- **@PostConstruct** — The `javax.annotation.PostConstruct` (or `jakarta.annotation.PostConstruct`) annotated method runs. This is the standard initialization callback.
+- **InitializingBean#afterPropertiesSet()** — Spring-specific interface alternative to `@PostConstruct`. Less commonly used but still supported.
+- **@Bean(initMethod = "...")** — XML or Java config init method. The last initialization callback to execute.
+- **BeanPostProcessor#postProcessAfterInitialization** — Called for ALL beans after initialization. **AOP proxies are created here** for annotations like `@Transactional`, `@Cacheable`, and `@Async`.
+- **Bean is Ready** — The bean is fully initialized and available for use by the application.
+- **@PreDestroy** — Cleanup callback before the bean is destroyed. Used for releasing resources.
+- **DisposableBean#destroy()** — Spring-specific interface for destruction callbacks.
+- **@Bean(destroyMethod = "...")** — Configured destroy method for custom cleanup logic.
 
-   - **Bean Definition** — Spring reads configuration (annotations, XML, or Java config) and creates `BeanDefinition` metadata objects for each bean.
-   - **BeanFactoryPostProcessors** — These modify bean definitions before any beans are instantiated. For example, `PropertySourcesPlaceholderConfigurer` resolves `${...}` placeholders.
-   - **Instantiation** — The bean's constructor is called (with constructor arguments resolved).
-   - **Populate Properties** — Spring injects dependencies via setters or `@Autowired` fields using reflection.
-   - **Aware Interfaces** — If the bean implements aware interfaces, Spring invokes them:
-     - `BeanNameAware` — Injects the bean's name.
-     - `BeanClassLoaderAware` — Injects the class loader.
-     - `ApplicationContextAware` — Injects the `ApplicationContext`.
-   - **BeanPostProcessor#postProcessBeforeInitialization** — Called for ALL beans before initialization callbacks.
-   - **@PostConstruct** — The `javax.annotation.PostConstruct` (or `jakarta.annotation.PostConstruct`) annotated method runs.
-   - **InitializingBean#afterPropertiesSet()** — Spring-specific interface alternative.
-   - **@Bean(initMethod = "...")** — XML or Java config init method.
-   - **BeanPostProcessor#postProcessAfterInitialization** — Called for ALL beans after initialization. **AOP proxies are created here!**
-   - **Bean is Ready** — The bean is fully initialized and available for use.
-   - **@PreDestroy** — Cleanup callback before the bean is destroyed.
-   - **DisposableBean#destroy()** — Spring-specific interface.
-   - **@Bean(destroyMethod = "...")** — Configured destroy method.
+### AOP Proxy Creation Timing
 
-3. **AOP Proxy Creation Timing**:
+AOP proxies (for `@Transactional`, `@Cacheable`, `@Async`, etc.) are created in `BeanPostProcessor#postProcessAfterInitialization`. This has an important implication:
 
-   AOP proxies (for `@Transactional`, `@Cacheable`, `@Async`, etc.) are created in `BeanPostProcessor#postProcessAfterInitialization`. This has an important implication:
+```java
+@Service
+public class MyService {
 
-   ```java
-   @Service
-   public class MyService {
+    @PostConstruct
+    public void init() {
+        // Runs on the RAW bean — before AOP proxies are created
+        // Calling self.doSomething() here does NOT trigger AOP
+    }
 
-       @PostConstruct
-       public void init() {
-           // Runs on the RAW bean — before AOP proxies are created
-           // Calling self.doSomething() here does NOT trigger AOP
-       }
+    @Transactional
+    public void doSomething() { /* ... */ }
+}
+```
 
-       @Transactional
-       public void doSomething() { /* ... */ }
-   }
-   ```
-
-   **Fix**: If you need transactional behavior during initialization, use `TransactionTemplate` programmatically.
+**Fix**: If you need transactional behavior during initialization, use `TransactionTemplate` programmatically.
 
 ---
 
 ## Core Concepts
 
-### 1. Initialization Callbacks
+### Initialization Callbacks
 
-   Three ways to define initialization logic, in order of execution:
+Three ways to define initialization logic, in order of execution:
 
-   ```java
-   @Component
-   public class CacheInitializer {
-       private final CacheManager cacheManager;
+```java
+@Component
+public class CacheInitializer {
+    private final CacheManager cacheManager;
 
-       public CacheInitializer(CacheManager cacheManager) {
-           this.cacheManager = cacheManager;
-       }
+    public CacheInitializer(CacheManager cacheManager) {
+        this.cacheManager = cacheManager;
+    }
 
-       @PostConstruct
-       public void warmCache() {
-           // 1st: javax/jakarta annotation
-           cacheManager.createCache("products");
-       }
-   }
-   ```
+    @PostConstruct
+    public void warmCache() {
+        // 1st: javax/jakarta annotation
+        cacheManager.createCache("products");
+    }
+}
+```
 
-   ```java
-   public class MyBean implements InitializingBean {
-       @Override
-       public void afterPropertiesSet() {
-           // 2nd: Spring interface
-       }
-   }
-   ```
+```java
+public class MyBean implements InitializingBean {
+    @Override
+    public void afterPropertiesSet() {
+        // 2nd: Spring interface
+    }
+}
+```
 
-   ```java
-   @Bean(initMethod = "init")
-   public MyBean myBean() {
-       return new MyBean();
-   }
-   // public void init() → 3rd: configured method
-   ```
+```java
+@Bean(initMethod = "init")
+public MyBean myBean() {
+    return new MyBean();
+}
+// public void init() → 3rd: configured method
+```
 
-### 2. Destruction Callbacks
+### Destruction Callbacks
 
-   ```java
-   @Component
-   public class ConnectionManager {
-       private Connection connection;
+```java
+@Component
+public class ConnectionManager {
+    private Connection connection;
 
-       @PostConstruct
-       public void connect() {
-           this.connection = createConnection();
-       }
+    @PostConstruct
+    public void connect() {
+        this.connection = createConnection();
+    }
 
-       @PreDestroy
-       public void disconnect() {
-           if (connection != null) {
-               connection.close();
-           }
-       }
-   }
-   ```
+    @PreDestroy
+    public void disconnect() {
+        if (connection != null) {
+            connection.close();
+        }
+    }
+}
+```
 
-### 3. Lazy Initialization
+### Lazy Initialization
 
-   Beans marked with `@Lazy` are instantiated only when first requested, not at startup:
+Beans marked with `@Lazy` are instantiated only when first requested, not at startup:
 
-   ```java
-   @Component
-   @Lazy
-   public class ExpensiveResource {
-       public ExpensiveResource() {
-           // Heavy initialization — deferred until first use
-       }
-   }
-   ```
+```java
+@Component
+@Lazy
+public class ExpensiveResource {
+    public ExpensiveResource() {
+        // Heavy initialization — deferred until first use
+    }
+}
+```
 
-   Global lazy initialization: `spring.main.lazy-initialization=true` (defers all beans).
+Global lazy initialization: `spring.main.lazy-initialization=true` (defers all beans).
 
-### 4. Proxy Types
+### Proxy Types
 
-   | Proxy Type | Requirement | Performance | How It Works |
-   |-----------|-------------|-------------|--------------|
-   | JDK Dynamic | Must implement an interface | Fast | Creates a proxy implementing the same interface |
-   | CGLIB | Any class (no interface needed) | Fast (slightly slower) | Creates a subclass at runtime |
+| Proxy Type | Requirement | Performance | How It Works |
+|-----------|-------------|-------------|--------------|
+| JDK Dynamic | Must implement an interface | Fast | Creates a proxy implementing the same interface |
+| CGLIB | Any class (no interface needed) | Fast (slightly slower) | Creates a subclass at runtime |
 
-   CGLIB is used by default since Spring Boot 2.x. If the bean class is `final`, CGLIB cannot proxy it.
+CGLIB is used by default since Spring Boot 2.x. If the bean class is `final`, CGLIB cannot proxy it.
 
 ---
 
 ## Common Mistakes
 
-1. **Calling `@Transactional` from `@PostConstruct`** — The `@Transactional` does not work because AOP proxies are not yet created. Use `TransactionTemplate` or restructure the code.
-
-2. **Trying to use uninitialized dependencies in a constructor** — Dependencies are not yet injected during constructor execution. Use `@PostConstruct` for initialization that depends on injected fields.
-
-3. **Throwing exceptions in `@PostConstruct`** — The application context fails to refresh and the application does not start. Handle exceptions gracefully inside init methods.
-
-4. **Not cleaning up resources** — Failing to implement `@PreDestroy` for closable resources causes memory leaks and exhausted connections.
-
-5. **Circular init dependencies** — Bean A depends on Bean B and Bean B depends on Bean A, causing `BeanCurrentlyInCreationException`. Use `@Lazy` or restructure.
-
-6. **Heavy initialization in singleton beans** — Slows application startup significantly. Use `@Lazy` for expensive beans.
-
-7. **`final` classes with AOP annotations** — CGLIB cannot create a proxy for final classes. Either remove `final` or use an interface.
+- **Calling `@Transactional` from `@PostConstruct`** — The `@Transactional` does not work because AOP proxies are not yet created during `@PostConstruct`. Use `TransactionTemplate` or restructure to use `@EventListener(ContextRefreshedEvent.class)`.
+- **Trying to use uninitialized dependencies in a constructor** — Dependencies are not yet injected during constructor execution. Use `@PostConstruct` for initialization that depends on injected fields, not the constructor itself.
+- **Throwing exceptions in `@PostConstruct`** — The application context fails to refresh and the application does not start. Handle exceptions gracefully inside init methods with proper logging and fallback logic.
+- **Not cleaning up resources** — Failing to implement `@PreDestroy` for closable resources causes memory leaks, exhausted connections, and file handle leaks over time.
+- **Circular init dependencies** — Bean A depends on Bean B and Bean B depends on Bean A, causing `BeanCurrentlyInCreationException`. Use `@Lazy` on one side or restructure to eliminate the cycle.
+- **Heavy initialization in singleton beans** — Slows application startup significantly and blocks the entire context refresh. Use `@Lazy` for expensive beans or move initialization to background threads.
+- **`final` classes with AOP annotations** — CGLIB cannot create a proxy for final classes, so `@Transactional`, `@Cacheable`, and `@Async` are silently ignored. Either remove `final` or use an interface for JDK proxying.
 
 ---
 

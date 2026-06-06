@@ -7,6 +7,8 @@
 - **Definition:** Reusable, proven solutions to commonly occurring problems in software design, cataloged by the Gang of Four (GoF) in 1994.
 - **Why It Exists:** Patterns provide a common vocabulary for developers, promote best practices, encourage loose coupling and high cohesion, and align with frameworks like Spring Boot which implement many patterns internally.
 - **Key Concepts:** **Creational Patterns** (Singleton, Factory, Builder — object creation), **Structural Patterns** (Adapter, Decorator, Proxy — object composition), **Behavioral Patterns** (Observer, Strategy, State — object communication)
+- **Patterns vs Principles vs Idioms** — Design patterns are reusable solutions (Strategy, Observer). Principles are guidelines (SOLID, KISS, DRY). Idioms are language-specific conventions (JavaBean pattern, try-with-resources). Patterns implement principles; idioms implement patterns in a specific language.
+- **When NOT to Use a Pattern** — Patterns add indirection, complexity, and maintenance overhead. If a simple if-else for 3 cases solves the problem, don't add a Strategy pattern. If a single class with 2 methods handles the task, don't add Abstract Factory. Apply patterns where change is expected, not preemptively. YAGNI (You Ain't Gonna Need It) applies to patterns too.
 
 ---
 
@@ -22,6 +24,9 @@
 - **Strategy Pattern:** Defines a family of interchangeable algorithms. Used for payment methods, shipping costs, tax calculations, and authentication providers.
 - **Template Method Pattern:** Defines the skeleton of an algorithm, deferring some steps to subclasses. Spring's `JdbcTemplate`, `RestTemplate`, and `JpaRepository` follow this pattern.
 - **State Pattern:** Allows an object to alter its behavior when its internal state changes. Order lifecycle management (Pending → Paid → Shipped → Delivered) is a classic example.
+- **Command Pattern:** Encapsulates a request as an object, allowing parameterization, queuing, logging, and undoable operations. Implemented via `Runnable`, `Callable`, and functional interfaces in Java. Used in task queues, transactional behavior, and menu systems.
+- **Chain of Responsibility:** Passes a request along a chain of handlers. Each handler decides to process or pass to the next. Spring Security's `SecurityFilterChain` is the canonical example — authentication filters, CSRF filters, CORS filters, each processing or delegating.
+- **Facade Pattern:** Provides a unified interface to a set of interfaces in a subsystem. REST controllers often act as facades over complex business logic and service layers. The controller exposes a simple API while hiding the complexity of service orchestration behind it.
 
 ```java
 // Strategy Pattern for shipping costs
@@ -68,6 +73,7 @@ source = new EncryptionDecorator(source);
 - **Misapplying Inheritance** — using inheritance when composition is more appropriate. Prefer Strategy over subclassing for varying behaviors.
 - **Pattern Rigidity** — treating patterns as rigid rules instead of guidelines. Adapt the pattern to your specific context.
 - **Implementing Patterns From Scratch** — Spring Boot already implements Proxy, Template Method, Singleton, Factory, and Observer. Leverage the framework.
+- **Proxies Without Interface (CGLIB vs JDK Dynamic)** — Spring uses JDK Dynamic Proxy when the target implements an interface, CGLIB when it doesn't. CGLIB creates a subclass at runtime. Both have the same performance characteristics. Spring Boot defaults to CGLIB for `@EnableAspectJAutoProxy`. Ensure `@Configuration` classes are not `final` if CGLIB proxies are used.
 
 ---
 
@@ -76,6 +82,8 @@ source = new EncryptionDecorator(source);
 - **Spring Boot Pattern Mapping** — Singleton (`@Service`, `@Component` default scope), Factory (`@Bean`, `BeanFactory`), Proxy (`@Transactional`, `@Cacheable`, AOP), Template Method (`JdbcTemplate`, `JpaRepository`), Observer (`@EventListener`), Chain of Responsibility (`SecurityFilterChain`), Strategy (`AuthenticationProvider`, `MessageConverter`).
 - **Modern Alternatives** — Strategy → lambda expressions and method references; Observer → reactive streams; Command → `Runnable`/`Callable`/`Supplier`; Template Method → functional interface composition; Builder → Lombok `@Builder` or Kotlin data classes.
 - **Patterns in Distributed Systems** — Circuit Breaker (Resilience4j), Saga (distributed transactions), CQRS (command/query separation), Event Sourcing (state as event stream), Bulkhead (resource isolation), Sidecar (service mesh deployment).
+- **Reactive Patterns** — Observer evolved into Reactive Streams (Publisher/Subscriber). Spring WebFlux uses this pattern for non-blocking I/O. Backpressure (subscriber signals demand to publisher) prevents overwhelming consumers. Hot vs Cold publishers: Cold = each subscriber gets its own stream; Hot = subscribers share the same stream (like a broadcast).
+- **Functional Programming as Pattern Alternative** — Many GoF patterns can be replaced with functional constructs: Strategy → lambda/predicate, Command → `Function`/`Consumer`, Template Method → method reference, Visitor → pattern matching (in languages with pattern matching). Functional composition often achieves the same goal with less boilerplate than traditional OOP patterns.
 - **Composition Over Inheritance** — prefer composing objects with interfaces over deep class hierarchies. Strategies, Decorators, and Adapters all use composition.
 
 ---
@@ -258,3 +266,5 @@ public class SMSNotifier {
 - **Use Builder for objects with >4 parameters, especially when many are optional** — Telescoping constructors (one for each parameter combination) are unreadable and error-prone. The Builder pattern with fluent API makes construction self-documenting. Lombok's `@Builder` eliminates boilerplate. Validation in `build()` catches configuration errors early. Examples: HTTP request builders, query specifications, configuration objects.
 
 - **Match the pattern to the volatility point** — Identify what changes most frequently in your system and apply the appropriate pattern there. If payment methods change quarterly, use Strategy. If notification channels change, use Observer. If database access patterns change, use Template Method. Over-engineering stable code with patterns adds complexity without payoff.
+- **Document the pattern intent, not just the structure** — When using a pattern, document why it was chosen and what problem it solves. A comment like "Strategy pattern for shipping cost calculation — new shipping methods implement the interface" is more valuable than just the structural code. Future maintainers need to know the design rationale, not just the pattern name.
+- **Patterns are vocabulary, not a checklist** — The primary value of patterns is communication. When a developer says "let's use Strategy here," everyone understands the intent: extract algorithm into interchangeable implementations. Don't force code into a pattern structure if it doesn't fit — the problem drives the pattern choice, not vice versa.

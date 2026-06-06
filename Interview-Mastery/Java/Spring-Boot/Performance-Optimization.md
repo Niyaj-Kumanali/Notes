@@ -8,79 +8,69 @@
 
 ### Key Concepts:
 
-1. **Optimization Areas**:
+- **Optimization Areas:** Performance optimization spans five dimensions: startup time (how quickly the application serves requests), request latency (individual endpoint response speed), memory usage (heap and off-heap consumption with GC pressure), throughput (concurrent request capacity), and resource usage (thread pool and connection pool saturation). Identify the specific area causing pain before choosing a strategy.
 
-   - **Startup Time** — How quickly the application becomes ready to serve requests.
-   - **Request Latency** — How fast individual endpoints respond.
-   - **Memory Usage** — Heap and off-heap memory consumption, GC pressure.
-   - **Throughput** — How many concurrent requests the application can handle.
-   - **Resource Usage** — Thread pool utilization, connection pool saturation, file handles.
+- **Startup Optimization:** Reduce startup time by excluding unused auto-configurations, limiting `@ComponentScan` to specific packages, disabling OSIV (`spring.jpa.open-in-view=false`), and enabling lazy initialization (`spring.main.lazy-initialization=true`). For Spring Boot 3.x, AOT compilation can dramatically reduce startup time for Kubernetes deployments.
 
-2. **Startup Optimization**:
+  ```yaml
+  # application.yml
+  spring:
+    autoconfigure:
+      exclude:  # Exclude unused auto-configurations
+        - org.springframework.boot.autoconfigure.mongo.MongoAutoConfiguration
+        - org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration
+    jpa:
+      open-in-view: false  # Disable OSIV (significant performance cost)
 
-   ```yaml
-   # application.yml
-   spring:
-     autoconfigure:
-       exclude:  # Exclude unused auto-configurations
-         - org.springframework.boot.autoconfigure.mongo.MongoAutoConfiguration
-         - org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration
-     jpa:
-       open-in-view: false  # Disable OSIV (significant performance cost)
+  # Lazy initialization (Spring Boot 2.2+)
+  spring.main.lazy-initialization=true
+  ```
 
-   # Lazy initialization (Spring Boot 2.2+)
-   spring.main.lazy-initialization=true
-   ```
+  ```java
+  // Limit component scanning
+  @SpringBootApplication
+  @ComponentScan(basePackages = {"com.company.order", "com.company.common"})
+  public class Application {}
+  ```
 
-   ```java
-   // Limit component scanning
-   @SpringBootApplication
-   @ComponentScan(basePackages = {"com.company.order", "com.company.common"})
-   public class Application {}
-   ```
+- **Connection Pool Configuration (HikariCP):** Configure HikariCP with `maximum-pool-size` based on the formula `connections = ((core_count * 2) + effective_spindle_count)`, starting with 10 and monitoring. Set `minimum-idle` to handle traffic spikes, `connection-timeout` to fail fast when the pool is exhausted, and `max-lifetime` to recycle connections before database-enforced timeouts.
 
-3. **Connection Pool Configuration (HikariCP)** :
+  ```yaml
+  spring:
+    datasource:
+      hikari:
+        maximum-pool-size: 10
+        minimum-idle: 5
+        idle-timeout: 300000
+        connection-timeout: 20000
+        max-lifetime: 1200000
+        pool-name: OrderServicePool
+  ```
 
-   ```yaml
-   spring:
-     datasource:
-       hikari:
-         maximum-pool-size: 10
-         minimum-idle: 5
-         idle-timeout: 300000
-         connection-timeout: 20000
-         max-lifetime: 1200000
-         pool-name: OrderServicePool
-   ```
+- **Caching Strategy:** Reduce repeated expensive operations by caching computationally heavy or I/O-bound results. Use Caffeine for single-instance caching with bounded size and TTL, and Redis for distributed caching. Always configure `maximumSize`, `expireAfterWrite`, and `recordStats` to monitor cache effectiveness.
 
-   A common formula for pool size: `connections = ((core_count * 2) + effective_spindle_count)`. Start with 10 and monitor.
+  ```java
+  @Configuration
+  public class PerformanceCacheConfig {
 
-4. **Caching Strategy**:
-
-   Reduce repeated expensive operations:
-
-   ```java
-   @Configuration
-   public class PerformanceCacheConfig {
-
-       @Bean
-       public CacheManager cacheManager() {
-           CaffeineCacheManager manager = new CaffeineCacheManager();
-           manager.setCaffeine(Caffeine.newBuilder()
-               .maximumSize(10_000)
-               .expireAfterWrite(5, TimeUnit.MINUTES)
-               .recordStats()
-           );
-           return manager;
-       }
-   }
-   ```
+      @Bean
+      public CacheManager cacheManager() {
+          CaffeineCacheManager manager = new CaffeineCacheManager();
+          manager.setCaffeine(Caffeine.newBuilder()
+              .maximumSize(10_000)
+              .expireAfterWrite(5, TimeUnit.MINUTES)
+              .recordStats()
+          );
+          return manager;
+      }
+  }
+  ```
 
 ---
 
 ## Core Concepts
 
-### 1. JPA Performance
+### JPA Performance
 
    The most common source of performance issues in Spring Boot applications:
 
@@ -107,7 +97,7 @@
    List<OrderSummary> findAllSummaries();
    ```
 
-### 2. Thread Pool Configuration
+### Thread Pool Configuration
 
    Separate pools for different workloads:
 
@@ -137,7 +127,7 @@
    }
    ```
 
-### 3. Response Compression
+### Response Compression
 
    Reduce response size over the wire:
 
@@ -149,7 +139,7 @@
        min-response-size: 1024
    ```
 
-### 4. Undertow Instead of Tomcat
+### Undertow Instead of Tomcat
 
    Undertow offers better throughput under high concurrency:
 
@@ -170,7 +160,7 @@
    </dependency>
    ```
 
-### 5. JVM Tuning
+### JVM Tuning
 
    Production JVM options for G1GC:
 
@@ -191,25 +181,25 @@
 
 ## Common Bottlenecks
 
-1. **N+1 queries** — Slow list endpoints. Fix with `JOIN FETCH` or `@EntityGraph`.
+- **N+1 queries** — Slow list endpoints caused by fetching entities and accessing lazy associations in a loop. Fix with `JOIN FETCH` or `@EntityGraph` to load all required data in a single query.
 
-2. **Missing database indexes** — Full table scans on WHERE/JOIN/ORDER BY columns. Add composite indexes.
+- **Missing database indexes** — Full table scans on WHERE, JOIN, or ORDER BY columns cause performance degradation as tables grow. Add composite indexes based on query patterns and use `EXPLAIN ANALYZE` to verify index usage.
 
-3. **No caching** — Same data fetched repeatedly. Add `@Cacheable` with appropriate TTL.
+- **No caching** — Same data fetched repeatedly from the database without a cache layer. Add `@Cacheable` with appropriate TTL and monitor cache hit ratio to ensure effectiveness.
 
-4. **Large JSON responses** — Full entities serialized as JSON. Use DTO projections and pagination.
+- **Large JSON responses** — Full entities serialized as JSON include unnecessary columns and trigger lazy associations. Use DTO projections and pagination to reduce payload size and serialization overhead.
 
-5. **Synchronous blocking I/O** — Thread pool exhaustion under load. Use `@Async` or reactive programming.
+- **Synchronous blocking I/O** — REST calls, file I/O, or database operations block Tomcat threads, causing thread pool exhaustion under load. Use `@Async` for truly parallelizable tasks or reactive programming for I/O-bound services.
 
-6. **Open Session in View (OSIV)** — Database connection held for view rendering. Set `spring.jpa.open-in-view=false`.
+- **Open Session in View (OSIV)** — Database connection held for the entire HTTP request, including view rendering and serialization. Set `spring.jpa.open-in-view=false` to force explicit fetch planning and release connections earlier.
 
-7. **Full table scans** — Slow queries on large tables. Use `EXPLAIN ANALYZE` and add indexes.
+- **Full table scans** — Slow queries on large tables that scan every row instead of using indexes. Use `EXPLAIN ANALYZE` to identify scans and add appropriate indexes on filtered and joined columns.
 
-8. **Serialization bottleneck** — Jackson serialization of complex object graphs. Use flat DTOs and optimize Jackson configuration.
+- **Serialization bottleneck** — Jackson serialization of complex object graphs with circular references and lazy associations. Use flat DTOs, optimize Jackson configuration with `@JsonView`, and consider Protocol Buffers for latency-critical APIs.
 
-9. **Memory leaks** — OOM after days of running. Perform heap dump analysis.
+- **Memory leaks** — Application crashes with OOM after days of running due to unbounded caches, thread-local accumulation, or classloader leaks. Perform heap dump analysis with Eclipse MAT to identify leak suspects.
 
-10. **Classpath scanning** — Slow startup with large codebases. Use explicit `@ComponentScan`.
+- **Classpath scanning** — Slow startup with large codebases that scan many packages. Use explicit `@ComponentScan` with specific base packages and exclude unused auto-configurations.
 
 ---
 
@@ -301,97 +291,85 @@ Also added monitoring: HikariCP metrics exposed via Actuator for Grafana dashboa
 ## Scenario-Based Questions
 
 1. **Q: Your Spring Boot application starts in 4 minutes in production but 30 seconds locally. Both use the same codebase. What's different and how do you diagnose?**
-   A: Production likely has: (a) Slower disks — classpath scanning is I/O-bound. (b) More auto-configuration classes matched (different classpath). (c) Hibernate schema validation on a large database. (d) Network-attached config files. Diagnose by: adding `-Dspring.autoconfigure.logging=true` to see which auto-configurations match, enabling `logging.level.org.springframework.boot=DEBUG`, and using `-XX:+PrintClassHistogram` at startup. Fix: exclude unused auto-configurations, use explicit `@ComponentScan`, set `spring.jpa.hibernate.ddl-auto=none` if schema is managed externally, and enable AOT compilation.
+  A: Production likely has slower disks (classpath scanning is I/O-bound), more auto-configuration classes matched, Hibernate schema validation on a large database, or network-attached config files. Diagnose by adding `-Dspring.autoconfigure.logging=true` to see which auto-configurations match and enabling `logging.level.org.springframework.boot=DEBUG`. Fix by excluding unused auto-configurations, using explicit `@ComponentScan`, setting `spring.jpa.hibernate.ddl-auto=none` if schema is managed externally, and enabling AOT compilation.
 
 2. **Q: Your API response time P95 is 2 seconds. The P50 is 200ms. What's causing the tail latency and how do you fix it?**
-   A: A large gap between P50 and P95 indicates occasional slow requests. Common causes: (a) GC pauses — check GC logs for stop-the-world pauses. (b) Cache misses — first request after TTL expiry is slow (cold start). (c) Thread contention — requests queuing behind a slow one. (d) Database query plan changes — some queries use different plans. Fix: (a) Tune GC (use G1GC, set `MaxGCPauseMillis=50`). (b) Add cache warming (`@EventListener(ContextRefreshedEvent.class)`). (c) Use async processing for slow paths. (d) Pin query plans with `pg_hint_plan` or SQL Server plan guides. Profile with JFR/Async Profiler to identify the actual cause.
+  A: A large gap between P50 and P95 indicates occasional slow requests from GC pauses, cache misses after TTL expiry, thread contention behind a slow request, or database query plan changes. Tune GC with G1GC and `MaxGCPauseMillis=50`, add cache warming via `@EventListener(ContextRefreshedEvent.class)`, use async processing for slow paths, and pin query plans. Profile with JFR or Async Profiler to identify the actual cause.
 
 3. **Q: You deploy a Spring Boot 3.x application and notice memory usage is 30% higher than Spring Boot 2.x for the same code. What changed?**
-   A: Spring Boot 3.x (based on Spring 6 / Java 17+) uses virtual threads (Project Loom) by default with Tomcat. Virtual threads have smaller stacks but the virtual thread scheduler and carrier thread management add overhead. Also, Spring 6 uses more records and sealed classes internally which may increase object allocation. Check: (a) Is `spring.threads.virtual.enabled=true` set? Virtual threads use less memory for idle threads but can increase allocation rate. (b) Is Micrometer's observation API enabled (adds per-request overhead). Profile with JFR to compare allocation rates between versions. Consider disabling virtual threads if memory is constrained.
+  A: Spring Boot 3.x uses virtual threads by default with Tomcat, which adds virtual thread scheduler and carrier thread management overhead. Spring 6 also uses more records and sealed classes internally, increasing object allocation. Check if `spring.threads.virtual.enabled=true` is set and profile allocation rates with JFR between versions. Consider disabling virtual threads if memory is constrained.
 
 4. **Q: Your database queries are fast (5ms each), but your API endpoint takes 500ms. You discover that Jackson serialization of 50 JPA entities takes 400ms. How do you optimize?**
-   A: Jackson serialization time is proportional to object graph complexity. Every lazy association, every `@JsonBackReference`, and every field adds overhead. Fix: (a) Use DTO projections — serialize flat objects with only the needed fields. (b) Use `@JsonView` to define serialization views. (c) Pre-serialize with Jackson's `ObjectMapper` and cache the JSON string. (d) Use Jackson's `afterburner` module (optimizes getter/setter reflection). (e) If response is large, enable compression:
-   ```yaml
-   server.compression.enabled=true
-   server.compression.min-response-size=1024
-   ```
-   Tests show DTOs serialize 5-10x faster than entities due to smaller object graphs.
+  A: Jackson serialization time is proportional to object graph complexity — every lazy association and field adds overhead. Fix by using DTO projections with only the needed fields, applying `@JsonView` to limit serialization per endpoint, pre-serializing and caching JSON strings for static data, and using Jackson's `afterburner` module to optimize reflection. Enable compression for large responses. DTOs serialize 5-10x faster than entities due to smaller object graphs.
 
 5. **Q: Your application has 20 `@OneToMany` associations with `FetchType.EAGER`. Every entity load fetches huge Cartesian products. The team is afraid to change to LAZY because it might break code that accesses these associations outside transactions. How do you migrate safely?**
-   A: Gradual migration: (1) Add `spring.jpa.open-in-view=true` temporarily (keeps sessions open for the request). (2) Change ONE association from EAGER to LAZY and run all tests. (3) Add `@EntityGraph` on queries that need the association. (4) Remove OSIV (`spring.jpa.open-in-view=false`). (5) Fix any `LazyInitializationException` by adding explicit fetch plans. This approach lets you migrate incrementally without breaking existing code. Use ArchUnit to ban `FetchType.EAGER` on any new code.
+  A: Migrate gradually by first enabling OSIV temporarily (`spring.jpa.open-in-view=true`), changing one association at a time from EAGER to LAZY, adding `@EntityGraph` on queries that need the association, then finally disabling OSIV. Fix any `LazyInitializationException` by adding explicit fetch plans. Use ArchUnit to ban `FetchType.EAGER` on any new code to prevent regression.
 
 6. **Q: Your application's memory usage grows by 100MB/hour in production. Heap dumps show the largest object is a `HashMap` inside a library you cannot modify. You suspect a cache without TTL. How do you confirm and mitigate?**
-   A: Take two heap dumps 1 hour apart and compare with Eclipse MAT's "Leak Identification" report. If the library's internal cache is the growth source: (a) Use `-XX:+AlwaysPreTouch` and larger initial heap to give the cache room without triggering GC. (b) Use `@Bean` to wrap the library and periodically call its cleanup method via `@Scheduled`. (c) Use a `MeterBinder` to expose the cache size as a metric and set up a Grafana alert. (d) If the library supports configuration, pass a bounded cache via its API. As a last resort, use reflection to clear the cache periodically (not ideal but functional).
+  A: Take two heap dumps 1 hour apart and compare with Eclipse MAT's Leak Identification report. If the library's internal cache is the growth source, use a larger initial heap to give the cache room, wrap the library with a `@Bean` that periodically calls its cleanup method via `@Scheduled`, or expose the cache size as a metric via `MeterBinder` with a Grafana alert. As a last resort, use reflection to clear the cache periodically.
 
 7. **Q: You replace Tomcat with Undertow expecting better throughput. Instead, throughput drops by 20%. Your application is CPU-bound, not I/O-bound. Why did Undertow underperform?**
-   A: Undertow is optimized for I/O-bound workloads with its non-blocking IO. For CPU-bound applications, Tomcat's thread-per-request model often outperforms because it doesn't pay the overhead of non-blocking IO management. Undertow's event-driven model adds CPU overhead for managing I/O channels that provide no benefit when the bottleneck is CPU. Switch back to Tomcat. The embedded server choice matters less for CPU-bound apps — focus on optimizing the actual computation (caching, algorithm optimization, parallelization).
+  A: Undertow is optimized for I/O-bound workloads with non-blocking IO, but for CPU-bound applications, Tomcat's thread-per-request model outperforms because it avoids non-blocking IO management overhead. Undertow's event-driven model adds CPU overhead for managing I/O channels that provide no benefit when the bottleneck is CPU. Switch back to Tomcat and focus on optimizing actual computation through caching, algorithm optimization, or parallelization.
 
 8. **Q: Your service calls 3 external APIs during request processing. The APIs take 200ms, 300ms, and 500ms respectively. The total response time is 1000ms (sequential calls). How do you reduce this to 500ms?**
-   A: Parallelize the external calls using `CompletableFuture`:
-   ```java
-   public ServiceResponse handle(Request request) {
-       CompletableFuture<ApiAResult> futureA = CompletableFuture
-           .supplyAsync(() -> apiA.call(request), apiExecutor);
-       CompletableFuture<ApiBResult> futureB = CompletableFuture
-           .supplyAsync(() -> apiB.call(request), apiExecutor);
-       CompletableFuture<ApiCResult> futureC = CompletableFuture
-           .supplyAsync(() -> apiC.call(request), apiExecutor);
-       return CompletableFuture.allOf(futureA, futureB, futureC)
-           .thenApply(v -> combine(futureA.join(), futureB.join(), futureC.join()))
-           .join(); // Total time = max(200, 300, 500) = 500ms
-   }
-   ```
-   Use a separate thread pool (`apiExecutor`) sized for I/O-bound tasks. With 3 parallel calls, the response time drops from 1000ms to 500ms — limited by the slowest API.
+  A: Parallelize the external calls using `CompletableFuture` with a separate thread pool sized for I/O-bound tasks. With all three calls executing concurrently, the response time drops from 1000ms to 500ms — limited by the slowest API. Use a dedicated executor for external calls to avoid starving the main request handling threads.
 
 9. **Q: Your application has frequent GC pauses (2 per second, 100ms each). Users experience response time spikes during pauses. You cannot increase heap size. What do you do?**
-   A: Reduce object allocation rate — this is the root cause of frequent GC. Techniques: (a) Avoid creating objects in hot paths — reuse buffers, use `StringBuilder` instead of `+`, use `LongAdder` instead of `AtomicLong`. (b) Use primitive collections (Eclipse Collections, FastUtil) instead of boxing. (c) Pool expensive objects (byte arrays, JSON parsers). (d) Use `@JsonView` to reduce serialization objects. (e) Tune G1GC: `-XX:G1NewSizePercent=5 -XX:G1MaxNewSizePercent=40` to control young generation sizing. (f) Use ZGC (Java 17+) which has sub-millisecond pause times regardless of heap size — trade CPU for lower latency. Profile allocation with `-XX:+PrintStringTableStatistics` and JFR.
+  A: Reduce object allocation rate by avoiding object creation in hot paths — reuse buffers, use `StringBuilder` instead of concatenation, and use `LongAdder` instead of `AtomicLong`. Use primitive collections (Eclipse Collections, FastUtil) to avoid boxing, pool expensive objects like byte arrays and JSON parsers, and tune G1GC with `-XX:G1NewSizePercent=5 -XX:G1MaxNewSizePercent=40`. For sub-millisecond pause times, use ZGC (Java 17+) at the cost of higher CPU usage.
 
 10. **Q: You optimize a critical endpoint from 2 seconds to 200ms. Two weeks later, it's back to 1 second. You check git history — no code changes to that endpoint. What happened?**
-    A: Performance regression without code changes is usually data growth or configuration drift. Check: (a) Database table size — has the table grown 10x? Queries that were fast on 100K rows may be slow on 10M rows. (b) Index fragmentation — rebuild indexes. (c) Cache efficiency — has the cache hit ratio dropped? Check `cache.hit.ratio` metric. (d) Connection pool — is pool contention growing due to more concurrent users? (e) External API — has the upstream service degraded? Add performance regression tests to CI/CD that alert if P95 response time exceeds a threshold.
+  A: Performance regression without code changes is usually data growth or configuration drift. Check if database table size has grown significantly (queries fast on 100K rows may be slow on 10M rows), index fragmentation, cache hit ratio drops, connection pool contention from more concurrent users, or upstream service degradation. Add performance regression tests to CI/CD that alert if P95 response time exceeds a threshold.
 
 ---
 
 ## Interview Questions
 
-1. **What are the most common causes of slow Spring Boot applications?** 
-   A: N+1 queries, missing database indexes, no caching, large JSON serialization (returning entities instead of DTOs), synchronous blocking I/O inside transactions, OSIV holding connections, unbounded thread pools, and excessive classpath scanning at startup.
+- **What are the most common causes of slow Spring Boot applications?**
+  A: N+1 queries, missing database indexes, no caching, large JSON serialization (returning entities instead of DTOs), synchronous blocking I/O inside transactions, OSIV holding connections, unbounded thread pools, and excessive classpath scanning at startup.
 
-2. **How do you identify performance bottlenecks in a Spring Boot application?** 
-   A: Use a systematic approach: (1) Actuator metrics (`/actuator/metrics`) for system-level health. (2) Database slow query log. (3) JFR (JDK Flight Recorder) or Async Profiler for CPU/memory profiling. (4) Thread dumps for contention. (5) GC logs for pause analysis. (6) APM tools (Datadog, New Relic, Grafana).
+- **How do you identify performance bottlenecks in a Spring Boot application?**
+  A: Use a systematic approach: Actuator metrics for system-level health, database slow query log, JFR or Async Profiler for CPU/memory profiling, thread dumps for contention, GC logs for pause analysis, and APM tools (Datadog, New Relic, Grafana) for production monitoring.
 
-3. **What is the OSIV (Open Session in View) anti-pattern?** 
-   A: OSIV keeps the Hibernate session open for the entire HTTP request, including view rendering and JSON serialization. This holds a database connection longer than necessary and triggers N+1 queries silently in templates/serialization. Disable it with `spring.jpa.open-in-view=false` and load all required data explicitly in the service layer.
+- **What is the OSIV (Open Session in View) anti-pattern?**
+  A: OSIV keeps the Hibernate session open for the entire HTTP request, including view rendering and JSON serialization, which holds a database connection longer than necessary and silently triggers N+1 queries in templates or serialization. Disable it with `spring.jpa.open-in-view=false` and load all required data explicitly in the service layer.
 
-4. **How do you optimize startup time?** 
-   A: Exclude unused auto-configurations, limit `@ComponentScan` to specific packages, use `@Lazy` for expensive beans, set `spring.main.lazy-initialization=true`, disable OSIV, use Spring Boot 3.x AOT engine, and configure JVM container support (`-XX:+UseContainerSupport`).
+- **How do you optimize startup time?**
+  A: Exclude unused auto-configurations, limit `@ComponentScan` to specific packages, use `@Lazy` for expensive beans, set `spring.main.lazy-initialization=true`, disable OSIV, use Spring Boot 3.x AOT engine, and configure JVM container support with `-XX:+UseContainerSupport`.
 
-5. **What is the N+1 query problem and how do you fix it?** 
-   A: The N+1 problem occurs when you fetch N entities and then access their lazy associations in a loop, generating N extra queries. Fix with `JOIN FETCH`, `@EntityGraph`, DTO projections (best), or `@BatchSize`. Enable Hibernate statistics to detect N+1: `spring.jpa.properties.hibernate.generate_statistics=true`.
+- **What is the N+1 query problem and how do you fix it?**
+  A: The N+1 problem occurs when you fetch N entities and then access their lazy associations in a loop, generating N extra queries. Fix with `JOIN FETCH`, `@EntityGraph`, DTO projections (best), or `@BatchSize`. Enable Hibernate statistics with `spring.jpa.properties.hibernate.generate_statistics=true` to detect N+1.
 
-6. **How does connection pool size affect performance?** 
-   A: Too small → requests queue waiting for connections. Too large → database overhead from managing many connections, thread contention. Formula: `connections = ((core_count * 2) + effective_spindle_count)`. Start with 10-20 and monitor. PostgreSQL can handle ~100 connections; beyond that, use PgBouncer for connection pooling.
+- **How does connection pool size affect performance?**
+  A: A pool that is too small causes requests to queue waiting for connections, while a pool that is too large creates database overhead from managing many connections and thread contention. Use the formula `connections = ((core_count * 2) + effective_spindle_count)`, starting with 10-20 and monitoring utilization. PostgreSQL can handle approximately 100 connections; beyond that, use PgBouncer.
 
-7. **What is the difference between Tomcat and Undertow?** 
-   A: Tomcat uses a thread-per-request model (each request gets a dedicated thread). Undertow uses non-blocking IO with fewer threads. Tomcat is better for CPU-bound applications; Undertow is better for I/O-bound applications with many concurrent connections. Spring Boot default is Tomcat.
+- **What is the difference between Tomcat and Undertow?**
+  A: Tomcat uses a thread-per-request model where each request gets a dedicated thread, making it better for CPU-bound applications. Undertow uses non-blocking IO with fewer threads, making it better for I/O-bound applications with many concurrent connections. Spring Boot defaults to Tomcat.
 
-8. **How do you reduce JSON serialization time?** 
-   A: (1) Use DTOs instead of entities (smaller object graph). (2) Use `@JsonView` to limit fields per endpoint. (3) Enable compression. (4) Use Jackson's `afterburner` module. (5) Cache pre-serialized JSON for static data. (6) Use Protocol Buffers or Avro for extremely latency-sensitive APIs.
+- **How do you reduce JSON serialization time?**
+  A: Use DTOs instead of entities for a smaller object graph, apply `@JsonView` to limit fields per endpoint, enable compression, use Jackson's `afterburner` module, cache pre-serialized JSON for static data, and consider Protocol Buffers or Avro for extremely latency-sensitive APIs.
 
-9. **How do you tune JVM garbage collection for a Spring Boot application?** 
-   A: Use G1GC (`-XX:+UseG1GC`) as default. Tune `-XX:MaxGCPauseMillis=100` for latency. Adjust heap size based on live data. For low-latency apps (p99 < 10ms), use ZGC (`-XX:+UseZGC`) which has sub-millisecond pauses. Enable GC logging: `-Xlog:gc*:file=gc.log`. Analyze with GCeasy.
+- **How do you tune JVM garbage collection for a Spring Boot application?**
+  A: Use G1GC (`-XX:+UseG1GC`) as the default choice and tune `-XX:MaxGCPauseMillis=100` for latency. Adjust heap size based on live data set size. For low-latency applications (p99 < 10ms), use ZGC (`-XX:+UseZGC`) which has sub-millisecond pause times. Enable GC logging with `-Xlog:gc*:file=gc.log` and analyze with GCeasy.
 
-10. **How do you implement caching for performance?** 
-    A: Use `@Cacheable` on service methods. Choose Caffeine for single-instance (fast, local), Redis for distributed. Set TTL, max size, and `sync = true` for cache stampede protection. Monitor hit ratio — target > 90%. Warm the cache after deployment. Use multi-level caching for critical paths (Caffeine L1 + Redis L2).
+- **How do you implement caching for performance?**
+  A: Use `@Cacheable` on service methods with Caffeine for single-instance caching (fast, local) or Redis for distributed caching. Configure TTL, max size, and `sync = true` for cache stampede protection. Monitor hit ratio targeting over 90% and warm the cache after deployment. Use multi-level caching for critical paths with Caffeine as L1 and Redis as L2.
 
 ---
 
 ## Developer Recommendations
 
-- **Always use DTO projections for read operations** — Returning JPA entities serializes all columns and triggers lazy associations. DTOs select only the needed fields, reducing memory, network, and serialization overhead. Use constructor expressions in JPQL or interface-based projections.
-- **Disable OSIV (`spring.jpa.open-in-view=false`) in production** — OSIV holds database connections through JSON serialization and masks N+1 problems. Disabling it forces explicit fetch planning, making performance behavior predictable. The default is `true` in Spring Boot 2.x — opt out explicitly.
-- **Profile before optimizing** — The most common performance mistake is optimizing the wrong thing. Use JFR + Async Profiler to find actual bottlenecks. A 10% improvement to a method that accounts for 1% of total time is wasted effort. Measure, identify, then optimize.
-- **Use `@Cacheable` with `sync = true` for high-traffic endpoints** — Without sync, 100 concurrent misses all hit the database. With sync, only one thread executes the method; the rest wait for the cached result. This is critical for cache stampede prevention.
-- **Keep transactions short** — Long transactions hold database connections and locks, increasing contention. Never perform blocking I/O (REST calls, file I/O) inside a transaction. The transaction should only cover the database operations — external calls go outside.
-- **Use pagination for list endpoints** — Returning unbounded lists causes OOM under load, slow serialization, and poor user experience. Always paginate with `Pageable` and return `Page<T>`. Set sensible defaults: `page=0, size=20` with a max limit of 1000.
-- **Use explicit `@ComponentScan` and exclude unused auto-configurations** — Classpath scanning and auto-configuration matching are startup bottlenecks. Limit scanning to packages your code actually uses. Exclude auto-configurations that don't apply to your application (MongoDB if you use JPA, Flyway if you use Liquibase).
-- **Monitor performance metrics in production** — Without metrics, performance optimization is guesswork. Track P50/P95/P99 response times, GC pause frequency/duration, connection pool utilization, thread pool saturation, and cache hit ratio. Set up alerts for regressions. Use Micrometer + Prometheus + Grafana.
+- **Always use DTO projections for read operations** — Returning JPA entities serializes all columns and triggers lazy associations. DTOs select only the needed fields, reducing memory, network, and serialization overhead. Use constructor expressions in JPQL or interface-based projections for compile-time safety.
+
+- **Disable OSIV (`spring.jpa.open-in-view=false`) in production** — OSIV holds database connections through JSON serialization and masks N+1 problems. Disabling it forces explicit fetch planning, making performance behavior predictable. The default is `true` in Spring Boot 2.x, so opt out explicitly.
+
+- **Profile before optimizing** — The most common performance mistake is optimizing the wrong thing. Use JFR and Async Profiler to find actual bottlenecks — a 10% improvement to a method that accounts for 1% of total time is wasted effort. Measure, identify, then optimize.
+
+- **Use `@Cacheable` with `sync = true` for high-traffic endpoints** — Without sync, 100 concurrent cache misses all hit the database simultaneously. With sync, only one thread executes the method while the rest wait for the cached result, preventing cache stampede in high-concurrency scenarios.
+
+- **Keep transactions short** — Long transactions hold database connections and locks, increasing contention and reducing throughput. Never perform blocking I/O (REST calls, file I/O) inside a transaction — the transaction should only cover database operations with external calls placed outside.
+
+- **Use pagination for list endpoints** — Returning unbounded lists causes OOM under load, slow serialization, and poor user experience. Always paginate with `Pageable` and return `Page<T>` with sensible defaults like `page=0, size=20` and a maximum limit of 1000.
+
+- **Use explicit `@ComponentScan` and exclude unused auto-configurations** — Classpath scanning and auto-configuration matching are significant startup bottlenecks. Limit scanning to packages your code actually uses and exclude auto-configurations that don't apply, such as MongoDB when you use JPA or Flyway when you use Liquibase.
+
+- **Monitor performance metrics in production** — Without metrics, performance optimization is guesswork. Track P50/P95/P99 response times, GC pause frequency and duration, connection pool utilization, thread pool saturation, and cache hit ratio. Use Micrometer with Prometheus and Grafana to set up alerts for regressions.

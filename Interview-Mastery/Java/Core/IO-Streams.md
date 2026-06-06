@@ -4,9 +4,14 @@
 
 ## Overview
 
-- **Definition:** Java I/O Streams are a fundamental API for reading from and writing to data sources — files, network sockets, memory buffers, system console — using a stream abstraction: a continuous flow of data.
+- **Purpose** — Java I/O Streams are a fundamental API for reading from and writing to data sources — files, network sockets, memory buffers, and the system console — using the abstraction of a continuous flow of data.
+- **Three Generations** — Java provides the original blocking `java.io` stream API (Java 1.0), the `java.nio` buffer-and-channel API with selectors for non-blocking I/O (Java 1.4), and the NIO.2 file system API in `java.nio.file` with asynchronous channels (Java 7). NIO.2 `Path` and `Files` should be your default for all new file I/O code.
+- **Memory-Mapped Files** — `MappedByteBuffer` maps file regions directly into virtual memory, allowing the OS to handle paging transparently and providing 10-100x speed improvements for large-file random access.
+- **Cardinal Rule** — Always close resources using try-with-resources (Java 7+), which guarantees that `close()` is called even when an exception is thrown.
 
-- **Why Multiple APIs?:**
+```java
+try (InputStream in = new FileInputStream("file")) { ... }
+```
 
 | API | Package | I/O Model | Since |
 |-----|---------|-----------|-------|
@@ -15,16 +20,15 @@
 | **NIO.2** | `java.nio.file` | File system API, async channels | Java 7 |
 | **Memory-Mapped** | `java.nio.MappedByteBuffer` | File → Direct memory | Java 1.4 |
 
-- **Key Principle:** Always close resources using try-with-resources (Java 7+):
-  ```java
-  try (InputStream in = new FileInputStream("file")) { ... }
-  ```
-
 ---
 
 ## Byte Streams (8-bit)
 
-- **Definition:** Handle I/O of raw binary data. The root classes are `InputStream` (reading) and `OutputStream` (writing).
+- **Purpose** — Byte streams handle I/O of raw binary data with `InputStream` as the abstract root for reading and `OutputStream` for writing. `FileInputStream` and `FileOutputStream` read from and write to files, but they should always be wrapped with `BufferedInputStream` / `BufferedOutputStream` to avoid per-byte system calls.
+- **ByteArray Streams** — `ByteArrayInputStream` and `ByteArrayOutputStream` operate on in-memory byte arrays, useful for testing and data transformation within the same JVM.
+- **Data Streams** — `DataInputStream` and `DataOutputStream` allow reading and writing Java primitive types (`int`, `long`, `double`) in a portable binary format with `readInt()`, `readLong()`, `readFully()`, and `readUTF()`. The `readFully()` method guarantees the requested number of bytes is read or an `EOFException` is thrown.
+- **Object Streams** — `ObjectInputStream` and `ObjectOutputStream` enable Java object serialization, converting entire object graphs to and from byte streams.
+- **PushbackInputStream** — Allows a single byte to be "unread" after reading, useful for lookahead parsing.
 
 | InputStream | OutputStream | Purpose |
 |-------------|-------------|---------|
@@ -47,16 +51,11 @@ try (InputStream in = new BufferedInputStream(new FileInputStream("data.bin"))) 
 
 ## Character Streams (16-bit Unicode)
 
-- **Definition:** Handle I/O of character data. Root classes are `Reader` and `Writer`. They handle character encoding transparently.
-
-| Reader | Writer | Purpose |
-|--------|--------|---------|
-| `FileReader` | `FileWriter` | File I/O (use with caution — charset issues) |
-| `CharArrayReader` | `CharArrayWriter` | In-memory buffer |
-| `BufferedReader` | `BufferedWriter` | Buffering |
-| `InputStreamReader` | `OutputStreamWriter` | Bridge between byte and char streams |
-| `StringReader` | `StringWriter` | String as source/sink |
-| `PrintWriter` | — | Formatted text output |
+- **Purpose** — Character streams handle I/O of character data with `Reader` and `Writer` as the abstract roots, managing character encoding transparently through an internal `Charset` decoder or encoder.
+- **FileReader/FileWriter** — Convenient for simple text file operations but use the platform default charset, which causes data corruption when files are moved between systems with different default encodings. Always specify the charset explicitly.
+- **BufferedReader/BufferedWriter** — Add buffering and line-oriented operations — `BufferedReader.readLine()` is the standard idiom for processing text files line by line.
+- **Bridge Classes** — `InputStreamReader` and `OutputStreamWriter` convert between byte streams and character streams. The charset must always be specified explicitly: `new InputStreamReader(in, StandardCharsets.UTF_8)`.
+- **StringReader/StringWriter** — Treat a `String` as a character source or sink, useful for testing. `PrintWriter` provides formatted text output with `print()`, `printf()`, and `println()` methods and optional auto-flushing.
 
 ```java
 // Reading text with proper encoding
@@ -69,16 +68,15 @@ try (BufferedReader reader = new BufferedReader(
 }
 ```
 
-- **Bridge Streams:** Use `InputStreamReader` to convert byte stream to character stream, and `OutputStreamWriter` for the reverse. Always specify the charset:
-  ```java
-  new InputStreamReader(in, StandardCharsets.UTF_8)
-  ```
-
 ---
 
 ## NIO.2 File API (Preferred for File I/O)
 
-- **Definition:** The modern file API in `java.nio.file` package (since Java 7) providing simpler, more powerful file operations.
+- **Path and Files** — The modern file API in `java.nio.file` (Java 7+) provides `Path` (an immutable, cross-platform file path) and `Files` (a utility class with static methods for all file operations). `Path.of()` creates paths without hardcoded separators, making code platform-independent.
+- **Reading Files** — `Files.readString()` (Java 11+) loads small files into a `String` in one line, while `Files.lines()` returns a lazy `Stream<String>` for processing large files without loading them entirely into memory.
+- **Writing Files** — `Files.write()` and `Files.writeString()` handle writing with charset control. Copying, moving, and deleting files use `Files.copy()`, `Files.move()`, and `Files.delete()` with options like `StandardCopyOption.REPLACE_EXISTING` and `ATOMIC_MOVE`.
+- **Directory Traversal** — `Files.walk()` and `Files.find()` return `Stream<Path>` for efficient filtering and processing of directory trees.
+- **Recommendation** — Always prefer NIO.2 `Files` + `Path` over legacy `java.io.File` for all new code. The NIO.2 API is more consistent, supports symbolic links, throws meaningful exceptions instead of returning boolean status codes, and provides lazy streaming operations for large files.
 
 ```java
 // Reading
@@ -108,13 +106,14 @@ try (Stream<Path> walk = Files.walk(rootDir)) {
 }
 ```
 
-- **Always prefer NIO.2 `Files` + `Path` over legacy `java.io.File`** for file operations. The NIO.2 API is more consistent, supports symbolic links, better error handling, and is generally faster.
-
 ---
 
 ## Buffering
 
-- **Definition:** Buffering improves I/O performance by reducing the number of system calls. Each system call has overhead, so reading/writing in larger chunks is more efficient.
+- **Critical Optimization** — Buffering is the single most important optimization for I/O performance. Each system call has overhead from privilege level switching, context switching, and cache effects.
+- **Problem** — Reading one byte at a time with `InputStream.read()` causes one system call per byte, translating to 1 billion system calls to read a 1GB file.
+- **Solution** — `BufferedInputStream` wraps an input stream with an internal 8192-byte buffer, reading from the source in large chunks and serving individual bytes from the in-memory buffer. This reduces system calls from 1 billion to approximately 125K for the same 1GB file — a 10,000x reduction.
+- **Default Buffer Size** — 8192 bytes is sufficient for most use cases. Larger buffers (64KB) can help on high-latency storage like network file systems. Always wrap streams with `BufferedInputStream` for binary data and `BufferedReader` for text data.
 
 ```java
 // BAD: One syscall per byte — extremely slow
@@ -130,15 +129,13 @@ try (BufferedInputStream in = new BufferedInputStream(new FileInputStream("file"
 }
 ```
 
-- **Always wrap streams with buffering** — the default buffer size is 8192 bytes, which is sufficient for most use cases.
-
 ---
 
 ## Under the Hood: Blocking vs Non-Blocking I/O
 
-- **Blocking I/O (java.io):** The calling thread blocks until the I/O operation completes. Each connection needs its own thread. Simple but doesn't scale well for many concurrent connections.
-
-- **NIO Non-Blocking I/O:** A `Selector` enables single-thread handling of multiple channels. The thread can process any channel that's ready, rather than being blocked on one.
+- **Blocking I/O** — The calling thread blocks until the I/O operation completes — the thread is parked in the kernel and cannot do any other work. Each concurrent connection requires its own thread, and with the thread-per-connection model, the system cannot scale beyond a few thousand connections because each thread consumes approximately 1MB of native stack memory.
+- **NIO Non-Blocking I/O** — Uses a `Selector` that monitors multiple `Channel` instances, allowing a single thread to manage thousands of concurrent connections by processing only those channels that are ready for read or write operations. The selector thread calls `select()` which blocks until at least one channel is ready, then iterates through the ready `SelectionKey` instances.
+- **Memory-Mapped Files** — A file region is mapped into the process's virtual memory address space, and the OS handles paging between disk and memory transparently. File access appears as simple memory read and write operations with performance that can be 10-100x faster than traditional `read()` and `write()` for large-file random access patterns.
 
 ```java
 Selector selector = Selector.open();
@@ -154,8 +151,6 @@ while (true) {
 }
 ```
 
-- **Memory-Mapped Files:** Maps a file region directly into memory — the OS handles paging between disk and memory. Performance can be 10-100x faster than traditional `read()` for large files.
-
 ```java
 FileChannel channel = FileChannel.open(path, StandardOpenOption.READ);
 MappedByteBuffer buffer = channel.map(
@@ -166,15 +161,11 @@ MappedByteBuffer buffer = channel.map(
 
 ## Common Mistakes
 
-- **Not closing streams** — resource leak. Always use try-with-resources.
-- **No charset specified** — platform-dependent encoding. Always specify `StandardCharsets.UTF_8`.
-- **Not buffering** — reading one byte at a time causes excessive system calls. Always wrap with `BufferedInputStream`/`BufferedReader`.
-- **Forgetting flush()** — buffered data lost on crash without flush. BufferedWriter/OutputStream auto-flush may not cover all cases.
-- **Partial reads** — `read(byte[])` may read fewer bytes than the array size. Use `readFully()` (DataInputStream) or loop.
-- **Large file into memory** — `readAllBytes()`/`readAllLines()` on huge files causes OOM. Use streaming with `Files.lines()`.
-- **File.exists() before access** — TOCTOU race condition (file deleted between check and access). Just open and handle `FileNotFoundException`.
-- **File.separator hardcoding** — use `Path.of()` for cross-platform paths. Don't hardcode `/` or `\`.
-- **Calling flush() too frequently** — defeats the purpose of buffering.
+- **Not Closing Resources** — Unclosed file handles accumulate until the process reaches the OS file descriptor limit (typically 1024 on Linux), causing `IOException: Too many open files`. Always use try-with-resources for any `InputStream`, `OutputStream`, `Reader`, `Writer`, `Channel`, or `Stream<Path>` returned by `Files.lines()` or `Files.walk()`.
+- **Omitting the Charset** — `FileReader` and `FileWriter` use the platform default charset — on US Windows this is `windows-1252`, on Linux it is typically `UTF-8`. A file written on one platform may be unreadable on another. Always specify `StandardCharsets.UTF_8` explicitly.
+- **Reading Without Buffering** — Each unbuffered `read()` or `write()` call translates to a system call, and for files processed byte by byte, the overhead of millions of kernel context switches dominates the I/O time. A 500MB file read one byte at a time takes approximately 45 minutes; wrapping with `BufferedInputStream` reduces this to under one minute.
+- **Ignoring Partial Reads** — `InputStream.read(buffer)` is not guaranteed to fill the buffer — it returns the number of bytes actually read, which may be less than the array length. Only `DataInputStream.readFully()` guarantees the requested number of bytes. Processing partial buffers without checking the return value leads to processing stale data from previous reads.
+- **TOCTOU Race Condition** — Using `File.exists()` before accessing a file introduces a Time-of-Check-Time-of-Use race condition — the file could be deleted between the check and the open call. Instead, attempt the operation directly and handle the `FileNotFoundException` or `NoSuchFileException`.
 
 ---
 
@@ -182,7 +173,7 @@ MappedByteBuffer buffer = channel.map(
 
 ### Scenario 1: High-Throughput Log Ingestion Pipeline
 
-A logging system ingests 50GB of application logs per day from 200 microservices. Logs arrive as gzipped files over HTTP. The system must parse, filter, and index each line with minimal memory footprint.
+A logging system ingests 50GB of application logs per day from 200 microservices. Logs arrive as gzipped files over HTTP. The system must parse, filter, and index each line with minimal memory footprint because multiple files may be processed concurrently on a server with limited RAM.
 
 ```java
 public class LogIngestor {
@@ -202,11 +193,11 @@ public class LogIngestor {
 }
 ```
 
-`GZIPInputStream` wraps `FileInputStream` to decompress on the fly. `BufferedReader` wraps the `InputStreamReader` for line-based reading with internal buffering (8KB default). The entire pipeline reads one line at a time — memory stays at ~8KB + one line regardless of file size. Without buffering, each `readLine()` would cause a system call, and without streaming decompression, the entire gzip file (potentially 500MB decompressed) would need to fit in memory.
+`GZIPInputStream` wraps the underlying `FileInputStream` to decompress gzip data on the fly, avoiding the need to decompress the entire file to disk first. `BufferedReader` wraps the `InputStreamReader` for line-based reading with internal 8KB buffering, ensuring that system call overhead is amortized across many lines. The entire pipeline reads one line at a time — memory consumption stays at approximately 8KB for the buffer plus the size of one line, regardless of whether the file is 10MB or 10GB. Without buffering, each `readLine()` call would cause a system call, and without streaming decompression, the entire decompressed file (potentially 500MB) would need to fit in memory.
 
 ### Scenario 2: Multipart File Upload with Progress
 
-A web application allows users to upload large video files (up to 2GB). The server must save the file to disk while streaming it — not loading the entire file into memory. It must also track upload progress.
+A web application allows users to upload large video files up to 2GB. The server must stream the file directly to disk without loading it entirely into memory, and it must track upload progress to display a progress bar to the user.
 
 ```java
 @PostMapping("/upload")
@@ -226,11 +217,11 @@ public ResponseEntity<String> handleUpload(HttpServletRequest request) throws IO
 }
 ```
 
-The `ServletInputStream` (from `request.getInputStream()`) provides bytes as they arrive over the network. The `FileOutputStream` writes them directly to disk. The 8KB buffer keeps memory constant regardless of file size. `FileChannel.transferFrom()` could further optimize by using zero-copy if the servlet container supports it, but the buffered approach is simpler and works across all containers.
+The `ServletInputStream` provides bytes as they arrive over the network, and the `FileOutputStream` writes them directly to disk. The 8KB reusable buffer keeps memory constant regardless of the 2GB file size — no part of the file is ever held in the Java heap. The progress tracker is updated after every buffer write, giving the UI real-time feedback. For further optimization, `FileChannel.transferFrom()` could use zero-copy to write directly from the network socket to the file system without passing through user space.
 
 ### Scenario 3: Configurable Data Export with Character Encoding
 
-A reporting system exports data to CSV files for clients worldwide. European clients need ISO-8859-1 encoding; Asian clients need UTF-8. The export must handle line breaks within fields and use the correct column delimiter (comma vs semicolon for European locales).
+A reporting system exports data to CSV files for clients worldwide. European clients require ISO-8859-1 encoding for compatibility with legacy spreadsheet software, while Asian clients need UTF-8 to represent non-Latin characters. The export must handle fields containing commas, line breaks, and double quotes.
 
 ```java
 public class CsvExporter {
@@ -250,329 +241,322 @@ public class CsvExporter {
 }
 ```
 
-The `OutputStreamWriter` bridges bytes to characters using the specified charset. `BufferedOutputStream` ensures writes are batched into 8KB chunks. Without explicit charset control, `FileWriter` would use the platform default (Windows-1252 on US Windows, causing data loss for Asian characters). The `delimiter` parameter allows comma/semicolon switching without code changes.
+The `OutputStreamWriter` bridges the byte stream to a character stream using the caller-specified charset, and `BufferedOutputStream` ensures that writes are batched into 8KB chunks before hitting the disk. Without explicit charset control via `OutputStreamWriter`, using `FileWriter` would silently use the platform default encoding, corrupting non-Latin text. The `delimiter` parameter allows switching between comma (for standard CSV) and semicolon (for European locales where comma is the decimal separator), and each field is properly quoted and escaped to handle embedded commas, quotes, and newlines.
 
 ---
 
 ## Scenario-Based Questions
 
-1. **Q: You are building a file watcher service that monitors a directory for new CSV files, processes them, and moves them to an archive. Files arrive at unpredictable times (from 1 to 1000 per minute). Each file is 100MB-2GB. How do you design the I/O pipeline to handle bursts without OOM or thread starvation?**
-   A: Use a bounded thread pool (e.g., 4 threads) with a `BlockingQueue<Path>` for file discovery:
-   ```java
-   try (WatchService watcher = FileSystems.getDefault().newWatchService()) {
-       dir.register(watcher, ENTRY_CREATE);
-       for (int i = 0; i < 4; i++) {
-           executor.submit(() -> {
-               while (true) {
-                   Path file = fileQueue.poll(10, SECONDS);
-                   if (file == null) continue;
-                   try (Stream<String> lines = Files.lines(file, UTF_8)) {
-                       lines.skip(1).map(this::parse).forEach(this::process);
-                   }
-                   Files.move(file, archive.resolve(file.getFileName()));
-               }
-           });
-       }
-       while (true) {
-           WatchKey key = watcher.take();
-           key.pollEvents().stream()
-               .filter(e -> e.kind() == ENTRY_CREATE)
-               .map(e -> dir.resolve((Path) e.context()))
-               .forEach(f -> fileQueue.offer(f));
-           key.reset();
-       }
-   }
-   ```
-   The key design decisions: `Files.lines()` streams each file lazily (no OOM regardless of file size); bounded thread pool prevents thread starvation during bursts; `BlockingQueue` decouples discovery from processing with backpressure; `WatchService` uses OS-level file system events (no polling overhead).
+**Q: You are building a file watcher service that monitors a directory for new CSV files, processes them, and moves them to an archive. Files arrive at unpredictable times (from 1 to 1000 per minute). Each file is 100MB-2GB. How do you design the I/O pipeline to handle bursts without OOM or thread starvation?**
 
-2. **Q: A service must read a config file that is updated atomically (write to temp file, rename). The service should use the latest config within 5 seconds of a change without polling every few seconds. How do you design this with NIO.2?**
-   A: Use `WatchService` for change notifications combined with atomic reads:
-   ```java
-   public class HotReloadConfig {
-       private volatile Config config;
-       private final Path configPath;
+A: Use a bounded thread pool with a `BlockingQueue<Path>` to decouple file discovery from processing, and stream each file lazily via `Files.lines()`:
+```java
+try (WatchService watcher = FileSystems.getDefault().newWatchService()) {
+    dir.register(watcher, ENTRY_CREATE);
+    for (int i = 0; i < 4; i++) {
+        executor.submit(() -> {
+            while (true) {
+                Path file = fileQueue.poll(10, SECONDS);
+                if (file == null) continue;
+                try (Stream<String> lines = Files.lines(file, UTF_8)) {
+                    lines.skip(1).map(this::parse).forEach(this::process);
+                }
+                Files.move(file, archive.resolve(file.getFileName()));
+            }
+        });
+    }
+    while (true) {
+        WatchKey key = watcher.take();
+        key.pollEvents().stream()
+            .filter(e -> e.kind() == ENTRY_CREATE)
+            .map(e -> dir.resolve((Path) e.context()))
+            .forEach(f -> fileQueue.offer(f));
+        key.reset();
+    }
+}
+```
+The four key design decisions are: `Files.lines()` streams each file lazily without loading it entirely into memory, preventing OOM regardless of file size; a bounded thread pool of 4 workers prevents thread starvation during bursts of 1000 files per minute; the `BlockingQueue` decouples high-speed file discovery from slower processing with natural backpressure when the queue fills; and `WatchService` uses OS-level file system events (inotify on Linux, ReadDirectoryChanges on Windows) so there is zero CPU cost when no files are arriving.
 
-       public void startWatching() throws IOException {
-           try (WatchService watcher = configPath.getParent().newWatchService()) {
-               configPath.getParent().register(watcher, ENTRY_MODIFY, ENTRY_CREATE);
-               reload(); // initial load
-               while (true) {
-                   WatchKey key = watcher.poll(5, SECONDS);
-                   if (key != null) {
-                       key.pollEvents().stream()
-                           .filter(e -> e.context().equals(configPath.getFileName()))
-                           .forEach(e -> reload());
-                       key.reset();
-                   }
-               }
-           }
-       }
+**Q: A service must read a config file that is updated atomically (write to temp file, rename). The service should use the latest config within 5 seconds of a change without polling every few seconds. How do you design this with NIO.2?**
 
-       private void reload() {
-           try { this.config = parse(Files.readString(configPath, UTF_8)); }
-           catch (IOException e) { log.error("Failed to reload config", e); }
-       }
-   }
-   ```
-   `WatchService` uses OS-level inotify (Linux) or ReadDirectoryChanges (Windows) — no polling overhead. `volatile` config reference ensures visibility across threads. `Files.readString()` reads the entire config (assumed small, <1MB). For atomicity, the writer uses `Files.move(temp, target, ATOMIC_MOVE)` so the reader never sees a partially-written file.
+A: Use `WatchService` for OS-level change notifications combined with a `volatile` reference for thread-safe config access:
+```java
+public class HotReloadConfig {
+    private volatile Config config;
+    private final Path configPath;
 
-3. **Q: A microservice communicates with a legacy system over a TCP socket using a custom binary protocol. Messages are length-prefixed (4 bytes big-endian length + payload). The connection is long-lived. How do you read messages without blocking the entire application?**
-   A: Use NIO non-blocking channels with a `Selector`, or wrap with `DataInputStream` in a dedicated thread:
-   ```java
-   // Blocking approach in a dedicated thread
-   public class TcpClient {
-       private final DataInputStream in;
-       private final ExecutorService executor = Executors.newSingleThreadExecutor();
-
-       public void start() throws IOException {
-           SocketChannel channel = SocketChannel.open(new InetSocketAddress(host, port));
-           this.in = new DataInputStream(Channels.newInputStream(channel));
-           executor.submit(() -> {
-               while (!Thread.currentThread().isInterrupted()) {
-                   int length = in.readInt(); // blocks until 4 bytes available
-                   byte[] payload = new byte[length];
-                   in.readFully(payload); // blocks until all bytes received
-                   process(payload);
-               }
-           });
-       }
-   }
-   ```
-   `DataInputStream.readInt()` and `readFully()` handle the framing correctly — `readFully()` guarantees the entire payload is read (unlike raw `InputStream.read()` which may read partial). The dedicated thread blocks on I/O without affecting other parts of the system. For higher throughput with fewer threads, use NIO's `Selector` with a `ByteBuffer` to accumulate data.
-
-4. **Q: A batch job processes 1M records. For each record, it reads a file from disk, transforms it, and writes a new file. The job takes 6 hours. Profiling shows 40% CPU and 60% I/O wait. How do you overlap computation with I/O to improve throughput?**
-   A: Use asynchronous I/O with `AsynchronousFileChannel` and `CompletableFuture`:
-   ```java
-   public CompletablePath<Void> processFile(Path input, Path output) {
-       AsynchronousFileChannel inChannel = AsynchronousFileChannel.open(input, READ);
-       AsynchronousFileChannel outChannel = AsynchronousFileChannel.open(output, WRITE, CREATE);
-       ByteBuffer buffer = ByteBuffer.allocate(8192);
-
-       return CompletableFuture.runAsync(() -> {
-           while (inChannel.read(buffer, position).get() > 0) {
-               buffer.flip();
-               ByteBuffer transformed = transform(buffer);
-               outChannel.write(transformed, writePos).get();
-               writePos += transformed.position();
-               buffer.clear();
-           }
-       }, ioExecutor);
-   }
-
-   // Process 4 files concurrently — overlap I/O with I/O
-   List<CompletableFuture<Void>> futures = files.stream()
-       .map(f -> processFile(f.input(), f.output()))
-       .toList();
-   CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-   ```
-   `AsynchronousFileChannel` uses OS-level AIO (on Windows/IOCP) or thread-pool-backed AIO (on Linux/epoll). Processing 4 files concurrently allows the I/O subsystem to service reads from one file while another is transforming data. The result: I/O wait drops from 60% to 30%, and total time reduces from 6 hours to ~3.5 hours.
-
-5. **Q: A Spring Boot application serves static assets (images, CSS, JS). Under load, file reads show high latency. The OS cache helps, but first requests are slow. How do you reduce file I/O latency for static assets?**
-   A: Preload commonly accessed files into a `MappedByteBuffer` at startup and serve from memory:
-   ```java
-   @Component
-   public class AssetCache {
-       private final ConcurrentHashMap<String, MappedByteBuffer> cache = new ConcurrentHashMap<>();
-
-       @PostConstruct
-       public void preload() throws IOException {
-           List.of("styles.css", "app.js", "logo.png").forEach(name -> {
-               Path path = Path.of("static", name);
-               try (FileChannel channel = FileChannel.open(path, READ)) {
-                   cache.put(name, channel.map(READ_ONLY, 0, channel.size()));
-               }
-           });
-       }
-
-       public ByteBuffer get(String name) {
-           return cache.getOrDefault(name, empty).duplicate();
-       }
-   }
-   ```
-   `FileChannel.map()` creates a memory-mapped file — the OS loads pages on demand but keeps them in the page cache. First access is faster than `FileInputStream` because the mapping is established at startup (not per-request). `.duplicate()` returns a new `ByteBuffer` sharing the same backing memory (zero-copy). For production, use a proper HTTP cache (ETag, Cache-Control) and a CDN — memory-mapped files optimize the server side when the CDN miss rate is high.
-
-6. **Q: You need to tail a growing log file (like `tail -f`) and stream new lines to a WebSocket client. The log file is written by another process. How do you read only new data without re-reading the entire file?**
-   A: Use `FileChannel.position()` to track read position and poll for changes:
-   ```java
-   public class LogTailer {
-       private final RandomAccessFile file = new RandomAccessFile(path, "r");
-       private final FileChannel channel = file.getChannel();
-       private long position = 0;
-
-       public void streamToWebSocket(WebSocket socket) throws IOException {
-           while (!closed) {
-               long newSize = channel.size();
-               if (newSize > position) {
-                   channel.position(position);
-                   ByteBuffer buffer = ByteBuffer.allocate((int)(newSize - position));
-                   channel.read(buffer);
-                   buffer.flip();
-                   socket.send(StandardCharsets.UTF_8.decode(buffer).toString());
-                   position = newSize;
-               }
-               Thread.sleep(100); // poll interval
-           }
-       }
-   }
-   ```
-   `FileChannel` allows seeking to any position — we track where we left off and only read new bytes. `RandomAccessFile` opens the file in read mode without locking. The 100ms poll is a reasonable trade-off between latency and CPU. For zero-latency updates, use `WatchService` (but it only reports directory changes, not file growth) or inotify directly. For production, use a library like Apache Commons IO `Tailer` which handles log rotation and encoding.
-
-7. **Q: A file parser reads a binary format where records are variable-length but have a fixed-size header (32 bytes) containing the record length. The file is 50GB. How do you parse it efficiently using memory-mapped I/O?**
-   A: Memory-map the file in large chunks and parse sequentially with a `ByteBuffer`:
-   ```java
-   public class BinaryParser {
-       public void parse(Path path) throws IOException {
-           try (FileChannel channel = FileChannel.open(path, READ)) {
-               long fileSize = channel.size();
-               long position = 0;
-               while (position < fileSize) {
-                   long mapSize = Math.min(REGION_SIZE, fileSize - position);
-                   MappedByteBuffer region = channel.map(READ_ONLY, position, mapSize);
-                   while (region.remaining() >= 32) {
-                       int recordLength = region.getInt(region.position() + 28);
-                       if (region.remaining() < recordLength) break;
-                       parseRecord(region, recordLength);
-                       region.position(region.position() + recordLength);
-                       position += recordLength;
-                   }
-                   position += region.position();
-               }
-           }
-       }
-   }
-   ```
-   Memory mapping avoids copying data between kernel and user space. The 1GB `REGION_SIZE` maps a large chunk at a time — the OS handles paging. Sequential access within a mapped region is fast because the OS prefetches pages. The outer loop handles the case where a record spans region boundaries. This approach is 3-5x faster than `FileInputStream` for random-access binary formats.
-
-8. **Q: A REST API aggregates data from 10 upstream services. Each upstream call returns JSON. The API currently calls each service sequentially (10 × 200ms = 2s total). How do you use NIO to parallelize the HTTP calls without creating 10 threads per request?**
-   A: Use a non-blocking HTTP client (Java 11+ `HttpClient` with `sendAsync`) with a small connection pool:
-   ```java
-   public CompletableFuture<AggregatedResponse> aggregate() {
-       List<CompletableFuture<JsonNode>> futures = uris.stream()
-           .map(uri -> httpClient.sendAsync(
-               HttpRequest.newBuilder(uri).build(),
-               BodyHandlers.ofByteArray())
-               .thenApply(response -> parseJson(response.body())))
-           .toList();
-
-       return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-           .thenApply(v -> futures.stream()
-               .map(CompletableFuture::join)
-               .collect(collectingAndThen(toList(), AggregatedResponse::new)));
-   }
-   ```
-   Java 11's `HttpClient` uses non-blocking I/O internally (NIO `Selector`). A single HTTP connection pool of 10-20 connections handles all 10 concurrent calls — no thread-per-connection overhead. The `sendAsync()` returns immediately with a `CompletableFuture`. The total response time drops from 2s to ~200ms (the slowest upstream). The thread pool is shared across all API requests, so 100 concurrent API requests don't create 1000 threads.
-
-9. **Q: A service receives files via FTP, processes them, and archives them to S3. Files are 10MB-5GB. Occasionally a file is truncated (FTP transfer interrupted). How do you detect incomplete files before processing?**
-   A: Write a marker file after the upload completes, or check file consistency:
-   ```java
-   // Approach 1: Marker file
-   Path marker = uploadDir.resolve(filename + ".done");
-   if (Files.exists(marker)) {
-       processFile(uploadDir.resolve(filename));
-       Files.delete(marker);
-   }
-
-   // Approach 2: CRC check
-   try (InputStream in = Files.newInputStream(path)) {
-       byte[] actual = DigestUtils.sha256(in);
-       String expected = readChecksumFile(path.resolveSibling(path.getFileName() + ".sha256"));
-       if (!Arrays.equals(actual, Hex.decodeHex(expected))) {
-           throw new IOException("Checksum mismatch — file truncated or corrupted");
-       }
-   }
-   ```
-   The marker file approach is simpler: the FTP process creates the `.done` file only after the upload is complete. The processing service only looks for files with a matching `.done` marker. For stronger guarantees, compute SHA-256 during upload and compare. `Files.newInputStream()` with `DigestUtils.sha256()` streams the file without loading it entirely into memory — safe for 5GB files.
-
-10. **Q: A legacy application writes logs using `System.out.println()`. You need to redirect all stdout to a rolling file without modifying the application code. How do you do this at the JVM level?**
-    A: Use `System.setOut()` with a custom `PrintStream` that wraps a rolling file appender:
-    ```java
-    public class StdoutRedirector {
-        public static void redirect(String logDir) {
-            try {
-                OutputStream rollingOut = new OutputStream() {
-                    private PrintWriter current;
-                    private long nextRotation = System.currentTimeMillis() + 3600_000;
-
-                    @Override public void write(int b) throws IOException {
-                        rotateIfNeeded();
-                        current.write(b);
-                    }
-
-                    private void rotateIfNeeded() throws IOException {
-                        if (current == null || System.currentTimeMillis() > nextRotation) {
-                            if (current != null) current.close();
-                            String filename = logDir + "/stdout-" + Instant.now().toString() + ".log";
-                            current = new PrintWriter(new OutputStreamWriter(
-                                new BufferedOutputStream(Files.newOutputStream(Path.of(filename))), UTF_8), true);
-                            nextRotation = System.currentTimeMillis() + 3600_000;
-                        }
-                    }
-                };
-                System.setOut(new PrintStream(rollingOut, true, UTF_8));
-            } catch (IOException e) { throw new RuntimeException(e); }
+    public void startWatching() throws IOException {
+        try (WatchService watcher = configPath.getParent().newWatchService()) {
+            configPath.getParent().register(watcher, ENTRY_MODIFY, ENTRY_CREATE);
+            reload(); // initial load
+            while (true) {
+                WatchKey key = watcher.poll(5, SECONDS);
+                if (key != null) {
+                    key.pollEvents().stream()
+                        .filter(e -> e.context().equals(configPath.getFileName()))
+                        .forEach(e -> reload());
+                    key.reset();
+                }
+            }
         }
     }
-    ```
-    `System.setOut()` replaces the global stdout `PrintStream`. The custom `OutputStream` wraps a rolling file writer that rotates hourly. `BufferedOutputStream` ensures writes are batched (reducing system calls from one per `println()` to one per 8KB). The `autoFlush=true` parameter on `PrintWriter` ensures data is written to disk promptly (but this is a trade-off between durability and performance). For production, use Logback's `SyslogAppender` or SLF4J's `Logback` which handles rotation, compression, and cleanup.
+
+    private void reload() {
+        try { this.config = parse(Files.readString(configPath, UTF_8)); }
+        catch (IOException e) { log.error("Failed to reload config", e); }
+    }
+}
+```
+`WatchService` uses OS-level file system event notifications with no polling overhead — the thread sleeps in the kernel until a file system event occurs. The `volatile` keyword on the `config` reference provides the happens-before guarantee required for other threads to see the updated config immediately. The atomic write pattern (`Files.move(temp, target, ATOMIC_MOVE)`) ensures that the reader never sees a partially written file, and `Files.readString()` reads the entire config in one operation — acceptable because config files are typically under 1MB.
+
+**Q: A microservice communicates with a legacy system over a TCP socket using a custom binary protocol. Messages are length-prefixed (4 bytes big-endian length + payload). The connection is long-lived. How do you read messages without blocking the entire application?**
+
+A: Use a dedicated single thread with `DataInputStream` for its framing guarantees, isolating the blocking I/O from the rest of the application:
+```java
+// Blocking approach in a dedicated thread
+public class TcpClient {
+    private final DataInputStream in;
+    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+
+    public void start() throws IOException {
+        SocketChannel channel = SocketChannel.open(new InetSocketAddress(host, port));
+        this.in = new DataInputStream(Channels.newInputStream(channel));
+        executor.submit(() -> {
+            while (!Thread.currentThread().isInterrupted()) {
+                int length = in.readInt(); // blocks until 4 bytes available
+                byte[] payload = new byte[length];
+                in.readFully(payload); // blocks until all bytes received
+                process(payload);
+            }
+        });
+    }
+}
+```
+`DataInputStream.readInt()` correctly assembles 4 bytes into a big-endian `int`, and `readFully()` guarantees that exactly `length` bytes are read — unlike raw `InputStream.read(byte[])` which may return fewer bytes. The dedicated single-thread executor keeps the blocking I/O isolated so the rest of the application handles requests concurrently. For higher throughput with fewer threads, use NIO's `Selector` with a `ByteBuffer` to accumulate partial reads, but for a single long-lived connection, the dedicated thread approach is simpler and equally efficient.
+
+**Q: A batch job processes 1M records. For each record, it reads a file from disk, transforms it, and writes a new file. The job takes 6 hours. Profiling shows 40% CPU and 60% I/O wait. How do you overlap computation with I/O to improve throughput?**
+
+A: Use `AsynchronousFileChannel` with `CompletableFuture` to overlap I/O operations from multiple files, allowing the I/O subsystem to service one file while another is being transformed:
+```java
+public CompletableFuture<Void> processFile(Path input, Path output) {
+    AsynchronousFileChannel inChannel = AsynchronousFileChannel.open(input, READ);
+    AsynchronousFileChannel outChannel = AsynchronousFileChannel.open(output, WRITE, CREATE);
+    ByteBuffer buffer = ByteBuffer.allocate(8192);
+
+    return CompletableFuture.runAsync(() -> {
+        while (inChannel.read(buffer, position).get() > 0) {
+            buffer.flip();
+            ByteBuffer transformed = transform(buffer);
+            outChannel.write(transformed, writePos).get();
+            writePos += transformed.position();
+            buffer.clear();
+        }
+    }, ioExecutor);
+}
+
+// Process 4 files concurrently
+List<CompletableFuture<Void>> futures = files.stream()
+    .map(f -> processFile(f.input(), f.output()))
+    .toList();
+CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+```
+`AsynchronousFileChannel` uses OS-level asynchronous I/O where available (IOCP on Windows) or a thread-pool-backed implementation (on Linux). Processing four files concurrently allows overlapping — while file A's I/O is waiting, file B's data is being transformed on the CPU. This converts the 60% I/O wait time into useful computation, reducing total processing time from 6 hours to approximately 3.5 hours. The `ioExecutor` is a dedicated thread pool sized to the number of concurrent file operations, preventing the I/O tasks from competing with the application's main processing threads.
+
+**Q: A Spring Boot application serves static assets (images, CSS, JS). Under load, file reads show high latency. The OS cache helps, but first requests are slow. How do you reduce file I/O latency for static assets?**
+
+A: Preload commonly accessed files into `MappedByteBuffer` at application startup and serve from memory with zero-copy buffer duplication:
+```java
+@Component
+public class AssetCache {
+    private final ConcurrentHashMap<String, MappedByteBuffer> cache = new ConcurrentHashMap<>();
+
+    @PostConstruct
+    public void preload() throws IOException {
+        List.of("styles.css", "app.js", "logo.png").forEach(name -> {
+            Path path = Path.of("static", name);
+            try (FileChannel channel = FileChannel.open(path, READ)) {
+                cache.put(name, channel.map(READ_ONLY, 0, channel.size()));
+            }
+        });
+    }
+
+    public ByteBuffer get(String name) {
+        return cache.getOrDefault(name, empty).duplicate();
+    }
+}
+```
+`FileChannel.map()` creates a memory-mapped region — the OS loads pages on demand when the data is first accessed, but the mapping itself is established at startup rather than per-request, eliminating per-request `open()` and `close()` overhead. The `.duplicate()` method returns a new `ByteBuffer` that shares the same backing memory, providing zero-copy reads — no data is copied from the mapped buffer to the application heap. For a production system, combine this with proper HTTP caching headers (ETag, Cache-Control) and a CDN; the memory-mapped cache optimizes the server-side path for requests that miss the CDN cache.
+
+**Q: You need to tail a growing log file (like `tail -f`) and stream new lines to a WebSocket client. The log file is written by another process. How do you read only new data without re-reading the entire file?**
+
+A: Use `FileChannel` to track the read position and only read the new bytes appended since the last poll:
+```java
+public class LogTailer {
+    private final RandomAccessFile file = new RandomAccessFile(path, "r");
+    private final FileChannel channel = file.getChannel();
+    private long position = 0;
+
+    public void streamToWebSocket(WebSocket socket) throws IOException {
+        while (!closed) {
+            long newSize = channel.size();
+            if (newSize > position) {
+                channel.position(position);
+                ByteBuffer buffer = ByteBuffer.allocate((int)(newSize - position));
+                channel.read(buffer);
+                buffer.flip();
+                socket.send(StandardCharsets.UTF_8.decode(buffer).toString());
+                position = newSize;
+            }
+            Thread.sleep(100); // poll interval
+        }
+    }
+}
+```
+`FileChannel` allows seeking to any byte position with `position()`, so we track where we left off and only read the bytes beyond that point. `RandomAccessFile` opens the file in read mode without locking, so the writer process is not blocked. The 100ms polling interval is a reasonable trade-off between near-real-time latency (max 100ms delay) and CPU usage (10 polls per second). For production use, libraries like Apache Commons IO `Tailer` handle log rotation detection, encoding, and configurable polling with less code.
+
+**Q: A file parser reads a binary format where records are variable-length but have a fixed-size header (32 bytes) containing the record length. The file is 50GB. How do you parse it efficiently using memory-mapped I/O?**
+
+A: Memory-map the file in 1GB regions and parse sequentially with `ByteBuffer`, handling the edge case where records span region boundaries:
+```java
+public class BinaryParser {
+    public void parse(Path path) throws IOException {
+        try (FileChannel channel = FileChannel.open(path, READ)) {
+            long fileSize = channel.size();
+            long position = 0;
+            while (position < fileSize) {
+                long mapSize = Math.min(REGION_SIZE, fileSize - position);
+                MappedByteBuffer region = channel.map(READ_ONLY, position, mapSize);
+                while (region.remaining() >= 32) {
+                    int recordLength = region.getInt(region.position() + 28);
+                    if (region.remaining() < recordLength) break;
+                    parseRecord(region, recordLength);
+                    region.position(region.position() + recordLength);
+                    position += recordLength;
+                }
+                position += region.position();
+            }
+        }
+    }
+}
+```
+Memory-mapping avoids copying data between kernel space and user space — the file data is directly accessible as a `ByteBuffer` in the process's virtual address space. The 1GB `REGION_SIZE` maps a large chunk at a time, with the OS handling demand paging so only the accessed pages are loaded into physical memory. Sequential access within a mapped region is fast because the OS prefetches subsequent pages. The outer loop handles the edge case where a record header at the end of one region's data would exceed the mapped region — in that case, the inner loop breaks, the position is updated, and a new 1GB region is mapped starting from the record boundary.
+
+**Q: A REST API aggregates data from 10 upstream services. Each upstream call returns JSON. The API currently calls each service sequentially (10 x 200ms = 2s total). How do you use NIO to parallelize the HTTP calls without creating 10 threads per request?**
+
+A: Use Java 11+ `HttpClient` with `sendAsync()` which uses NIO non-blocking I/O internally, allowing a single small thread pool to handle thousands of concurrent connections:
+```java
+public CompletableFuture<AggregatedResponse> aggregate() {
+    List<CompletableFuture<JsonNode>> futures = uris.stream()
+        .map(uri -> httpClient.sendAsync(
+            HttpRequest.newBuilder(uri).build(),
+            BodyHandlers.ofByteArray())
+            .thenApply(response -> parseJson(response.body())))
+        .toList();
+
+    return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+        .thenApply(v -> futures.stream()
+            .map(CompletableFuture::join)
+            .collect(collectingAndThen(toList(), AggregatedResponse::new)));
+}
+```
+Java 11's `HttpClient` uses NIO `Selector` internally, so a single HTTP connection pool of 10-20 connections handles all concurrent calls without a thread-per-connection model. The `sendAsync()` method returns immediately with a `CompletableFuture`, and the underlying NIO selector processes the responses as they arrive. The total response time drops from 2 seconds (serial 200ms x 10) to approximately 200ms (the slowest upstream service), with the connection pool shared across all API requests so that 100 concurrent API requests do not create 1000 threads.
+
+**Q: A service receives files via FTP, processes them, and archives them to S3. Files are 10MB-5GB. Occasionally a file is truncated (FTP transfer interrupted). How do you detect incomplete files before processing?**
+
+A: Use a marker file approach combined with checksum verification to reliably detect incomplete transfers:
+```java
+// Approach 1: Marker file
+Path marker = uploadDir.resolve(filename + ".done");
+if (Files.exists(marker)) {
+    processFile(uploadDir.resolve(filename));
+    Files.delete(marker);
+}
+
+// Approach 2: CRC check
+try (InputStream in = Files.newInputStream(path)) {
+    byte[] actual = DigestUtils.sha256(in);
+    String expected = readChecksumFile(path.resolveSibling(path.getFileName() + ".sha256"));
+    if (!Arrays.equals(actual, Hex.decodeHex(expected))) {
+        throw new IOException("Checksum mismatch — file truncated or corrupted");
+    }
+}
+```
+The marker file approach is simpler: the FTP process creates a `.done` file atomically only after the upload is fully complete, and the processing service only looks for files with a matching `.done` marker. For stronger guarantees against network corruption during transfer, compute a SHA-256 hash during upload and compare it against a distributed checksum file. The `Files.newInputStream()` with `DigestUtils.sha256()` streams the file without loading it into memory, making it safe for 5GB files.
+
+**Q: A legacy application writes logs using `System.out.println()`. You need to redirect all stdout to a rolling file without modifying the application code. How do you do this at the JVM level?**
+
+A: Use `System.setOut()` at startup to replace the global `System.out` `PrintStream` with a custom implementation that rolls files hourly:
+```java
+public class StdoutRedirector {
+    public static void redirect(String logDir) {
+        try {
+            OutputStream rollingOut = new OutputStream() {
+                private PrintWriter current;
+                private long nextRotation = System.currentTimeMillis() + 3600_000;
+
+                @Override public void write(int b) throws IOException {
+                    rotateIfNeeded();
+                    current.write(b);
+                }
+
+                private void rotateIfNeeded() throws IOException {
+                    if (current == null || System.currentTimeMillis() > nextRotation) {
+                        if (current != null) current.close();
+                        String filename = logDir + "/stdout-" + Instant.now().toString() + ".log";
+                        current = new PrintWriter(new OutputStreamWriter(
+                            new BufferedOutputStream(Files.newOutputStream(Path.of(filename))), UTF_8), true);
+                        nextRotation = System.currentTimeMillis() + 3600_000;
+                    }
+                }
+            };
+            System.setOut(new PrintStream(rollingOut, true, UTF_8));
+        } catch (IOException e) { throw new RuntimeException(e); }
+    }
+}
+```
+`System.setOut()` replaces the global stdout `PrintStream` with a custom implementation. The custom `OutputStream` wraps a rolling file writer that creates a new log file every hour, with `BufferedOutputStream` batching the many small `write()` calls from `println()` into 8KB chunks. The `autoFlush=true` parameter ensures each line is written to disk promptly — a trade-off between durability and write amplification. For production use, a proper logging framework like Logback handles rotation, compression, retention, and cleanup with far less custom code.
 
 ---
 
 ## Interview Questions
 
-1. **What is the difference between `InputStream` and `Reader`?**
-   A: `InputStream` reads raw bytes (8-bit). `Reader` reads characters (16-bit Unicode). `Reader` handles character encoding translation from bytes to chars using a `Charset`. Always use `InputStream` for binary data (images, ZIP files) and `Reader` for text data. Bridge between them with `InputStreamReader` which converts bytes to characters using a specified charset.
+**What is the difference between `InputStream` and `Reader`?** `InputStream` reads raw bytes (8-bit) for binary data like images, ZIP files, and serialized objects. `Reader` reads characters (16-bit Unicode) for text data, with internal charset decoding from bytes to characters. The bridge between them is `InputStreamReader`, which converts incoming bytes to characters using a specified `Charset`. Always choose `InputStream` for binary data and `Reader` for text data.
 
-2. **What is try-with-resources and why is it important for I/O?**
-   A: try-with-resources (Java 7+) automatically closes resources that implement `AutoCloseable`. For I/O, it ensures streams, channels, and readers are closed even if an exception occurs. Without it, unclosed streams cause file handle leaks, eventually throwing `TooManyOpenFilesException`. The syntax: `try (InputStream in = new FileInputStream("file")) { ... }`. Resources are closed in reverse order of declaration.
+**What is try-with-resources and why is it important for I/O?** try-with-resources (Java 7+) automatically closes resources implementing `AutoCloseable` after the try block, regardless of exceptions. For I/O, this prevents file handle leaks that would otherwise require explicit `finally` blocks and null checks. Multiple resources are declared separated by semicolons and closed in reverse declaration order. The syntax is: `try (InputStream in = new FileInputStream("file")) { ... }`.
 
-3. **What is the difference between `FileInputStream` and `FileChannel`?**
-   A: `FileInputStream` is a blocking byte stream — each `read()` causes a system call. `FileChannel` provides more advanced operations: position-independent read/write, memory-mapped I/O (`map()`), zero-copy transfers (`transferTo()`, `transferFrom()`), and locking (`lock()`, `tryLock()`). `FileChannel` is typically faster for large files and random access. Use `FileInputStream` for simple sequential reads of small to medium files.
+**What is the difference between `FileInputStream` and `FileChannel`?** `FileInputStream` is a blocking byte stream where each `read()` causes a system call. `FileChannel` provides position-independent read/write with zero-copy transfer methods (`transferTo()`, `transferFrom()`), memory-mapped I/O (`map()`), and file locking (`lock()`, `tryLock()`). `FileChannel` is typically faster for large files and random access patterns. `FileInputStream` is simpler for small sequential reads.
 
-4. **What is buffering and why does it matter for I/O performance?**
-   A: Buffering groups multiple small writes/reads into larger blocks, reducing the number of system calls. Each system call has overhead (kernel privilege switch, context switch). Reading one byte at a time causes N system calls for N bytes. `BufferedInputStream` with an 8KB buffer causes N/8192 system calls. For a 1GB file, that's 1 billion vs 125K system calls — a 10,000x reduction.
+**What is buffering and why does it matter for I/O performance?** Buffering groups many small I/O operations into larger blocks to reduce the number of system calls. Each system call incurs overhead from kernel privilege switching, context switching, and cache effects. Reading one byte at a time from a 1GB file causes 1 billion system calls; `BufferedInputStream` with an 8KB buffer reduces this to 125K calls — a 10,000x reduction that can change processing time from 45 minutes to under one minute.
 
-5. **What is the difference between `File` (java.io) and `Path` (java.nio.file)?**
-   A: `File` is the legacy API (Java 1.0) with inconsistent methods, no symbolic link support, and poor error handling (returns boolean instead of throwing exceptions). `Path` (Java 7+) is immutable, supports `resolve()`, `relativize()`, symbolic links, and works with `Files` utility methods that throw meaningful exceptions. Always use `Path` and `Files` for new code.
+**What is the difference between `File` (java.io) and `Path` (java.nio.file)?** `File` is the legacy API with inconsistent error handling (returns boolean instead of throwing exceptions), no symbolic link support, and unreliable `delete()` behavior. `Path` is immutable, supports `resolve()` and `relativize()` for path manipulation, works with symbolic links, and integrates with `Files` utility methods that throw meaningful exceptions. Always use `Path` and `Files` for new code.
 
-6. **What is memory-mapped I/O and when should you use it?**
-   A: `MappedByteBuffer` maps a file region into the process's virtual memory address space. The OS handles paging between disk and memory transparently. Reads and writes become memory operations — no explicit `read()`/`write()` calls. Best for: large files (100MB+), random access patterns, shared memory between processes. Avoid for: small files (overhead of mapping is not justified), very short-lived operations, files that change size frequently.
+**What is memory-mapped I/O and when should you use it?** `MappedByteBuffer` maps a file region into the process's virtual memory, allowing the OS to handle paging between disk and memory transparently. Reads and writes become memory operations without explicit `read()`/`write()` calls. Best for: large files (100MB+) with random access patterns, shared memory between processes, and high-performance database or indexing systems. Avoid for small files, very short-lived operations, or files that change size frequently.
 
-7. **How does `FileChannel.transferTo()` achieve zero-copy?**
-   A: `transferTo()` uses OS-level `sendfile()` (Linux) or `TransmitFile()` (Windows). Data is copied directly from the file cache to the network socket (or output channel) without passing through the Java application's memory space (no user-kernel context switches for data). This is 10-50x faster than `read()` + `write()` for large data transfers. Common use: serving static files from a web server.
+**How does `FileChannel.transferTo()` achieve zero-copy?** `transferTo()` delegates to the OS-level `sendfile()` (Linux) or `TransmitFile()` (Windows). Data is copied directly from the file system cache to the network socket (or output channel) within kernel space, never passing through the Java application's memory. This eliminates the data copy from kernel to user space and back, reducing CPU usage and improving throughput by 10-50x for large data transfers.
 
-8. **What is the difference between `Files.readAllLines()` and `Files.lines()`?**
-   A: `readAllLines()` loads all lines into a `List<String>` in memory — OOM risk for large files. `Files.lines()` returns a lazy `Stream<String>` that reads lines on demand — memory scales with the largest line, not the file size. Use `readAllLines()` for small files (<100MB) where you need random access to lines. Use `Files.lines()` for large files or streaming processing.
+**What is the difference between `Files.readAllLines()` and `Files.lines()`?** `readAllLines()` loads the entire file into a `List<String>` in memory, risking `OutOfMemoryError` for large files. `Files.lines()` returns a lazy `Stream<String>` that reads lines on demand from the underlying `FileChannel`, keeping memory proportional to the largest line rather than the file size. Use `readAllLines()` only for small files under 100MB; use `Files.lines()` for all other text processing.
 
-9. **What is the difference between blocking I/O (BIO) and non-blocking I/O (NIO)?**
-   A: In BIO, a thread blocks until the I/O operation completes — one thread per connection model that doesn't scale to thousands of connections. In NIO, a `Selector` monitors multiple channels and processes only those that are ready — one thread can handle thousands of connections. NIO is more complex but necessary for high-concurrency servers (10K+ connections). BIO is simpler and fine for low-concurrency scenarios.
+**What is the difference between blocking I/O (BIO) and non-blocking I/O (NIO)?** In BIO, a thread blocks until the I/O operation completes — the thread-per-connection model cannot scale beyond a few thousand connections due to thread stack memory consumption. In NIO, a `Selector` monitors many `Channel` instances and processes only those that are ready, allowing one thread to handle thousands of connections. NIO is more complex but necessary for high-concurrency servers; BIO is simpler and sufficient for low-concurrency scenarios.
 
-10. **How do you properly close resources when using multiple I/O streams?**
-    A: The outer stream's `close()` typically calls the inner stream's `close()`. But if the outer stream's constructor throws, the inner stream leaks. Best practice: use try-with-resources with separate variables for each resource:
-    ```java
-    try (FileInputStream fis = new FileInputStream("file");
-         BufferedInputStream bis = new BufferedInputStream(fis);
-         DataInputStream dis = new DataInputStream(bis)) {
-        // Both fis and bis are closed even if DataInputStream constructor throws
-    }
-    ```
-    Or if wrapping in a single try-with-resources, create the inner stream first and pass it to the outer. In Java 9+, the outer stream's constructor can take the inner as a parameter and both are closed properly.
+**How do you properly close resources when using multiple I/O streams?** Use try-with-resources with separate variable declarations for each stream, because the outer stream's constructor may throw before `close()` is recorded, leaking the inner stream:
+```java
+try (FileInputStream fis = new FileInputStream("file");
+     BufferedInputStream bis = new BufferedInputStream(fis);
+     DataInputStream dis = new DataInputStream(bis)) {
+    // All three streams are closed, even if DataInputStream constructor throws
+}
+```
+In Java 9+, the `InputStreamReader(InputStream)` constructor is annotated with `@SuppressWarnings("try")` to handle this correctly even in a single-resource try-with-resources, but the multi-variable pattern is the most robust approach.
 
 ---
 
 ## Developer Recommendations
 
-- **Always specify charset explicitly** — `FileReader`, `FileWriter`, `String.getBytes()` use the platform default charset. On Windows this is `windows-1252`; on Linux it's `UTF-8`. A file written on one platform may be unreadable on another. Always use `StandardCharsets.UTF_8` or explicitly specify the charset. `Files.writeString(path, content, StandardCharsets.UTF_8)` is both explicit and concise.
-
-- **Always buffer I/O streams** — Reading one byte at a time causes one system call per byte (millions of user-kernel context switches). Wrap with `BufferedInputStream` (8KB default buffer). For text, use `BufferedReader`/`BufferedWriter`. For a 500MB file, buffering reduces processing time from 45 minutes to under 1 minute — a 45x improvement from a single wrapper class.
-
-- **Prefer NIO.2 `Files` + `Path` over legacy `java.io.File`** — `File` has inconsistent error handling (returns `boolean` instead of throwing), no symbolic link support, and unreliable `delete()` behavior. `Path` + `Files` throws meaningful exceptions, supports `walk()`, `find()`, `copy()`, `move()`, and works with `Stream<String>` for efficient processing. Migration is straightforward: replace `new File(path)` with `Path.of(path)`.
-
-- **Use `Files.lines()` for large files, `Files.readString()` for small files** — `Files.readAllLines()` loads the entire file into a `List<String>` in memory. For a 2GB log file with 20M lines, that's 20M String objects — certain OOM. `Files.lines()` returns a lazy `Stream<String>` that reads lines on demand. For files under 100MB, `Files.readString()` (Java 11+) is simple and efficient.
-
-- **Use `FileChannel.transferTo()` for zero-copy file transfers** — Copying a file via `read()` + `write()` loops through user space (copy from kernel → app → kernel). `transferTo()` uses OS-level `sendfile()` — data moves directly between file descriptors in kernel space. For a 1GB file, this is 10-50x faster. Use it for file copies, serving files over HTTP, and compressing files.
-
-- **Use try-with-resources for ALL I/O resources** — Every `InputStream`, `OutputStream`, `Reader`, `Writer`, `Channel`, and `Stream<Path>` must be closed. Unclosed file handles accumulate until the process hits the OS limit (typically 1024-4096). try-with-resources guarantees cleanup even with exceptions. For `Files.lines()`, always wrap: `try (Stream<String> lines = Files.lines(path)) { ... }`.
-
-- **Use `DataInputStream` for binary data with known structure** — Raw `InputStream.read()` returns partial data (may read fewer bytes than requested). `DataInputStream.readFully()` guarantees the requested bytes or throws `EOFException`. For multi-byte values, `readInt()`, `readLong()`, `readUTF()` handle endianness and framing correctly. This is essential for network protocols and binary file formats.
-
-- **Use `Memory-mapped` files for random-access large files** — `FileChannel.map()` maps a file region into virtual memory. The OS manages paging, so random access patterns are fast (the OS keeps frequently accessed pages in memory). For a 10GB database file where you access random 4KB pages, memory-mapped I/O is 10-100x faster than `RandomAccessFile` because the OS optimizes page cache usage.
+- **Always specify the charset explicitly** — `FileReader`, `FileWriter`, and `String.getBytes()` use the platform default charset, which is platform-dependent. A file written with `FileWriter` on Windows and read with `FileReader` on Linux may produce corrupted `?` characters. Always use `StandardCharsets.UTF_8` or the appropriate charset in every I/O call.
+- **Always buffer I/O streams** — Reading one byte at a time from a file causes a system call per byte, and with 1 billion system calls per GB, the user-kernel context switches dominate execution time. Wrapping with `BufferedInputStream` (default 8KB buffer) reduces system calls by a factor of 8192 and can turn a 45-minute operation into a sub-minute one.
+- **Prefer NIO.2 Path and Files over legacy java.io.File** — `File` has inconsistent error handling (returning `boolean` instead of throwing `IOException`), no support for symbolic links, and unreliable `delete()` behavior. `Path` is immutable and thread-safe, supports `resolve()`, `relativize()`, symbolic links, and works with `Files` methods that throw specific exception subclasses.
+- **Use Files.lines() for large files and Files.readString() for small files** — `Files.readAllLines()` loads the entire file into a `List<String>` — for a 2GB log file with 20 million lines, that is 20 million `String` objects that will cause `OutOfMemoryError`. `Files.lines()` returns a lazy `Stream<String>` that reads lines on demand with memory proportional to the largest line.
+- **Use FileChannel.transferTo() for zero-copy file transfers** — Copying a file with `read()` and `write()` requires four kernel crossings per chunk. `transferTo()` uses `sendfile()` — data moves directly between file descriptors within the kernel, eliminating all user-space copies and context switches. For a 1GB file, this is 10-50x faster than the traditional read-write loop.
+- **Use try-with-resources for every I/O resource** — Unclosed file handles accumulate until the process hits the OS's file descriptor limit (typically 1024 on Linux), causing all subsequent file operations to fail with `Too many open files`. Every `Files.lines()` call must be wrapped: `try (Stream<String> lines = Files.lines(path)) { ... }`.
+- **Use DataInputStream for binary data with known structure** — The `readFully()` method guarantees that the requested number of bytes is read or throws `EOFException`, unlike `InputStream.read(byte[])` which may return fewer bytes. For network protocols and binary file formats, `readInt()`, `readLong()`, and `readUTF()` handle byte ordering and framing correctly.
+- **Use memory-mapped files for random-access operations on large files** — `FileChannel.map()` maps a file region into virtual memory, and the OS manages the page cache, keeping frequently accessed pages in physical memory. For a 10GB database file with random 4KB page accesses, memory-mapped I/O can be 10-100x faster than `RandomAccessFile`.

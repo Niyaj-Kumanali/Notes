@@ -7,6 +7,8 @@
 - **Definition:** Caching stores frequently accessed data in a temporary storage layer to serve future requests faster, reducing latency and load on the primary data store.
 - **Why It Exists:** Databases are slow relative to in-memory access; caching exploits temporal and spatial locality to avoid repeated expensive operations.
 - **Key Concepts:** **Cache Hit** (data found in cache), **Cache Miss** (data not found; fetch from origin), **TTL** (time-to-live expiration), **Eviction Policy** (LRU, LFU, FIFO, TinyLFU), **Cache Invalidation** (removing stale entries), **Cache Stampede** (thundering herd on expiration).
+- **Caching by Data Type** — Static data (CSS, JS, images) can be cached indefinitely with content hashing. Session data should use short TTLs (15-30 minutes) with sliding expiration. Database query results benefit from cache-aside with TTLs based on data volatility. API responses can be cached at the CDN level with stale-while-revalidate for dynamic content.
+- **Cache Consistency Models** — Strong consistency (write-through: every write goes to cache and DB synchronously, higher latency), Eventual consistency (TTL-based: stale data served until expiry, simple), and Read-your-writes (session-level consistency: user always sees their own writes immediately). Choose based on business requirements.
 
 ---
 
@@ -17,6 +19,8 @@
 - **Write-Through:** Data written to cache and DB synchronously. Strong consistency, higher write latency.
 - **Write-Behind (Write-Back):** Data written to cache immediately, asynchronously persisted to DB. Very low write latency, risk of data loss on cache failure.
 - **Refresh-Ahead:** Cache proactively refreshes entries before TTL expiry. Reduces misses for popular keys, wastes resources on unused entries.
+- **Cache Penetration** — Requests for non-existent keys always miss the cache and hit the database. Mitigation: cache negative results (short TTL of 30-60s), use a Bloom filter to check key existence before cache lookup, or validate input parameters before cache access.
+- **Cache Breakdown (Hot Key)** — A single key receives so many requests that the cache node handling it becomes saturated. Mitigation: local L1 cache on each application instance, replicate the hot key across multiple cache nodes (key:0, key:1), or use read replicas to distribute load.
 
 ```java
 // Cache-Aside with RedisTemplate
@@ -38,6 +42,9 @@ public Product getProduct(String productId) {
 - **Cache Stampede (Thundering Herd)** — Multiple concurrent requests hit DB on expiry. Fix with distributed locks or stale-while-revalidate.
 - **Infinite TTL** — Stale data lives forever. Always set TTL unless data is immutable.
 - **Caching Everything** — Cache only frequently-read, infrequently-written data.
+- **No Cache Key Namespacing** — Without prefixes like `product:v2:` or `user:{tenantId}:`, cache keys collide across environments or tenants. Use consistent key naming with version and tenant prefixes.
+- **Ignoring Serialization Overhead** — Storing complex objects in cache requires serialization/deserialization. Java serialization is slow; use JSON, Protocol Buffers, or Kryo for faster serialization. Measure the serialization cost as part of cache miss latency.
+- **Cache Warming on Every Deployment** — After a deployment, all L1 caches are cold, causing a thundering herd on Redis. Warm caches before accepting traffic using startup probes and pre-load scripts.
 
 ---
 
@@ -49,6 +56,8 @@ public Product getProduct(String productId) {
 - **Cache Warm-Up** — Pre-load popular entries on startup via `CommandLineRunner` with Redis pipelining.
 - **Cache Invalidation Patterns** — TTL-based (simplest), event-driven (Kafka/RabbitMQ), CDC (change-data-capture), version-based.
 - **Cache Poisoning** — Validate data before caching, sanitize keys, use tenant prefixes in multi-tenant systems.
+- **Geographic Cache Distribution** — For global applications, use a multi-region cache topology: write to local region's cache, replicate or invalidate across regions via a global event bus. Accept cross-region replication latency (typically 1-5 seconds). Use a global Redis Cluster or DynamoDB Accelerator (DAX) for active-active multi-region caching.
+- **Cache Monitoring and Observability** — Track cache hit ratio (per key pattern), eviction rate (should be near zero), average load time (miss penalty), cache size vs capacity, and network latency to cache servers. Alert on hit ratio drops below 85% and eviction rate spikes. Use Redis `INFO stats` and Caffeine `.recordStats()` for detailed metrics.
 
 ---
 
@@ -190,3 +199,5 @@ public class ProductCacheService {
 - **Monitor cache hit ratio as a critical SLO** — Cache hit ratio tells you if your caching strategy is working. Alert if the ratio drops below 90% (or your target). A sudden drop indicates a configuration issue, a deployment cleared the cache, or a code change altered the cache key pattern. Track per-cache-region ratios to identify specific problem areas.
 
 - **Use consistent cache key naming with version prefixes** — A cache key like `product:v2:{sku}` allows safe invalidation of all v2 keys when the data format changes. Include relevant dimensions in the key: tenant ID for multi-tenant systems, locale for internationalized content. Avoid excessively long keys (waste memory) — use hashed keys for long composite keys.
+- **Cache negative results to prevent cache penetration** — When a query returns no data (e.g., non-existent product ID), cache the "not found" result with a short TTL (30-60 seconds). This prevents repeated database lookups for the same invalid key. Without negative caching, an attack cycling through random IDs would bypass your cache entirely and overload the database.
+- **Use local (L1) caches to protect Redis from hot keys** — A single hot key in Redis can saturate a CPU core on the Redis node, degrading all traffic to that node. Adding a local Caffeine cache in each application instance absorbs 90%+ of reads for the hot key. The local cache has a shorter TTL than Redis to stay fresh. This pattern is essential for viral content, trending products, and flash sale items.

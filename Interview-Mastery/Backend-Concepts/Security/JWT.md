@@ -7,6 +7,8 @@
 - **Definition:** JWT (RFC 7519) is a compact, URL-safe token format for securely transmitting claims between parties as a JSON object, digitally signed or encrypted.
 - **Why It Exists:** Enables stateless authentication — servers validate tokens locally without a session store, making JWTs ideal for distributed systems, microservices, and OAuth 2.0.
 - **Key Concepts:** **Header.Payload.Signature** (three dot-separated base64url-encoded parts), **JWS** (signed — ensures integrity), **JWE** (encrypted — ensures confidentiality), **Claims** (sub, iss, aud, exp, iat, nbf, jti), **JWKS** (JSON Web Key Set for public key distribution), **Algorithm Confusion Attack** (attacker changes alg from RS256 to HS256 using public key as secret).
+- **Token Binding** — Binds a JWT to a specific client by including a hash of the client's TLS certificate (`cnf` claim) or a DPoP public key, preventing token replay if the token is stolen from a different device or IP.
+- **Performance Characteristics** — JWT validation with cached JWKS takes <1ms locally vs 30-50ms for opaque token introspection. The trade-off is larger token size (typically 1-2KB vs 20-30 bytes for opaque) and inability to instantly revoke without server-side checks.
 
 ---
 
@@ -16,6 +18,8 @@
 - **Signing Algorithms:** **HS256** (HMAC symmetric — shared secret, simple but harder to manage across services). **RS256** (RSA asymmetric — public/private key pair, standard for distributed systems). **ES256** (ECDSA — faster than RSA). **EdDSA** (Ed25519 — high security and performance).
 - **Validation Process:** Parse token → Decode header → Verify algorithm (reject `none`) → Fetch signing key (JWKS or local) → Verify signature → Validate claims: `exp` (future), `nbf` (past), `iss` (matches), `aud` (includes this service), `iat` (reasonable) → Check blacklist by `jti`.
 - **JWT vs Opaque Tokens:** JWT is self-contained (local validation, larger size, hard to revoke). Opaque tokens are references (requires introspection endpoint, small, instant revocation).
+- **Token Binding with DPoP** — DPoP (Demonstration of Proof-of-Possession) binds a JWT to a specific client key pair. The client proves possession of the private key on every request. A stolen JWT is useless without the corresponding private key. DPoP is recommended by OAuth 2.1 for high-security scenarios.
+- **Claim Validation Best Practices** — Always validate `exp` (reject expired), `nbf` (reject early), `iss` (must match expected issuer), `aud` (must include this service's identifier), and `iat` (reject if too far in past or future). Use a configurable clock skew window of 30-60 seconds. Validate `jti` uniqueness for replay detection in high-security systems.
 
 ```java
 // JWT generation with RS256
@@ -37,6 +41,8 @@ String token = Jwts.builder()
 - **Not Validating Algorithm** — Vulnerable to algorithm confusion attacks. Whitelist expected algorithms.
 - **Including Sensitive Data in Payload** — Payload is base64 encoded, not encrypted. Never include passwords/PII.
 - **Long Expiry Without Refresh Rotation** — Increased theft window. Use 15-min access tokens with rotating refresh tokens.
+- **Not Setting an Appropriate `aud` Claim** — Without audience validation, a token issued for one service can be used against any other service. Always include and validate the `aud` claim to restrict token usage to the intended recipient.
+- **Hardcoding Secrets in Source Code** — Committing JWT signing secrets or private keys to version control exposes the entire authentication system. Use environment variables, secrets managers (Vault, AWS Secrets Manager), or JWKS endpoints for key distribution.
 
 ---
 
@@ -48,6 +54,8 @@ String token = Jwts.builder()
 - **Token Blacklist:** Store `jti` in Redis with TTL matching token expiry. On logout or compromise, add to blacklist. Check before each request.
 - **Algorithm Whitelist:** Accept only expected algorithms (e.g., RS256, ES256). Reject `none`, HS256 if you use asymmetric keys.
 - **Clock Skew:** Allow configurable clock skew (typically 30-60 seconds) for `exp` and `nbf` validation to handle time differences across servers.
+- **Token Exchange (RFC 8693)** — Enables a service to exchange one JWT for another with different claims or audience. Useful for service-to-service delegation where Service A has a token for its audience but needs to call Service B with a token scoped to B's audience.
+- **Key Rotation Automation** — Automate key rotation by publishing new keys to JWKS before the old keys expire. Use a grace period where both old and new keys are valid for verification. Monitor JWKS fetch rates to ensure all clients have picked up the new key before deactivating the old one.
 
 ---
 
@@ -154,3 +162,5 @@ String token = Jwts.builder()
 - **Cache JWKS aggressively but honor cache headers** — JWKS validation is the critical path for every authenticated request. Cache JWKS responses for at least 1 hour (or respect `Cache-Control` and `Expires` headers). This eliminates the JWKS fetch latency from the critical path. The trade-off: key rotation takes up to 1 hour to propagate. Mitigation: add new keys to JWKS 24 hours before activating them (publish, wait, then sign). Monitor JWKS fetch rates to detect stale caches.
 
 - **Validate JWT claims in a centralized library, not per-service** — Each microservice reimplementing JWT validation introduces inconsistency and bugs. Create a shared JWT validation library (internal Maven/Gradle dependency) that all services use. It handles: algorithm whitelist, JWKS fetching and caching, claim validation (exp, nbf, iss, aud), blacklist checking, and role extraction. Changes to token strategy require changing only one library version, not 20 services.
+- **Use short access token TTLs (15 minutes or less) as a defense-in-depth measure** — Even with perfect implementation, a stolen JWT gives the attacker full access until expiry. Short TTLs minimize the damage window. Combine with rotating refresh tokens for seamless user experience. For high-security systems, use 5-minute access tokens with token binding (DPoP) so a stolen token is unusable from a different device.
+- **Never pass external JWTs to internal services without validation and translation** — A third-party JWT may have claims that overlap with your internal claim names (e.g., `roles`, `admin`). Always validate external tokens at the API gateway, translate claims to your internal format, and issue a fresh internal JWT. This prevents claim collision attacks where an attacker crafts a third-party token with malicious claim values.

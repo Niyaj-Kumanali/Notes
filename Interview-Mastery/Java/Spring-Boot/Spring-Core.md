@@ -6,184 +6,177 @@
 
 **Spring Core** is the foundation module of the Spring Framework that provides the **Inversion of Control (IoC)** container and **Dependency Injection (DI)** capabilities. It is responsible for managing the complete lifecycle of Java objects — from instantiation to destruction — so that developers can focus on business logic rather than object wiring.
 
-### Key Concepts:
+### Inversion of Control (IoC)
 
-1. **Inversion of Control (IoC)**:
+Traditional applications create their own objects using `new`. With IoC, the **Spring container** creates and manages objects, then **injects** them where needed. This shifts control from the application to the container.
 
-   - Traditional applications create their own objects using `new`. With IoC, the **Spring container** creates and manages objects, then **injects** them where needed. This shifts control from the application to the container.
-   - Example of traditional vs IoC approach:
+Example of traditional vs IoC approach:
 
-       ```java
-       // Traditional: code creates dependencies
-       public class OrderService {
-           private InventoryService inventory = new InventoryService();
-           private PaymentGateway gateway = new StripeGateway();
-       }
+```java
+// Traditional: code creates dependencies
+public class OrderService {
+    private InventoryService inventory = new InventoryService();
+    private PaymentGateway gateway = new StripeGateway();
+}
 
-       // IoC: container injects dependencies
-       @Service
-       public class OrderService {
-           private final InventoryService inventory;
-           private final PaymentGateway gateway;
+// IoC: container injects dependencies
+@Service
+public class OrderService {
+    private final InventoryService inventory;
+    private final PaymentGateway gateway;
 
-           public OrderService(InventoryService inventory, PaymentGateway gateway) {
-               this.inventory = inventory;
-               this.gateway = gateway;
-           }
-       }
-       ```
+    public OrderService(InventoryService inventory, PaymentGateway gateway) {
+        this.inventory = inventory;
+        this.gateway = gateway;
+    }
+}
+```
 
-2. **IoC Container Types**:
+### IoC Container Types
 
-   - **`BeanFactory`** — The most basic container. It instantiates beans **lazily** (only when requested). Suitable for resource-constrained environments like mobile devices.
-   - **`ApplicationContext`** — The full-featured container built on `BeanFactory`. It provides **eager singleton initialization**, **event publishing**, **internationalization (i18n)** via `MessageSource`, and **AOP integration**. This is what you should use in almost all cases.
-   - **`ConfigurableApplicationContext`** — Extends `ApplicationContext` with lifecycle methods like `refresh()`, `close()`, and `registerShutdownHook()`.
-   - **`WebApplicationContext`** — Web-aware variant with additional scopes: `request`, `session`, `application`, and `websocket`.
+- **`BeanFactory`** — The most basic container. It instantiates beans **lazily** (only when requested). Suitable for resource-constrained environments like mobile devices, but lacks enterprise features.
+- **`ApplicationContext`** — The full-featured container built on `BeanFactory`. It provides **eager singleton initialization**, **event publishing**, **internationalization (i18n)** via `MessageSource`, and **AOP integration**. This is what you should use in almost all cases.
+- **`ConfigurableApplicationContext`** — Extends `ApplicationContext` with lifecycle methods like `refresh()`, `close()`, and `registerShutdownHook()`. Used for programmatic context management.
+- **`WebApplicationContext`** — Web-aware variant with additional scopes: `request`, `session`, `application`, and `websocket`. Used in Spring MVC and Spring Boot web applications.
 
-3. **Bean Scopes**:
+### Bean Scopes
 
-   - **`singleton`** — One instance per Spring container. All requests for the same bean ID return the same object. This is the default scope.
-   - **`prototype`** — A new instance is created every time the bean is injected or requested.
-   - **`request`** — One instance per HTTP request. Only valid in web-aware contexts.
-   - **`session`** — One instance per HTTP session.
-   - **`application`** — One instance per `ServletContext`.
-   - **`websocket`** — One instance per WebSocket session.
+- **`singleton`** — One instance per Spring container. All requests for the same bean ID return the same object. This is the default scope and the most memory-efficient.
+- **`prototype`** — A new instance is created every time the bean is injected or requested. Use for stateful beans where each caller needs a fresh instance.
+- **`request`** — One instance per HTTP request. Only valid in web-aware contexts like Spring MVC.
+- **`session`** — One instance per HTTP session. Useful for user-specific state that persists across requests.
+- **`application`** — One instance per `ServletContext`. Similar to singleton but scoped to the web application context.
+- **`websocket`** — One instance per WebSocket session. Used for WebSocket-based applications.
 
-   ```java
-   @Service
-   @Scope("singleton")
-   public class CacheService { }
+```java
+@Service
+@Scope("singleton")
+public class CacheService { }
 
-   @Component
-   @Scope("prototype")
-   public class TaskRunner { }
+@Component
+@Scope("prototype")
+public class TaskRunner { }
 
-   @Controller
-   @Scope("request")
-   public class RequestScopedController { }
-   ```
+@Controller
+@Scope("request")
+public class RequestScopedController { }
+```
 
-4. **ApplicationContext Initialization Sequence**:
+### ApplicationContext Initialization Sequence
 
-   The Spring container follows a well-defined startup sequence:
+The Spring container follows a well-defined startup sequence:
 
-   ```
-   1. Load configuration (XML, annotations, or Java config)
-   2. Scan for beans and read bean definitions
-   3. Resolve inter-bean dependencies
-   4. Register BeanPostProcessors
-   5. Instantiate and wire beans
-   6. Initialize eager singletons
-   7. Publish ContextRefreshedEvent
-   ```
+```
+1. Load configuration (XML, annotations, or Java config)
+2. Scan for beans and read bean definitions
+3. Resolve inter-bean dependencies
+4. Register BeanPostProcessors
+5. Instantiate and wire beans
+6. Initialize eager singletons
+7. Publish ContextRefreshedEvent
+```
 
-5. **Key Stereotype Annotations**:
+### Key Stereotype Annotations
 
-   - **`@Component`** — Generic stereotype for any Spring-managed bean.
-   - **`@Service`** — Specialization of `@Component` for service-layer beans.
-   - **`@Repository`** — Specialization for DAO/repository beans. Spring adds translation of persistence exceptions.
-   - **`@Controller`** — Specialization for web controller beans.
+- **`@Component`** — Generic stereotype for any Spring-managed bean. It is the base annotation that all other stereotypes are meta-annotated with.
+- **`@Service`** — Specialization of `@Component` for service-layer beans. It adds semantic meaning and makes the layer intent clear.
+- **`@Repository`** — Specialization for DAO/repository beans. Spring adds translation of persistence exceptions (e.g., `DataAccessException`) automatically.
+- **`@Controller`** — Specialization for web controller beans in Spring MVC. Used with request mapping annotations to handle HTTP requests.
 
 ---
 
 ## Core Concepts
 
-### 1. Dependency Injection via Java Configuration
+### Dependency Injection via Java Configuration
 
-   Java configuration uses `@Configuration` classes with `@Bean` methods to declare beans:
+Java configuration uses `@Configuration` classes with `@Bean` methods to declare beans:
 
-   ```java
-   @Configuration
-   @ComponentScan(basePackages = "com.example.service")
-   @PropertySource("classpath:application.properties")
-   public class AppConfig {
+```java
+@Configuration
+@ComponentScan(basePackages = "com.example.service")
+@PropertySource("classpath:application.properties")
+public class AppConfig {
 
-       @Bean
-       @Scope("prototype")
-       public TaskRunner taskRunner() {
-           return new TaskRunner();
-       }
+    @Bean
+    @Scope("prototype")
+    public TaskRunner taskRunner() {
+        return new TaskRunner();
+    }
 
-       @Bean
-       public DataSource dataSource(
-               @Value("${db.url}") String url,
-               @Value("${db.user}") String user,
-               @Value("${db.password}") String password) {
-           return DataSourceBuilder.create()
-               .url(url)
-               .username(user)
-               .password(password)
-               .build();
-       }
-   }
-   ```
+    @Bean
+    public DataSource dataSource(
+            @Value("${db.url}") String url,
+            @Value("${db.user}") String user,
+            @Value("${db.password}") String password) {
+        return DataSourceBuilder.create()
+            .url(url)
+            .username(user)
+            .password(password)
+            .build();
+    }
+}
+```
 
-### 2. The Bean Processing Pipeline
+### The Bean Processing Pipeline
 
-   Every bean goes through a detailed lifecycle pipeline:
+Every bean goes through a detailed lifecycle pipeline:
 
-   ```
-   Bean definition loaded
-       ↓
-   BeanFactoryPostProcessor (modify bean definitions)
-       ↓
-   Instantiation (constructor or factory method)
-       ↓
-   Populate properties (setters / @Autowired fields)
-       ↓
-   Aware interfaces (BeanNameAware, ApplicationContextAware, etc.)
-       ↓
-   BeanPostProcessor#postProcessBeforeInitialization
-       ↓
-   @PostConstruct / InitializingBean / init-method
-       ↓
-   BeanPostProcessor#postProcessAfterInitialization
-       ↓
-       → Bean is ready for use
-       ↓
-   @PreDestroy / DisposableBean / destroy-method
-   ```
+```
+Bean definition loaded
+    ↓
+BeanFactoryPostProcessor (modify bean definitions)
+    ↓
+Instantiation (constructor or factory method)
+    ↓
+Populate properties (setters / @Autowired fields)
+    ↓
+Aware interfaces (BeanNameAware, ApplicationContextAware, etc.)
+    ↓
+BeanPostProcessor#postProcessBeforeInitialization
+    ↓
+@PostConstruct / InitializingBean / init-method
+    ↓
+BeanPostProcessor#postProcessAfterInitialization
+    ↓
+    → Bean is ready for use
+    ↓
+@PreDestroy / DisposableBean / destroy-method
+```
 
-### 3. Configuration Approaches
+### Configuration Approaches
 
-   - **XML-based configuration** — Beans defined in `applicationContext.xml`. Still supported but legacy.
-   - **Annotation-based configuration** — `@Component`, `@Service`, `@Repository`, `@Controller` with component scanning.
-   - **Java-based configuration** — `@Configuration` classes with `@Bean` methods. This is the modern, type-safe approach preferred in Spring Boot.
+- **XML-based configuration** — Beans defined in `applicationContext.xml`. Still supported but legacy and not type-safe. Use only for gradual migration.
+- **Annotation-based configuration** — `@Component`, `@Service`, `@Repository`, `@Controller` with component scanning. Convenient but less explicit about bean wiring.
+- **Java-based configuration** — `@Configuration` classes with `@Bean` methods. This is the modern, type-safe approach preferred in Spring Boot. It is refactorable and keeps bean definitions close to the code.
 
-### 4. Dependency Injection Mechanisms
+### Dependency Injection Mechanisms
 
-   - **Constructor injection** — Dependencies provided via constructor arguments. Best for required dependencies. Beans are immutable and always fully initialized.
-   - **Setter injection** — Dependencies set via setter methods. Best for optional dependencies with defaults.
-   - **Field injection** — Dependencies injected directly into fields via reflection. Avoid in production code — it hides dependencies and makes testing harder.
+- **Constructor injection** — Dependencies provided via constructor arguments. Best for required dependencies. Beans are immutable and always fully initialized. This is the recommended approach.
+- **Setter injection** — Dependencies set via setter methods. Best for optional dependencies with defaults that can be changed after construction.
+- **Field injection** — Dependencies injected directly into fields via reflection. Avoid in production code — it hides dependencies, prevents immutability, and makes testing harder.
 
-### 5. Key Annotations Reference
+### Key Annotations Reference
 
-   - **`@Configuration`** — Marks a class as a source of bean definitions.
-   - **`@Bean`** — Indicates that a method produces a bean to be managed by Spring.
-   - **`@Autowired`** — Marks a constructor, field, or setter for automatic dependency injection.
-   - **`@Value`** — Injects values from properties files, environment variables, or SpEL expressions.
-   - **`@Scope`** — Defines the scope of a bean.
-   - **`@Lazy`** — Defers bean initialization until first use.
-   - **`@Primary`** — Indicates the preferred bean when multiple candidates of the same type exist.
-   - **`@Qualifier`** — Specifies which bean to inject by name when multiple candidates exist.
+- **`@Configuration`** — Marks a class as a source of bean definitions. Enables CGLIB proxying for inter-bean reference interception.
+- **`@Bean`** — Indicates that a method produces a bean to be managed by Spring. The method's return type defines the bean type.
+- **`@Autowired`** — Marks a constructor, field, or setter for automatic dependency injection. Since Spring 4.3, optional on single-constructor beans.
+- **`@Value`** — Injects values from properties files, environment variables, or SpEL expressions. Supports default values with colon syntax.
+- **`@Scope`** — Defines the scope of a bean (singleton, prototype, request, session, etc.).
+- **`@Lazy`** — Defers bean initialization until first use. Useful for expensive beans not always needed.
+- **`@Primary`** — Indicates the preferred bean when multiple candidates of the same type exist.
+- **`@Qualifier`** — Specifies which bean to inject by name when multiple candidates exist.
 
 ---
 
 ## Common Mistakes
 
-1. **Using field injection in production code** — Dependencies are hidden, making the class harder to test and impossible to instantiate outside the container. Always prefer constructor injection.
-
-2. **Not specifying `@Qualifier` when multiple beans of the same type exist** — Spring throws `NoUniqueBeanDefinitionException`. Use `@Primary` for a default or `@Qualifier` for explicit selection.
-
-3. **Using `BeanFactory` when `ApplicationContext` is needed** — `BeanFactory` lacks event support, i18n, and AOP integration. Use `ApplicationContext` unless you have a specific reason not to.
-
-4. **Circular dependencies with constructor injection** — Spring cannot resolve circular constructor dependencies and throws `BeanCurrentlyInCreationException`. Fix by extracting a shared interface, using `@Lazy` on one side, or restructuring the code.
-
-5. **Heavy initialization in singleton beans** — Slows application startup. Consider `@Lazy` for expensive beans or move heavy initialization to `@PostConstruct`.
-
-6. **Forgetting `@Configuration` on Java config classes** — Without it, `@Bean` methods are not intercepted and return new instances every time instead of singleton beans.
-
-7. **Misunderstanding proxy behavior** — Self-invocation (calling a `@Transactional` method from within the same class) bypasses the proxy, so annotations like `@Transactional` and `@Cacheable` don't work.
+- **Using field injection in production code** — Dependencies are hidden, making the class harder to test and impossible to instantiate outside the container. Always prefer constructor injection for explicit and testable code.
+- **Not specifying `@Qualifier` when multiple beans of the same type exist** — Spring throws `NoUniqueBeanDefinitionException`. Use `@Primary` for a default or `@Qualifier` for explicit selection to avoid ambiguity.
+- **Using `BeanFactory` when `ApplicationContext` is needed** — `BeanFactory` lacks event support, i18n, and AOP integration. Use `ApplicationContext` unless you have a specific resource-constrained reason not to.
+- **Circular dependencies with constructor injection** — Spring cannot resolve circular constructor dependencies and throws `BeanCurrentlyInCreationException`. Fix by extracting a shared interface, using `@Lazy` on one side, or restructuring the code.
+- **Heavy initialization in singleton beans** — Slows application startup significantly. Consider `@Lazy` for expensive beans or move heavy initialization to `@PostConstruct` or `@EventListener(ContextRefreshedEvent.class)`.
+- **Forgetting `@Configuration` on Java config classes** — Without it, `@Bean` methods are not intercepted and return new instances every time instead of singleton beans from the container.
+- **Misunderstanding proxy behavior** — Self-invocation (calling a `@Transactional` method from within the same class) bypasses the proxy, so annotations like `@Transactional` and `@Cacheable` don't work.
 
 ---
 
