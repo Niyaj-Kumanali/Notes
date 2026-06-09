@@ -6,6 +6,8 @@
 
 - **Purpose** — Lambda expressions, introduced in Java 8, are anonymous functions that can be treated as first-class values — passed as arguments to methods, returned from methods, and stored in variables. They enable declarative, functional programming styles and are the foundation for the Stream API, `Optional`, and `CompletableFuture`.
 - **Before Lambdas** — Java required verbose anonymous inner classes to achieve behavior parameterization, making functional patterns like callbacks, event handlers, and sorting unnecessarily verbose with boilerplate class declarations.
+
+  **Why not just sugar-coat anonymous classes?** Early prototypes compiled lambdas to anonymous inner classes, but this approach had three fatal flaws: (1) each lambda produced a separate `.class` file, increasing deployment size and classloader pressure; (2) the compiler could not optimize across anonymous class boundaries; (3) every evaluation allocated a new instance on the heap. The `invokedynamic` approach (introduced in Java 7 for dynamic languages) solved all three — it generates the implementation class once at runtime, caches it permanently, and allocates zero objects for non-capturing lambdas. **Why capture-by-value for local variables?** Local variables live on the stack. If a lambda escapes to another thread, the creating method's stack frame is gone. Copying the value into the lambda's heap object is the only safe approach — capture-by-reference would leave a dangling pointer. This is why captured local variables must be effectively final: if they could change, the lambda's copy and the original would diverge, violating the programmer's expectation.
 - **Syntax Forms** — Full block syntax `(parameters) -> { body; return value; }`, single-expression syntax `param -> expression` where the expression is automatically returned, and no-parameter syntax `() -> expression`. They are used throughout the JDK for collection operations, stream pipelines, optional fallbacks, async callbacks, and thread creation.
 
 ### Syntax Examples
@@ -77,6 +79,8 @@ Function<String, Integer> f = s -> Integer.parseInt(s);
 - **Instance Fields** — Instance fields are captured via the `this` reference, meaning the lambda holds a reference to the enclosing object and can access its mutable state directly. Static fields have no capture cost.
 - **Memory Implications** — Capturing local variables copies their values into the lambda's heap-allocated implementation object, while capturing instance fields prevents the enclosing object from being garbage collected as long as the lambda is reachable — a common source of memory leaks.
 
+  **Why effectively-final?** The rule exists because local variables live on the stack. If a lambda escapes to another thread, the creating method's stack frame is gone — a captured reference to a stack-allocated variable would dangle. Java's designers chose capture-by-value (copy the bits into the lambda's heap object) over capture-by-reference. The effectively-final constraint is the logical consequence: if the local variable could change, the lambda's copy and the original would diverge, creating a correctness hole that cannot be patched without runtime checks. Instance fields avoid this because they live on the heap — `this` is always accessible through the lambda's reference to the enclosing object.
+
 ```java
 public class Example {
     private int instanceField = 42;
@@ -120,6 +124,11 @@ public class ScopeExample {
 - **Runtime Behavior** — At runtime, the first invocation of the lambda triggers the bootstrap method, which uses `MethodHandle` (not reflection) to generate the lambda's implementation class on the fly, creating a `CallSite` that is permanently linked to the generated implementation.
 - **Performance** — Subsequent invocations of the same lambda call point call the linked method handle directly without any bootstrap overhead, reflection, or intermediate allocation. Non-capturing lambdas are generated once and cached forever.
 - **Benefits** — No separate `.class` files per lambda (reducing deployment size and classloader pressure), the implementation is generated once and cached, and the memory footprint is significantly lower than anonymous inner classes.
+
+  **Why `invokedynamic` and not just compile to anonymous classes?** The Java 8 team evaluated three alternatives:
+  1. **Anonymous class compilation** — Each lambda produces a `.class` file, loaded and verified by the classloader. Cost: one class file, class-loading overhead, and one new heap instance per evaluation (even for stateless lambdas). Plus, class definition is forever — no JVM can unload a class once loaded.
+  2. **Reflection-based proxies** — `Proxy.newProxyInstance` generates proxy classes dynamically but uses reflection for dispatch (slower than direct invocation) and cannot be inlined by the JIT.
+  3. **`invokedynamic` with `LambdaMetafactory`** — The call site is linked once at runtime using `MethodHandle`, then the JIT can inline it as aggressively as any regular method call. Non-capturing lambdas allocate zero bytes. The strategic advantage: the `LambdaMetafactory` itself is an implementation detail that can be replaced in future JDK releases without recompiling source code — exactly what happened in JDK 15-17 when the inner `InnerClassLambdaMetafactory` was significantly optimized.
 
 ```
 Source: Supplier<String> s = () -> "hello";
@@ -182,6 +191,8 @@ Class::new                  // ArrayList::new      () -> new ArrayList()
 - **Mutating Captured Local Variables** — Attempting to mutate a captured local variable causes a compile-time error because the variable must be effectively final. If you need mutable local state inside a lambda, use a mutable container like an array with one element or an `AtomicReference`.
 - **Checked Exceptions in Lambdas** — Calling a method that throws a checked exception inside a standard functional interface lambda produces a compile error because interfaces like `Function<T,R>` do not declare checked exceptions. Workarounds include wrapping in a try-catch that rethrows as `RuntimeException`, creating a custom `@FunctionalInterface` that declares the checked exception, or using a utility method that adapts a throwing function.
 - **Overloaded Method Ambiguity** — Using lambdas with overloaded methods that take different functional interfaces causes ambiguity that the compiler cannot resolve. The fix is to rename one method, cast the lambda, or assign the lambda to a typed variable before passing it.
+- **Capturing `this` in Hot Path** — A lambda like `items.forEach(item -> process(item))` inside an instance method captures `this` implicitly because `process()` is an instance method. Each invocation allocates a new lambda object holding a reference to the enclosing object, preventing GC of that object until the lambda is unreachable. In a hot loop called millions of times, this means millions of allocations holding references to the same object. The fix: extract to a static method and pass state explicitly: `items.forEach(item -> processHelper(config, item))`.
+- **Shared Mutable State in Parallel Streams** — `list.parallelStream().forEach(x -> counter++)` has a data race on `counter` and the lambda itself is not the problem — it's the shared mutable state. The concrete mistake is assuming the lambda's isolation implies thread safety. The fix is to use `map()` and `collect()` for stateless accumulation: `list.parallelStream().collect(Collectors.summingInt(x -> 1))`.
 
 ---
 
@@ -209,6 +220,8 @@ public class PricingEngine {
 
 Each pricing strategy is a `Function<Double, Double>` that can be tested independently, and new strategies are added by inserting a new entry into the map with no switch statements or if-else chains required. The `CLEARANCE` strategy is a non-capturing lambda that the JVM caches as a single static instance with zero allocation per invocation, while `COMPETITOR_MATCH` captures the `competitorService` instance (via `this`) and the `productId` parameter. This pattern demonstrates the power of treating functions as values — the pricing logic becomes data that can be configured, tested, and composed.
 
+**Why this approach?** A traditional strategy pattern using an interface with implementations (PercentageMarkupStrategy, CompetitorMatchStrategy, etc.) would require a class per strategy, a switch statement to select the right one, and class-loading overhead for every strategy. The `Map<String, Function>` approach eliminates all boilerplate around the strategy pattern — adding a new strategy is a single-line map insertion instead of a new class file. The trade-off is that complex strategies with mutable state or multi-step calculations need a named class; but for pure mathematical transformations, lambdas are both more concise and more performant (the JVM caches non-capturing strategies permanently).
+
 ### Scenario 2: Event Bus with Listener Filtering
 
 A GUI framework dispatches mouse events to registered listeners, where each listener specifies a filter predicate (e.g., only left-click events in a specific region) and a handler that processes matching events. Using lambdas avoids creating anonymous inner classes for each listener registration, reducing memory pressure in UI-heavy applications.
@@ -230,6 +243,8 @@ public class EventBus {
 ```
 
 Each `onEvent()` call creates a capturing lambda that holds references to `filter` and `handler` — the lambda captures both parameters because they are used in its body and they are effectively final. The `CopyOnWriteArrayList` ensures thread-safe iteration when dispatching events to listeners, providing lock-free reads at the cost of copying the array on each listener registration. If `onEvent()` is called in a hot loop (e.g., registering hundreds of listeners per frame), each call allocates a new lambda object — a cost that is acceptable for the readability and expressiveness it provides over anonymous inner classes.
+
+**Why this approach?** The alternative — a dedicated `FilteredListener` class implementing `Consumer<MouseEvent>` with filter and handler as constructor parameters — would produce the same memory footprint (one instance per registration) without the lambda's caching advantage for non-capturing cases. The lambda version is preferred because it reads as a declarative rule: "on left-click in this region, do this action" — the filter and handler appear inline where the listener is registered, not in a separate file. The `CopyOnWriteArrayList` is chosen over synchronized blocks because event dispatch is read-heavy (many dispatches per registration); copy-on-write makes reads lock-free at the cost of making registration O(n) — a correct trade-off when registration is infrequent.
 
 ### Scenario 3: Microservice Request Circuit Breaker
 
@@ -269,6 +284,8 @@ CircuitBreaker cb = new CircuitBreaker(
 ```
 
 The lambdas capture the `order` variable (effectively final) and the `paymentClient` reference (an instance field captured via `this`). This capturing behavior is acceptable because the circuit breaker is created once per request, not in a hot loop — the allocation cost is negligible compared to the downstream HTTP call. The key design insight is knowing when capturing is acceptable (per-request framework objects) versus problematic (hot-loop iteration where millions of lambdas would be allocated per second).
+
+**Why this approach?** A circuit breaker implemented as an abstract class with template methods (abstract `doPrimary()` and `doFallback()`) would require a subclass per call site, each with its own `.class` file, or an anonymous inner class that allocates regardless of capture semantics. The `Supplier<Response>` interface is the minimal contract — the circuit breaker does not need to know how the primary or fallback works, only that they produce responses. Lambdas let the caller supply behavior inline at construction, keeping the circuit breaker generic and reusable. The allocation cost of the lambdas (a few objects per request) is dwarfed by the HTTP connection overhead, so optimizing the lambda allocation here would be premature.
 
 ---
 

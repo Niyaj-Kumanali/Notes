@@ -9,6 +9,8 @@
 - **When to Use** — Use streams when processing collections with multiple chained operations, when readability matters more than raw iteration speed, and when you want effortless parallelism. Avoid streams for simple loops of three lines or fewer, performance-critical hot paths where allocation overhead matters, checked-exception-throwing lambdas, and very large datasets that do not fit in memory.
 - **Before Streams** — Data processing meant writing imperative loops with mutable accumulators, boilerplate variables, and error-prone manual parallelism. Streams let you specify what computation to perform declaratively, while the runtime handles iteration, short-circuiting, laziness, and parallelism.
 
+  **Why internal iteration?** External iteration (the `for` loop) forces the caller to manage the loop variable, collection state, and termination condition — the caller owns the iteration and the caller must also own any optimizations. Internal iteration (streams) transfers control to the library, which can then fuse operations into a single pass, skip operations for short-circuiting, parallelize by splitting the spliterator, and eliminate intermediate collections. This inversion of control is the fundamental architectural shift that makes laziness, fusion, and parallelism possible without burdening the caller.
+
 ---
 
 ## Stream Pipeline Structure
@@ -175,6 +177,8 @@ Stream<Integer> boxed = intStream.boxed();
 - **Stream Fusion** — The JVM merges multiple adjacent intermediate operations into a single pass over the data. Instead of iterating once for `filter()`, collecting survivors, and iterating again for `map()`, the fused pipeline processes each element through both operations before moving to the next element.
 - **Performance Benefit** — Each element moves through the entire pipeline one at a time — `filter().map()` processes element 1 through filter, and if it passes, immediately through map, then element 2, and so on. This results in one pass instead of two, dramatically improving CPU cache locality by keeping each element in L1 cache across all operations.
 
+  **How fusion works internally** — Each intermediate operation returns a new `Stream` wrapping a `Sink` (a callback that receives elements). When the terminal operation starts, the sinks are composed into a chain — `filter()`'s sink checks the predicate and passes matching elements downstream, `map()`'s sink transforms and forwards, and `collect()`'s sink accumulates. The JIT then inlines this sink chain into a tight loop with no virtual dispatch overhead. This is why writing pipelines as many small operations (`filter().map().sorted()`) is not slower than a hand-written loop — the JIT fuses them into roughly the same machine code, while the hand-written loop cannot expose parallelism opportunities.
+
 ```java
 // Nothing happens here:
 Stream<String> stream = list.stream()
@@ -211,6 +215,8 @@ List<String> result = stream.toList();
 - **Stateful Lambdas in Parallel** — Using stateful lambdas in parallel streams causes non-deterministic race conditions because elements from different partitions are processed by different threads. A lambda like `.map(x -> { counter++; return process(x); })` has a data race on `counter`. All lambdas in stream pipelines should be stateless.
 - **Missing Primitive Streams** — Failing to use primitive streams for numeric data introduces significant performance overhead from autoboxing and object allocation. A `Stream<Integer>` processing 10 million values allocates 10 million `Integer` objects, causing GC pressure that can be 5-10x slower than the equivalent `IntStream`.
 - **Order Assumptions with parallelStream()** — Assuming that `parallelStream()` preserves encounter order or that `forEach()` processes elements in order is a common source of non-deterministic bugs. Use `forEachOrdered()` instead of `forEach()` if processing order matters, but be aware that ordering guarantees reduce parallel performance.
+- **sorted().findFirst() Instead of min()** — Calling `sorted().findFirst()` sorts the entire stream O(n log n) just to find the minimum element, which is O(n) with `min()` or `reduce()`. On a dataset of 10 million elements, the difference is 10 seconds of sorting versus 50ms of scanning. Similarly, `sorted().limit(k)` sorts all elements when a partial sort (O(n log k)) would suffice — use a priority queue or custom collector for top-k queries.
+- **null in flatMap()** — The function passed to `flatMap()` must never return null; doing so throws `NullPointerException` because `Stream` does not allow null elements. Always return `Stream.empty()` for the no-result case. If the upstream `map()` might produce null, filter before flatMapping: `.filter(Objects::nonNull).flatMap(Function.identity())`.
 
 ---
 
@@ -239,6 +245,8 @@ public class FraudDetectionPipeline {
 
 The stream of predicates is evaluated lazily — `findFirst()` is a short-circuit terminal operation that stops at the first matching rule, so for a transaction that triggers the velocity check, the remaining 19 rules are never evaluated. Each rule is individually testable, and the rule list is composable — adding a new rule is a one-line change in the `Stream.of()` call. For the full audit trail, simply change the terminal operation to `.filter(rule -> rule.test(tx)).collect(Collectors.toList())`, which evaluates all rules and collects the triggered ones.
 
+**Why this approach?** An imperative implementation would need a `for` loop over rules, a `break` statement for fail-fast, a `List<String>` to accumulate failures for auditing, and a `boolean` flag to track whether any rule triggered — four mutable state variables scattered across a single method. The stream version encodes these concerns in the choice of terminal operation: `findFirst()` for fail-fast, `collect(toList())` for full evaluation. No state, no branches, no break statements. This is the core value of the declarative model — the what (filter by condition) is separated from the how (short-circuit or full evaluation).
+
 ### Scenario 2: Data Warehouse ETL with Column Transformations
 
 A nightly batch job reads 50 million customer records from a staging database, normalizes phone numbers, validates email addresses, geocodes addresses via an external API, and writes the cleaned records to a data warehouse. The job must parallelize across available CPU cores and handle partial failures gracefully without crashing the entire batch.
@@ -257,6 +265,8 @@ public class CustomerETL {
 ```
 
 `parallelStream()` distributes CPU-bound normalization (phone format, email regex validation) across all available cores, processing batches in parallel via the common ForkJoinPool. `flatMap` is used for the geocode step because it may fail for some records (invalid address, API timeout) and returns `Stream.empty()` in those cases, gracefully excluding them from the output without crashing the pipeline. Each transformation is an independently testable method, and the pipeline is entirely declarative — no mutable accumulators, no explicit error handling, no looping constructs. For production robustness, consider wrapping the stream in a custom `Spliterator` that periodically persists processing progress to a database for checkpoint-based recovery.
+
+**Why this approach?** An imperative ETL would have a `for` loop with try-catch around each transformation, conditional logic for skipping failed records, and manual thread management for parallelism. The stream version eliminates the try-catch boilerplate by using `flatMap` with `Stream.empty()` on failure — failures are treated as "no result" rather than exceptions. This shifts error handling from exceptions (control flow) to data (empty stream elements), which is more predictable in parallel execution because exceptions in one partition can affect other partitions. The `Objects::nonNull` filter is a safety net that catches any nulls that slip through, making the pipeline robust without exception-handling code scattered through every transformation.
 
 ### Scenario 3: Real-Time Dashboard Aggregation
 

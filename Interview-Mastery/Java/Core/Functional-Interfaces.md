@@ -9,6 +9,8 @@
 - **Before Java 8** — Anonymous inner classes were the only way to pass behavior, requiring verbose boilerplate. Functional interfaces enable the lambda syntax, reducing ceremony and making behavior parameterization practical at scale.
 - **Standard Package** — The `java.util.function` package provides 43 standard functional interfaces covering most common use cases, so custom functional interfaces are rarely needed.
 
+  **Why 43?** The 43 interfaces come from a combinatorial design across four dimensions: function shape (Predicate, Consumer, Function, Supplier, UnaryOperator, BinaryOperator, BiPredicate, BiConsumer, BiFunction, plus ToXxx/XxxToXxx bridges), primitive specializations (int, long, double), arity (unary, binary), and source/target type (e.g. `ToIntFunction<T>`, `IntToLongFunction`). The number isn't arbitrary — it covers the intersection of all commonly needed conversion patterns in numeric processing. If you find yourself reaching for a custom interface, check the package first; there's a good chance it already exists under a different name.
+
 ```java
 @FunctionalInterface
 public interface Predicate<T> {
@@ -59,6 +61,8 @@ BinaryOperator<Integer> sum = (a, b) -> a + b;
 - **Purpose** — Primitive-specialized functional interfaces operate directly on `int`, `long`, and `double` values, completely avoiding the boxing and unboxing overhead inherent in using generic interfaces like `Predicate<Integer>`. A `Predicate<Integer>` autoboxes each primitive `int` to an `Integer` object consuming 16-28 bytes of heap per value.
 - **Performance** — The equivalent `IntPredicate` operates on raw `int` values with zero allocation, making it 5-10x faster in performance-critical numeric processing. Each primitive type has specializations for predicates, consumers, functions, suppliers, and operators.
 - **Naming Conventions** — Specializations follow naming like `IntPredicate`, `LongConsumer`, `DoubleFunction`, `ToIntFunction`, and `IntToDoubleFunction`. In hot paths processing millions of elements, the difference between `Predicate<Integer>` and `IntPredicate` can be 50ms versus noticeable GC pauses.
+
+  **Why only int, long, double?** These three types cover nearly all numeric processing use cases in server-side applications (counters, timestamps, floating-point calculations). Boolean, byte, short, char, and float are trivially autoboxed with negligible overhead — `Byte` carries the same 16-28 bytes as `Integer` in the heap, but byte-by-byte processing at scale is rare. The JDK designers chose the 80% case: `int` for general counters and indices, `long` for timestamps and large numbers, `double` for decimal math (and `float` is almost never preferred over `double` in business logic).
 
 ```java
 // Avoid — autoboxing overhead in hot paths
@@ -139,6 +143,8 @@ Runtime: LambdaMetafactory.metafactory()
 - **Neglecting Primitive Specializations** — Neglecting primitive specializations in hot paths causes invisible autoboxing overhead. `Predicate<Integer>` boxes every value, while `IntPredicate` avoids allocation entirely — in a stream processing 10 million integers, the difference is 280 MB of garbage versus zero.
 - **Checked Exceptions in Standard Interfaces** — Handling checked exceptions inside lambdas using standard functional interfaces is impossible because no standard interface declares checked exceptions. The common workaround of wrapping in try-catch and rethrowing as `RuntimeException` is acceptable, but the original exception is preserved as the cause.
 - **Overusing Composition** — Composing too many operations with `andThen()` or `compose()` reduces readability and makes debugging difficult because stack traces from composed functions do not identify which stage failed. Beyond 3-4 compositions, extract to named intermediate variables.
+- **Supplier Without Memoization in Hot Paths** — `stream.generate(() -> expensiveLoad())` calls `expensiveLoad()` on every invocation. If the value is stable across the stream, wrap the supplier with memoization: `Supplier<Data> memoized = Suppliers.memoize(() -> expensiveLoad())` (Guava) or a simple lazy initialization holder pattern. Otherwise the same expensive computation runs N times with no caching.
+- **Function<T, Boolean> Instead of Predicate<T>** — Both accept T and return a boolean-like value, but `Function<T, Boolean>` autoboxes the result (`boolean` → `Boolean`) and loses access to `and()`, `or()`, and `negate()` — the composition methods that make predicates composable. Prefer `Predicate<T>` whenever the semantics are testing a condition, not transforming a value.
 
 ---
 
@@ -178,6 +184,8 @@ engine.addRule(notEmpty.and(validEmail).and(notPwned));
 
 `Predicate.and()` short-circuits naturally — if the input is empty, `validEmail` and `notPwned` are never evaluated, preserving the fail-fast behavior. The `getFailures()` method uses a different terminal operation (`filter` + `collect`) to evaluate all rules and return every failure. Predicate composition allows building complex validation trees from simple, testable building blocks that are loaded dynamically from configuration.
 
+**Why this approach?** A traditional validation framework (like Hibernate Validator or Apache Commons Validator) requires annotations or XML configuration files, creating a compile-time binding between rules and fields. The `Predicate`-based approach makes validation rules first-class objects that can be stored in a database, swapped at runtime, and composed with boolean logic without any code generation or annotation processing. The trade-off is loss of declarative metadata (you cannot inspect a composed predicate to discover which rules it contains) — for scenarios where you need per-rule error messages or rule ordering, a wrapper class holding a `Predicate` plus metadata string is better: `record ValidationRule(String name, Predicate<String> condition, String message) {}`.
+
 ### Scenario 2: Pluggable Cache Loading Strategy
 
 A caching layer supports different loading strategies — load from a database, fetch from a remote API, or compute on the fly. Each strategy is a `Supplier<Data>` that the cache invokes when a key is missing. The strategy is chosen at configuration time, and the cache must guarantee that the supplier runs at most once per key even under concurrent access.
@@ -207,6 +215,8 @@ new CacheManager<>(apiLoader);
 
 The `Supplier<T>` abstracts the loading mechanism entirely — the cache manager has no knowledge of whether it is loading from a database, a remote API, or computing from scratch. Each supplier captures the specific dependencies it needs (database connection, REST client, computation parameters) and can be unit tested independently. The `computeIfAbsent` method guarantees the supplier runs at most once per key across all concurrent threads, making this pattern safe for high-concurrency environments.
 
+**Why this approach?** A traditional cache using an abstract `load()` method (Template Method pattern) would require a subclass per loading strategy, creating a `.class` file per strategy and a classloader binding at compile time. The `Supplier<T>` approach makes the loading strategy a constructor parameter — the cache manager is closed for modification, open for extension. The `computeIfAbsent` guarantee is critical: without it, two concurrent threads calling `get(missingKey)` would both invoke the supplier, wasting resources and potentially duplicating work or creating race conditions on the backing store.
+
 ### Scenario 3: Event Processing with Consumer Chain
 
 A monitoring system receives raw log events and processes them through a multistage pipeline: parse raw data, enrich with metadata, filter low-severity events, persist to the database, and send alerts for critical events. Each stage is a `Consumer<Event>` that can be composed into a single pipeline, and stages should be independently testable.
@@ -232,6 +242,8 @@ public class EventPipeline {
 ```
 
 `Consumer.andThen()` creates a composed consumer that executes all stages in order for each event. Each stage is a focused, independently testable consumer — you can test `parse` with a mock event and verify the parsed fields without involving the database. The `filter` stage uses `Consumer` as a side-effect operation by setting a `suppressed` flag on the event, which is appropriate here because we are mutating event state rather than transforming values. The pipeline introduces O(1) overhead regardless of the number of stages because `andThen()` creates a lightweight delegating wrapper, not a copy of the stages.
+
+**Why this approach?** A traditional event pipeline using a `List<Consumer<Event>>` with a for-loop would achieve the same result with more code and no composition readability benefit — the loop obscures the ordering guarantee that `andThen()` makes explicit. The `Consumer` chain is the right abstraction because every stage mutates the event in place (setting parsed data, suppression flag, etc.). If stages needed to produce new event objects from old ones, `Function<Event, Event>` would be more appropriate, avoiding mutable state entirely. Choosing `Consumer` over `Function` here signals that the pipeline is a side-effect chain, not a transformation pipeline.
 
 ---
 
@@ -386,6 +398,14 @@ Function<A, D> pipeline = step1.andThen(step2).andThen(step3);
 ```
 The traced wrapper preserves the original exception as the cause and adds contextual information about which function name and input caused the failure. Without tracing, a composition chain of five or more functions becomes nearly impossible to debug because the stack trace from a composed `Function` does not include which stage threw the exception. For production, consider AOP-based instrumentation or structured logging that records the pipeline stage with each invocation.
 
+**Q: A developer declares an interface `@FunctionalInterface interface Action { void execute(); }`. They add `boolean equals(Object obj)`, `int hashCode()`, and `String toString()` as default methods. Is it still a functional interface?**
+
+A: Yes — `Object` methods like `equals`, `hashCode`, and `toString` do not count when counting abstract methods for the SAM rule, even if declared explicitly in the interface. The JLS specifies that any public method declared in `Object` is excluded from the single-abstract-method count. This is why `Comparator<T>` is a functional interface despite declaring `boolean equals(Object obj)` alongside `int compare(T o1, T o2)` — `equals` is from Object and is ignored. However, if `Action` adds a non-Object abstract method like `void cleanup()`, it would no longer be a functional interface.
+
+**Q: A class overloads `void process(Predicate<String>)` and `void process(Function<String, Boolean>)`. Calling `process(s -> s.isEmpty())` fails to compile with an ambiguous reference error. Why?**
+
+A: Both `Predicate<String>` and `Function<String, Boolean>` have the same erased signature `(String) -> Object`, and the lambda body `s -> s.isEmpty()` matches both — it returns a `boolean` which can be autoboxed to `Boolean` for the `Function` variant. The compiler cannot decide which overload applies because both are equally specific. The fix is to avoid overloading methods with different functional interfaces that share the same shape (T → boolean-like). Use distinct method names: `void filter(Predicate<String>)` and `void transform(Function<String, Boolean>)`. This is a design-time constraint: functional interface overloading works only when the shapes are clearly different (e.g., `Consumer` vs `Supplier`).
+
 **Q: A `BiConsumer<HttpRequest, HttpResponse>` is used as a middleware handler. The first middleware modifies the request, passes it to the next, and modifies the response. The handler is: `(req, res) -> { audit.log(req); next.accept(req, res); encrypt(res); }`. What concurrency issues arise with this `BiConsumer` chain?**
 
 A: The `BiConsumer` captures `next` and `audit` via `this`, and when multiple requests are processed concurrently, `encrypt(res)` may modify the response while the next middleware is still reading or writing to it, creating a data race. The shared mutable `req` and `res` references violate the principle that each stage should produce new values rather than mutating shared state. Fix this by using `Function<HttpRequest, CompletableFuture<HttpResponse>>` where each stage produces a new, immutable response rather than mutating a shared reference:
@@ -431,3 +451,4 @@ In this functional pipeline, `encrypt()` receives the response from the previous
 - **Use Consumer exclusively for side effects, Function for transformations, Supplier for lazy values** — Each functional interface encodes intent in its type signature. A method accepting `Consumer<T>` should perform actions with side effects; a method accepting `Function<T,R>` should transform without side effects. Violating this convention violates the principle of least surprise.
 - **Avoid checked exceptions in functional interfaces** — Create a single `Unchecked` utility rather than a proliferation of custom interfaces for each exception type. One utility method `Function<T,R> unchecked(ThrowingFunction<T,R> fn)` covers all cases without requiring `ThrowingFunction`, `ThrowingPredicate`, `ThrowingConsumer`, and so on.
 - **Use BinaryOperator<T> over BiFunction<T,T,T>** — `BinaryOperator` additionally provides `minBy()` and `maxBy()` static methods and more clearly communicates reduction semantics. Similarly, prefer `UnaryOperator<T>` over `Function<T,T>` for same-type transformations because it provides `identity()` for no-op transformations.
+- **Test functional interfaces as you would any other behavior** — A lambda is an anonymous implementation; test it by exercising the functional interface through its SAM. For inline lambdas that are passed to methods, extract them to fields or factory methods so they can be unit tested: `private static final Predicate<String> IS_EMPTY = String::isEmpty;`. For composed predicates or functions, test each building block individually and then test the composition — a failure in a 5-way `andThen` chain is hard to attribute without isolated unit tests for each component. Mock libraries like Mockito can stub `Function.apply()` for integration tests, but prefer real lambda implementations in unit tests to catch logic errors.
