@@ -5,8 +5,14 @@
 ## Overview
 
 - **Definition:** Data structures organize and store data for efficient access. Algorithms are step-by-step procedures for solving problems. Together they form the foundation of efficient software.
+
 - **Why It Exists:** Without DSA, software is slow (searching 1M records takes minutes), resource-heavy (memory usage scales linearly), and unscalable (what works for 100 users fails for 100K).
-- **Key Concepts:** **Time Complexity** (how runtime grows — O(1), O(log n), O(n), O(n log n), O(n²)), **Space Complexity** (how memory grows), **Amortized Analysis** (average cost over a sequence), **Trade-offs** (time vs space, speed vs readability).
+
+- **Key Concepts:**
+  - **Time Complexity** — how runtime grows as input scales: O(1), O(log n), O(n), O(n log n), O(n²)
+  - **Space Complexity** — how memory usage grows with input size
+  - **Amortized Analysis** — average cost over a sequence of operations, not per-operation worst case
+  - **Trade-offs** — time vs space, speed vs readability, exactness vs approximation
 
 ---
 
@@ -14,7 +20,7 @@
 
 ### Asymptotic Analysis & Big O
 
-Big O describes the upper bound of runtime/memory growth as input size approaches infinity.
+Big O describes the upper bound of runtime or memory growth as input size approaches infinity. Constants and lower-order terms are dropped because at large n, they become irrelevant — an O(n) algorithm will always eventually outperform an O(n²) algorithm regardless of the constant factor.
 
 | Notation | Name | Example |
 |----------|------|---------|
@@ -25,12 +31,12 @@ Big O describes the upper bound of runtime/memory growth as input size approache
 | O(n²) | Quadratic | Nested loops over same array |
 | O(2ⁿ) | Exponential | Recursive subsets, brute-force |
 
-```cpp
+```java
 // O(1) — array access
 int get(int[] arr, int i) { return arr[i]; }
 
 // O(n) — linear search
-bool find(int[] arr, int target) {
+boolean find(int[] arr, int target) {
     for (int n : arr) if (n == target) return true;
     return false;
 }
@@ -43,44 +49,94 @@ void sort(int[] arr) {
 }
 ```
 
+**Amortized analysis** matters most with dynamic arrays. A single `append` that triggers a resize is O(n), but averaged over all appends, the cost is O(1) because the resize doubles capacity and becomes increasingly rare. Reporting O(n) per append would be technically correct but misleadingly pessimistic.
+
+**Space-time trade-off** is the fundamental tension in DSA. Caching computed results (memoization) spends memory to save time. A sorted array enables O(log n) search but costs O(n log n) to build. Every algorithmic choice is implicitly a choice about which resource is more scarce.
+
+---
+
 ### Linear Data Structures
 
-**Arrays:** Contiguous memory, O(1) random access, O(n) insert/delete.
+**Arrays** store elements in contiguous memory, enabling O(1) random access because the address of element `i` is `base + i * element_size` — a single arithmetic operation. The cost is that inserting or deleting in the middle requires shifting all subsequent elements, O(n). Arrays are also maximally cache-friendly: sequential access loads adjacent elements into the same cache line.
 
-**Dynamic Arrays (ArrayList/Vec):** Amortized O(1) append, doubles capacity on overflow.
+**Dynamic Arrays (`ArrayList`/`Vec`)** wrap a fixed array and resize when full. The resize strategy — typically doubling capacity — is what makes append amortized O(1). If you doubled capacity on every single insert instead, each insert would be O(n). Doubling ensures the total work across all inserts is O(n), so the per-insert average is O(1). This is the same reasoning behind `ArrayList`'s 50% growth factor: doubling wastes memory; too-small factors increase resize frequency.
 
-**Strings:** Immutable char arrays. `+=` in a loop creates O(n²) copies — use `StringBuilder`.
+**Strings** are immutable character arrays in most languages. The classic mistake is concatenating in a loop:
 
-**Linked Lists:** Nodes with value + next pointer. O(1) prepend, O(n) access.
+```java
+String result = "";
+for (String s : list) result += s;  // O(n²) — creates a new String on every iteration
+```
 
-**Stacks & Queues:** LIFO (array/list) and FIFO (deque/linked list). Used for DFS/BFS.
+Each `+=` allocates a new String object of length `result.length + s.length`. Over n iterations, total work is 1 + 2 + 3 + ... + n = O(n²). `StringBuilder` avoids this by maintaining a mutable buffer, making the loop O(n).
+
+**Linked Lists** store each element in a separate `Node` object with a pointer to the next node. O(1) prepend is possible because inserting at the head requires only changing one pointer. O(n) access is unavoidable because there is no arithmetic shortcut to element `i` — you must follow pointers from the head. Each pointer dereference is also a potential cache miss, since nodes are allocated independently on the heap and are rarely adjacent in memory.
+
+**Stacks and Queues** are abstract data types that constrain access to one or two ends:
+- Stack (LIFO): `push`/`pop` from the same end. Used for DFS, call stacks, expression parsing, undo history.
+- Queue (FIFO): `enqueue` at back, `dequeue` from front. Used for BFS, job scheduling, buffering.
+
+Both are typically implemented with a dynamic array or doubly-linked list. `ArrayDeque` is the correct choice in Java — no per-node overhead, O(1) amortized at both ends.
+
+---
 
 ### Hash-Based Structures
 
-**HashMap / HashSet:** Key-value with O(1) average lookups.
+A hash map works by computing an index from the key: `bucket = hash(key) % capacity`. The idea is that if hash values are uniformly distributed, lookups require examining only one bucket rather than scanning the entire structure.
 
 ```
-Hash("apple") = 10 → arr[10 % 16] = "apple"
-Hash("banana") = 200 → arr[200 % 16] = "banana"  // collides at index 8 → chaining
+hash("apple")  = 10  → arr[10 % 16] = "apple"
+hash("banana") = 200 → arr[200 % 16] = "banana"  // index 8 — collision handled by chaining
 ```
+
+**Collision handling** is unavoidable because hash functions map an infinite key space to a finite array. Two strategies exist:
+- **Chaining** — each bucket holds a linked list of all keys that hashed there. Degrades to O(n) if too many keys collide.
+- **Open addressing** — on collision, probe for the next empty slot (linear, quadratic, or double hashing). More cache-friendly than chaining but sensitive to load factor.
+
+Java's `HashMap` uses chaining and converts chains to Red-Black trees when a bucket exceeds 8 entries — improving worst-case from O(n) to O(log n). This was added in Java 8 specifically to mitigate hash-collision DoS attacks.
+
+**Load factor** controls the balance between memory and performance. At load factor 0.75 (the Java default), the map resizes when 75% of buckets are occupied. Higher load = more collisions but less memory waste. Lower load = fewer collisions but more empty buckets. The 0.75 default represents an empirically good balance for general workloads.
+
+---
 
 ### Trees
 
-- **Binary Tree:** Each node has ≤2 children; leaf nodes have no children.
-- **BST:** Left child < parent < right child. O(log n) average, O(n) worst (skewed).
-- **Balanced BST (AVL, Red-Black):** Self-balancing, guaranteed O(log n).
-- **B-Tree:** Multi-child nodes, used in databases (reduces disk I/O).
-- **Trie:** Prefix tree for strings. O(k) lookup, O(n) space. Used for autocomplete.
-- **Heap:** Complete binary tree where parent ≥ children (max-heap) or ≤ children (min-heap).
+All tree-based structures share a single core property: they reduce search from O(n) linear scan to something smaller by organizing data hierarchically.
+
+- **Binary Tree** — each node has at most 2 children. No ordering constraint. Used for expression parsing, Huffman coding.
+
+- **BST (Binary Search Tree)** — left child < parent < right child. Enables O(log n) search on average by eliminating half the tree on each comparison. Degrades to O(n) on a skewed tree (e.g., inserting already-sorted data builds a linked list structure).
+
+- **Balanced BST (AVL, Red-Black)** — self-balancing variants that guarantee O(log n) by performing rotations after insertions and deletions to maintain height ≤ O(log n). AVL trees are more strictly balanced (better for read-heavy workloads), Red-Black trees allow slightly more imbalance in exchange for fewer rotations (better for write-heavy workloads). Java's `TreeMap` and `HashMap` (for treeified buckets) use Red-Black trees.
+
+- **B-Tree** — generalizes BST to nodes with many children (not just 2). Each node stores multiple keys and fits within a single disk page. Minimizes disk I/O by maximizing data per page read. Used in every major relational database (PostgreSQL, MySQL, SQLite) and filesystem for index storage.
+
+- **Trie (Prefix Tree)** — each node represents a character; a path from root to a node spells a prefix. O(k) lookup where k is the key length — independent of how many keys are stored. Used for autocomplete, spell checking, and IP routing tables. The memory cost is O(n × m) where n is the number of words and m is average length. Compressed tries (Radix Trees) merge single-child chains to reduce this.
+
+- **Heap** — a complete binary tree where every parent satisfies the heap property (max-heap: parent ≥ children; min-heap: parent ≤ children). Stored as an array where children of node `i` are at `2i+1` and `2i+2` — no pointers needed. Insert: place at the end, sift up — O(log n). Extract min/max: swap root with last element, sift down — O(log n). The root is always the min or max, which is why heaps back `PriorityQueue`. Iterating a heap does not produce sorted order — only successive `poll()` calls do.
+
+---
 
 ### Graphs
 
-- **Adjacency List:** `List<Integer>[] neighbors`. O(V+E) space. Most common.
-- **Adjacency Matrix:** `boolean[][] adj`. O(V²) space, O(1) edge check.
-- **DFS:** Recursive/stack. O(V+E). Good for connected components, cycles.
-- **BFS:** Queue. O(V+E). Shortest path in unweighted graphs.
-- **Dijkstra:** Priority queue + distances. O((V+E) log V). No negative edges.
-- **Bellman-Ford:** Iterative relax. O(VE). Handles negative weights.
+A graph is a set of nodes (vertices) connected by edges. Trees are a special case — a connected acyclic graph.
+
+**Representation trade-off:**
+- **Adjacency List** (`List<Integer>[] neighbors`) — O(V+E) space. Efficient for sparse graphs (most real-world graphs: social networks, road networks). Iterating neighbors is O(degree).
+- **Adjacency Matrix** (`boolean[][] adj`) — O(V²) space. Efficient for dense graphs where edge existence needs O(1) checking. Wastes memory on sparse graphs.
+
+**Traversal:**
+- **DFS** — uses a stack (recursive or explicit). O(V+E). Explores as deep as possible before backtracking. Natural for: topological sort, cycle detection, connected components, maze solving.
+- **BFS** — uses a queue. O(V+E). Explores all neighbors at the current depth before going deeper. Natural for: shortest path in unweighted graphs, level-order traversal, bipartiteness testing.
+
+The choice between DFS and BFS is not stylistic — it determines what the algorithm naturally produces. BFS levels correspond to distances from the source, so shortest-path guarantees are structural. DFS post-order naturally produces reverse topological order.
+
+**Shortest Path:**
+- **Dijkstra** — greedy approach using a priority queue. Processes nodes in order of their current known distance. O((V+E) log V). Fails on negative-weight edges because it assumes that once a node is processed, its shortest path is finalized — a negative edge discovered later could undercut that.
+- **Bellman-Ford** — relaxes all edges V-1 times. O(VE). Handles negative weights. Detects negative cycles (a cycle whose total weight is negative — no shortest path exists in such a graph).
+- **A\*** — Dijkstra with a heuristic that estimates remaining distance. Explores more promising directions first. Optimal when the heuristic is admissible (never overestimates).
+
+---
 
 ### Sorting
 
@@ -91,126 +147,406 @@ Hash("banana") = 200 → arr[200 % 16] = "banana"  // collides at index 8 → ch
 | Heap Sort | O(n log n) | O(n log n) | O(n log n) | O(1) | No |
 | Counting Sort | O(n+k) | O(n+k) | O(n+k) | O(k) | Yes |
 
+**Why Quicksort dominates in practice** despite its O(n²) worst case: it is in-place (no auxiliary memory), and its cache access pattern is sequential within each partition — adjacent elements are compared and swapped, maximizing cache line reuse. Merge sort's O(n) auxiliary array means every merge step writes to a separate allocation, incurring more cache misses. Java's `Arrays.sort()` uses Dual-Pivot Quicksort for primitives and Timsort for objects.
+
+**Stability** matters when you sort by multiple keys. If you sort a list of employees first by department, then by name, a stable sort preserves the department ordering within each name group. An unstable sort may not. This is why Merge Sort (stable) is used for objects in Java but Quicksort (unstable) is acceptable for primitives — primitives have no identity beyond their value, so stability is meaningless.
+
+**Counting Sort** works in O(n+k) by skipping comparisons entirely — it counts occurrences of each value and reconstructs the sorted array from counts. It requires the values to be bounded integers (range k). For k >> n, it wastes memory and time. For k ≈ n (sorting scores 0–100, sorting characters), it beats O(n log n) comparison sorts.
+
 ---
 
 ## Common Mistakes
 
-- **Bubble sort in production** — O(n²) for any dataset > trivial size
-- **Not pre-sizing HashMaps** — Repeated resize storms for large datasets
-- **Stack overflow** — Recursive DFS on deep tree; use iterative BFS/DFS
-- **Mutable keys in HashSet** — Hash changes after insertion → object lost
-- **Overflow in binary search** — `mid = (left + right) / 2` overflows for large ints
-- **Off-by-one in binary search** — Wrong boundary updates cause infinite loops
-- **Not handling duplicates** — Equal elements cause incorrect results
+- **Bubble sort in production** — O(n²) is acceptable for < ~20 elements; for anything larger, use the language's built-in sort which is O(n log n) and heavily optimized.
+
+- **Not pre-sizing HashMaps** — A `HashMap` growing from default capacity to 10K entries rehashes multiple times. Each rehash re-indexes every existing entry. `new HashMap<>(expectedSize / 0.75f + 1)` eliminates all resize overhead when the final size is known.
+
+- **Stack overflow from recursive DFS** — Recursive DFS on a tree or graph with thousands of levels consumes one call stack frame per level. JVM default stack depth is ~500–1000 frames depending on frame size. Convert to iterative DFS with an explicit `Deque` stack.
+
+- **Mutable keys in HashSet** — If a key's `hashCode()` changes after insertion, the map looks in the wrong bucket on retrieval and finds nothing. The entry still exists — it is just unreachable. Always use immutable keys.
+
+- **Overflow in binary search** — `mid = (left + right) / 2` overflows when `left + right > Integer.MAX_VALUE`. Use `mid = left + (right - left) / 2` instead. This is a real production bug — it was present in Java's `Arrays.binarySearch` until 2006.
+
+- **Off-by-one in binary search** — The wrong boundary update (`left = mid` instead of `left = mid + 1`) causes an infinite loop when `left` and `right` are adjacent. The boundary update must strictly shrink the search space on every iteration.
+
+- **Not handling duplicates** — Algorithms that assume distinct elements (binary search returning a single index, two-pointer techniques) silently produce wrong results when duplicates are present. Consider what "equal" means for your specific problem before writing comparisons.
 
 ---
 
 ## Key Design Considerations
 
-- **Depth-first vs. breadth-first:** DFS uses less memory (implicit stack), BFS finds shortest paths, DFS better for topological ordering.
-- **Adjacency list vs. matrix:** List for sparse graphs, matrix for dense graphs with frequent edge checks.
-- **Dynamic vs. static:** Static arrays for fixed sizes, dynamic lists for variable growth.
-- **Memory hierarchy:** Sequential array access is cache-friendly; linked lists and trees cause cache misses.
-- **Two-pointer vs. sliding window:** Two-pointer for sorted arrays and palindrome checks; sliding window for subarray/substring optimization.
-- **Recursion vs. iteration:** Recursion is elegant for trees but may stack overflow; iteration is safer for deep structures.
+- **DFS vs BFS** — DFS uses O(depth) memory (the implicit or explicit stack), BFS uses O(width) memory (the queue holding all nodes at the current level). For trees where width >> depth (dense graphs, complete trees), BFS can exhaust memory while DFS stays lean. For trees where depth >> width (linked-list-like structures), DFS risks stack overflow while BFS stays shallow.
+
+- **Adjacency list vs matrix** — Use adjacency list for sparse graphs (most real-world networks where E << V²). Use adjacency matrix when you need O(1) edge existence checks or are working with dense graphs. For a 1M-node sparse graph, a matrix would require 10¹² bits — impossible.
+
+- **Static vs dynamic structures** — Static arrays allocate a fixed block of contiguous memory at creation. Dynamic lists allocate incrementally. Static arrays are faster (no pointer dereferencing, better cache behavior) but require knowing size upfront. The common pattern is to use dynamic structures during construction, then convert to a static array when the size is finalized.
+
+- **Memory hierarchy** — Sequential array access is cache-friendly because hardware prefetchers detect the access pattern and load ahead. Pointer-following structures (linked lists, trees) cause cache misses on almost every access because nodes are scattered in heap memory. At scale, this difference can be the primary performance factor regardless of algorithmic complexity.
+
+- **Two-pointer vs sliding window:**
+  - Two-pointer — two indices moving toward each other or at different speeds. Best for sorted arrays, palindrome checks, and cycle detection.
+  - Sliding window — a range `[left, right]` that expands and contracts. Best for subarray/substring problems where you need the optimal contiguous range satisfying a condition.
+
+  The key distinction: two-pointer typically shrinks the problem from both ends; sliding window expands from one end and contracts from the other.
+
+- **Recursion vs iteration** — Recursion is structurally natural for problems defined recursively (trees, divide-and-conquer). Iteration is safer for production code on deep structures. When converting, use an explicit stack to simulate the call stack rather than rewriting the logic from scratch.
 
 ---
 
 ## Real-World Scenarios
 
 ### Scenario 1: Real-Time Leaderboard
-You need to display a live leaderboard for 10M players in an online game. Scores update every second. Players can view their rank and the top 100. **Design:** Use a Redis sorted set (`ZADD` to update scores, `ZREVRANGE` for top 100, `ZRANK` for individual rank). This gives O(log n) updates and O(1) rank lookups. For persistence, snapshot to a DB every 5 minutes. **Trade-off:** Redis is memory-bound; for 10M entries, estimate ~500MB RAM.
+
+You need to display a live leaderboard for 10M players. Scores update every second. Players view their rank and the top 100.
+
+**Design:** Use a Redis sorted set (`ZADD` to update scores, `ZREVRANGE` for top 100, `ZRANK` for individual rank). Redis sorted sets are backed by both a hash map (O(1) score lookup by member) and a skip list (O(log n) ordered traversal). This gives O(log n) updates and O(log n + k) range queries. For persistence, snapshot to a database every 5 minutes.
+
+**Trade-off:** Redis is memory-bound. At 10M entries with ~50 bytes per entry, expect ~500MB RAM. The skip list also carries more memory overhead than a pure array structure. If memory is the primary constraint and exact real-time rank is not required, approximate rank via a sampled sorted structure trades precision for memory.
 
 ### Scenario 2: URL Shortener
-Design bit.ly — generate short codes for long URLs, handle 100M+ URLs, redirect in <10ms. **Design:** Use a distributed ID generator (Snowflake) for unique 7-char base62 codes. Store in a distributed key-value store (Cassandra/DynamoDB) with URL as key, short code as value. Cache hot URLs in Redis. Handle collisions with retry logic. **Trade-off:** Base62 encoding uses more space than hashing but avoids collision complexity.
+
+Design bit.ly — 100M+ URLs, redirect in < 10ms.
+
+**Design:** Use a distributed ID generator (Snowflake) for unique 7-char base62 codes. Store in a distributed key-value store (Cassandra/DynamoDB) with the short code as key and long URL as value. Cache hot URLs in Redis (a small fraction of URLs receive the vast majority of traffic — LRU cache handles this effectively).
+
+**Trade-off:** Base62 encoding is deterministic per ID — no collision risk — but the ID generator becomes a potential bottleneck and single point of failure. Hash-based approaches (MD5 truncated to 7 chars) risk collisions and require retry logic but distribute generation across nodes. The ID generator approach trades centralization for predictability.
 
 ### Scenario 3: Search Autocomplete
-Implement prefix-based autocomplete for a search engine handling 10M queries/day. **Design:** Build a Trie where each node stores the top 10 suggestions (precomputed via min-heap). Update suggestions nightly from search logs. For real-time trending, use a separate sliding window counter. **Trade-off:** Tries use O(n*m) memory (n=words, m=avg length). For large dictionaries, consider a bloom filter + inverted index hybrid.
+
+Prefix-based autocomplete for 10M queries/day, results in < 10ms.
+
+**Design:** Build a Trie where each node stores the top 10 suggestions precomputed via a min-heap during index construction. Update suggestions nightly from search logs. For real-time trending queries, maintain a separate sliding window counter that feeds into a hot-prefix cache.
+
+**Trade-off:** Tries use O(n × m) memory where n is the number of words and m is average length. A naive Trie for a 1M-word dictionary can consume hundreds of MB. Compressed Tries (Radix Trees) reduce this by merging single-child chains. For truly memory-constrained environments, a Finite State Transducer (FST) — used by Lucene — provides minimal-memory prefix lookup at the cost of construction complexity.
 
 ---
 
 ## Scenario-Based Questions
 
-1. **Q: You are building a real-time analytics dashboard that aggregates 1M events/second. Users query rolling 5-minute windows. What data structures do you use?**
-   A: Use a ring buffer (circular array) per time window — append new events, evict expired. For aggregations (sum, avg, p99), maintain running counters that update in O(1). For top-K queries, use a min-heap. Trade-off: ring buffer uses fixed memory but loses precision on sparse buckets. Alternative: use Redis TimeSeries or ClickHouse for persistent storage.
+**Q: You are building a real-time analytics dashboard aggregating 1M events/second. Users query rolling 5-minute windows. What data structures do you use?**
 
-2. **Q: You need to find the shortest path in a city's road network (1M nodes, 3M edges) with traffic updates every 5 minutes. How do you make Dijkstra practical?**
-   A: Use A* with a heuristic (Manhattan distance). Use a binary heap or Fibonacci heap for the priority queue. Partition the graph into hierarchical levels (highways vs local roads) — route at highway level first, then refine locally. Trade-off: A* may not find the true shortest path with inadmissible heuristics.
+Use a ring buffer (circular array) per time bucket — new events overwrite the oldest as time advances. For aggregations (sum, average, p99), maintain running counters that update in O(1) per event. For top-K queries, use a min-heap of size K. The ring buffer's fixed size gives predictable memory usage regardless of event volume, which is critical for a high-throughput system. Trade-off: fixed bucket granularity loses precision for queries that don't align with bucket boundaries. Redis TimeSeries or ClickHouse are better choices when persistence and ad-hoc query flexibility matter more than latency.
 
-3. **Q: Design a recommendation system where users rate items (1-5). You need "users who liked X also liked Y" queries under 50ms. How do you structure the data?**
-   A: Build a collaborative filtering model offline (nightly batch). Store top-100 similar items per item in Redis as sorted sets. For online queries, look up the precomputed set in O(1). Trade-off: batch updates mean new items aren't recommended for up to 24h. Alternative: use Apache Spark MLlib for incremental updates.
+**Q: Find the shortest path in a city road network (1M nodes, 3M edges) with traffic updates every 5 minutes.**
 
-4. **Q: Your web crawler needs to detect duplicate pages without storing all crawled URLs (10B pages). How?**
-   A: Use a Bloom filter — a probabilistic data structure. Set multiple hash bits for each URL. If all bits are set, the page is likely a duplicate. Trade-off: false positives (missed pages) but zero false negatives and O(k) memory per insertion where k is hash count. For 10B URLs, a 1% false positive rate needs ~12GB.
+Vanilla Dijkstra on 1M nodes is too slow for real-time routing. Use A* with a geographic heuristic (straight-line or Manhattan distance) to prioritize exploration toward the destination. Combine with Contraction Hierarchies — precompute shortcut edges that skip intermediate nodes on known highway-level routes. This reduces query time from seconds to milliseconds by routing at the highway level first, then refining locally. Trade-off: A* is only optimal when the heuristic is admissible. Contraction Hierarchies require expensive preprocessing when the graph changes — traffic updates invalidate precomputed shortcuts for affected edges.
 
-5. **Q: You're implementing autocomplete for a mobile keyboard with 100K words. The user types a prefix — results must appear in <10ms. Memory is constrained (2MB). How?**
-   A: Use a compressed Trie (Radix Tree) — merges single-child nodes into one. Store only leaf frequencies. Use a trie + ternary search tree hybrid for memory efficiency. Trade-off: insertion is more complex (node splitting/merging). Alternative: use a finite state transducer (FST) like Lucene's — more complex but minimal memory.
+**Q: Design a recommendation system where "users who liked X also liked Y" queries must run under 50ms.**
 
-6. **Q: Design a rate limiter for a public API that handles 100K req/s with per-user limits (10/sec, 1000/hour). What data structures?**
-   A: Sliding window log per user stored in Redis sorted sets (timestamp as score). Prune expired entries on each request (O(log n)). Better for production: sliding window counter — track current + previous window counts, estimate without storing all timestamps. Trade-off: sliding window counter has slight inaccuracy (±1 window boundary).
+Build a collaborative filtering model offline in a nightly batch job. Store the top-100 similar items per item in Redis sorted sets (item similarity score as the sort key). Online queries look up the precomputed set in O(1). The key insight is that freshness matters less than latency here — a recommendation that is 12 hours stale is almost always acceptable. Trade-off: new items are not recommended for up to 24 hours after they appear. For platforms where new item discovery is critical (news, trending content), supplement with a real-time signal layer using approximate nearest neighbor search (Faiss, ScaNN) over recent interaction embeddings.
 
-7. **Q: You have 1TB of log files on a single machine. Find the top-100 most frequent IP addresses. RAM is 4GB. How?**
-   A: Use external sorting + map-reduce in memory. Split files into chunks, count frequencies per chunk in a HashMap, emit (count, IP) pairs, merge-sort with a min-heap of size 100. For higher accuracy: use Count-Min Sketch probabilistic data structure. Trade-off: external sorting is I/O bound; Count-Min Sketch has count overestimation but uses <1MB RAM.
+**Q: Your web crawler needs to detect duplicate pages without storing all 10B crawled URLs. How?**
 
-8. **Q: Your e-commerce site needs to find all products within a 10km radius. How do you index 10M products by geolocation?**
-   A: Use a Quadtree (2D spatial index) or Google S2 Geometry. Quadtree recursively divides space into quadrants; each leaf contains products in that region. Query: traverse nodes overlapping the 10km circle. Trade-off: Quadtrees are balanced by insertion order, not data density. Alternative: Geohash (Z-order curve) maps 2D to 1D for use in B-trees.
+Use a Bloom filter — a bit array with k hash functions. To insert a URL, set k bits at positions determined by the k hash functions. To check, verify all k bits are set. If any bit is unset, the URL is definitely not seen before. If all bits are set, it is probably a duplicate. The false positive rate is tunable: for 10B URLs with 1% false positive rate, a Bloom filter needs approximately 12GB — far less than storing URLs as strings (~800GB). The trade-off is accepting occasional re-crawls of already-visited pages (false positives) in exchange for massive memory savings. There are zero false negatives — a URL that was inserted will always be detected as seen.
 
-9. **Q: You're building a distributed job queue. Workers pull jobs, process them, and acknowledge. Jobs must be processed exactly-once. What data structures do you use?**
-   A: Use a Redis list (LPUSH/BRPOP) for the queue. For exactly-once: move jobs to an in-flight set with a lease TTL. A worker that crashes before acknowledging has its job returned to the queue after TTL expiry. Use a Redis sorted set for delayed/scheduled jobs. Trade-off: Redis is single-threaded for commands; shard across Redis clusters for scale.
+**Q: Implement autocomplete for a mobile keyboard with 100K words in under 10ms. Memory limit: 2MB.**
 
-10. **Q: Design the data structure for a version control system (like Git). How do you store 100K files with branching, history, and efficient diffs?**
-    A: Use a Merkle DAG (Directed Acyclic Graph). Each commit is a tree node pointing to a parent. Files are content-addressed blobs (SHA-1 hash). Trees map filenames → blob hashes. Diffs compare tree hashes. Trade-off: content-addressed storage causes fragmentation; git gc compresses. For large binaries, Git LFS stores pointers in the tree, blobs externally.
+A full Trie for 100K words exceeds 2MB. Use a compressed Trie (Radix Tree) — chains of single-child nodes are merged into one edge — to reduce node count. Store only leaf-level frequencies, not intermediate counts. For further compression, a Finite State Transducer (FST) encodes all words as a minimal acyclic automaton, achieving near-theoretical minimum memory. Trade-off: FST construction is expensive and complex; it is built once offline and loaded into memory at startup. Insertion after construction requires a full rebuild. For a mobile keyboard where the dictionary is static between app updates, this is acceptable.
+
+**Q: Design a rate limiter for 100K req/s with per-user limits (10/sec, 1000/hour).**
+
+For the per-second limit, use a sliding window counter per user in Redis: track the count in the current second and the previous second, then estimate the current rate as `prev_count × (1 - elapsed_fraction) + curr_count`. This avoids storing individual timestamps while approximating a true sliding window with negligible error. For the per-hour limit, use token buckets: each user has a bucket refilled at 1000/3600 tokens per second. Token buckets handle bursts gracefully — a user who has been idle can send a burst up to the bucket capacity. Trade-off: sliding window counters have a ~±1 window error at boundaries; token buckets allow short bursts above the stated rate. For strict per-second enforcement, store a sorted set of timestamps and prune on each request — accurate but O(log n) per request and higher memory.
+
+**Q: You have 1TB of log files on a single machine with 4GB RAM. Find the top-100 most frequent IP addresses.**
+
+External merge sort approach: split the log into 4GB chunks, count IP frequencies per chunk with a `HashMap`, write `(count, IP)` pairs to disk, then merge using a min-heap across all chunk outputs — keeping only the top 100 globally. Time complexity is O(n log n) dominated by the sort phase with heavy I/O. For an approximate answer in much less time, use Count-Min Sketch: a 2D array of counters with multiple hash functions per row. Each IP increments k counters; the frequency estimate is the minimum across those counters. Count-Min Sketch fits in kilobytes of RAM and processes the full 1TB in a single pass. Trade-off: counts are overestimates (never underestimates), with error bounded by `ε × total_events` for a sketch of width `1/ε`.
+
+**Q: Find all products within a 10km radius from 10M products indexed by geolocation.**
+
+Use a Geohash index. Geohash encodes a 2D coordinate as a 1D string (Z-order curve) where shared prefixes correspond to nearby regions. Products sharing a Geohash prefix are geographically close. Store products in a B-tree indexed by Geohash — a range query over nearby prefixes retrieves candidate products, then filter by exact distance. The Z-order curve does not perfectly preserve 2D proximity (edge cases near region boundaries), so query slightly larger Geohash cells and filter. Trade-off: Geohash boundary artifacts require querying 8 neighboring cells to guarantee no misses near boundaries, multiplying query work by 9. A Quadtree avoids this by splitting on actual data density but is harder to store in a relational database index.
+
+**Q: You are building a distributed job queue. Jobs must be processed exactly-once. What data structures do you use?**
+
+Use a Redis List (`LPUSH`/`BRPOP`) for the queue. For exactly-once semantics: on dequeue, atomically move the job to an in-flight sorted set with `timestamp + lease_TTL` as the score (`BRPOPLPUSH`). A worker that processes and acknowledges removes the job from the in-flight set. A worker that crashes leaves the job in the in-flight set; a reaper process polls for jobs whose score (expiry time) has passed and returns them to the queue. For delayed/scheduled jobs, a separate Redis sorted set with scheduled execution time as score is checked periodically. Trade-off: Redis is single-threaded for commands — at extreme queue depths, pipeline commands and shard across multiple Redis instances. At-least-once delivery is easy; exactly-once requires the worker to implement idempotent processing so that re-delivered jobs produce the same result.
+
+**Q: Design the data structure for a version control system like Git.**
+
+Use a Merkle DAG (Directed Acyclic Graph). Each commit node points to its parent commit(s) — multiple parents for merges. Each commit points to a tree object that maps filenames to blob hashes. Blobs are content-addressed: the blob's name is the SHA-1 of its content, so identical file content across branches or history is stored only once. Diffs compare tree objects — only subtrees whose root hash changed need examination, making diff O(changed files) rather than O(all files). Trade-off: content-addressed storage fragments the object store over time. `git gc` (garbage collection) packs loose object files into compressed packfiles using delta encoding (storing diffs between similar blobs rather than full copies). Git LFS handles large binaries by storing a pointer blob in the tree and the actual content on an external server — the tree structure stays intact, but objects that would bloat the repository are externalized.
 
 ---
 
 ## Interview Questions
 
-1. **What is Big O notation?**
-   A: A mathematical notation describing the upper bound of runtime/memory growth as input size approaches infinity. It ignores constants and lower-order terms.
+**What is Big O notation?**
+A mathematical notation describing the upper bound of runtime or memory growth as input size approaches infinity. Constants and lower-order terms are dropped because they become irrelevant as n grows. O(2n) and O(n) are both O(n).
 
-2. **What is the time complexity of binary search?**
-   A: O(log n). Each step halves the search space. Requires sorted data.
+**What is the time complexity of binary search?**
+O(log n). Each step eliminates half the remaining search space. After k steps, the remaining space is n/2^k — it reaches 1 when k = log₂(n). Requires the data to be sorted.
 
-3. **What is the difference between an array and a linked list?**
-   A: Arrays have O(1) random access but O(n) insert/delete. Linked lists have O(n) access but O(1) prepend/insert at known position.
+**What is the difference between an array and a linked list?**
+Arrays have O(1) random access (direct address arithmetic) but O(n) insert/delete due to element shifting. Linked lists have O(1) prepend and O(1) insert at a known position, but O(n) access because there is no address shortcut — you must follow pointers from the head.
 
-4. **What is a hash collision and how is it resolved?**
-   A: When two keys hash to the same index. Resolved via chaining (linked list per bucket) or open addressing (probing for next empty slot).
+**What is a hash collision and how is it resolved?**
+A collision occurs when two keys hash to the same bucket index. Resolved via chaining (each bucket holds a linked list or tree of all colliding keys) or open addressing (probe for the next available slot using linear, quadratic, or double-hashing). Chaining degrades gracefully under high load; open addressing is more cache-friendly but requires careful load factor management.
 
-5. **When would you use a BFS vs DFS?**
-   A: BFS finds shortest path in unweighted graphs and uses more memory (queue). DFS uses less memory (stack) and is better for topological sorting, cycle detection, and exhaustive search.
+**When would you use BFS vs DFS?**
+BFS finds the shortest path in unweighted graphs and processes nodes level by level — natural for problems about distance or reachability within a bounded number of steps. DFS uses less memory (O(depth) vs O(width)), and its post-order traversal naturally produces reverse topological order, making it better for dependency resolution, cycle detection, and exhaustive search of all paths.
 
-6. **What is the difference between a min-heap and a max-heap?**
-   A: In a min-heap, parent ≤ children (root is minimum). In a max-heap, parent ≥ children (root is maximum). Both support O(log n) insert and extract.
+**What is the difference between a min-heap and a max-heap?**
+In a min-heap, every parent is ≤ its children, so the root is always the minimum. In a max-heap, every parent is ≥ its children, so the root is the maximum. Both support O(log n) insert and extract-min/max, and O(1) peek at the root. Internally, both store elements in an array using the formula: children of index `i` are at `2i+1` and `2i+2`.
 
-7. **How does quicksort work and what is its worst case?**
-   A: Choose a pivot, partition elements into less-than and greater-than, recursively sort. Worst case O(n²) occurs when the pivot is always the smallest/largest element (e.g., already sorted array with first-element pivot).
+**How does quicksort work and what is its worst case?**
+Choose a pivot, partition the array into elements less than and greater than the pivot, then recursively sort each partition. Average O(n log n) because each partition roughly halves the problem. Worst case O(n²) occurs when the pivot is always the minimum or maximum (e.g., sorted input with first-element pivot) — each partition step reduces the problem by only one element. Randomized pivot selection or median-of-three selection makes worst case extremely unlikely in practice.
 
-8. **What is dynamic programming and when do you use it?**
-   A: Solving problems by breaking them into overlapping subproblems and storing results to avoid recomputation. Use when the problem has optimal substructure and overlapping subproblems.
+**What is dynamic programming and when do you use it?**
+Solving optimization or counting problems by breaking them into overlapping subproblems and storing results to avoid recomputation. Apply when two conditions hold: optimal substructure (the global optimum can be built from local optima) and overlapping subproblems (the same subproblem is solved multiple times in a naive recursive approach). Classic examples: Fibonacci, 0/1 knapsack, longest common subsequence, shortest path with DP relaxation.
 
-9. **Explain the two-pointer technique with an example.**
-   A: Two pointers traverse a data structure at different speeds or from different ends. Example: checking if a string is a palindrome — one pointer from start, one from end, compare characters moving inward.
+**Explain the two-pointer technique with an example.**
+Two indices traverse the data structure simultaneously, either from both ends or at different speeds. Example: detect a cycle in a linked list — slow pointer advances one step, fast pointer advances two. If there is a cycle, fast eventually laps slow and they meet. Example: check if a string is a palindrome — left pointer from start, right from end, advance inward until they cross or a mismatch is found.
 
-10. **What is the space complexity of a recursive algorithm?**
-    A: O(depth of recursion) due to the call stack. Each recursive call adds a frame. Deep recursion can cause stack overflow.
+**What is the space complexity of a recursive algorithm?**
+O(depth of recursion) due to call stack frames. Each recursive call adds a frame containing local variables and the return address. A recursive DFS on a tree of depth d uses O(d) stack space. For a balanced tree this is O(log n); for a degenerate (linked-list) tree this is O(n), risking stack overflow on large inputs.
+
+---
+
+## Advanced Topics
+
+### Dynamic Programming: Patterns and Intuition
+
+DP is not a single technique — it is a family of patterns. Recognizing which pattern applies is the actual skill.
+
+**Memoization vs tabulation:**
+- Memoization (top-down) — write the recursive solution naturally, then add a cache. Only computes subproblems that are actually needed.
+- Tabulation (bottom-up) — fill a table from the smallest subproblem upward. No recursion overhead, better cache locality, easier to optimize space.
+
+Both produce the same result. Use memoization when the subproblem space is sparse (not all subproblems are needed); use tabulation when the space is dense and the order of computation is clear.
+
+**Common DP patterns:**
+
+1. **Linear DP** — subproblem depends on the previous 1–2 states. Fibonacci, house robber, climbing stairs. Often O(n) time, reducible to O(1) space if only the last k states are needed.
+
+2. **Interval DP** — subproblem is defined over a range `[i, j]`. Matrix chain multiplication, burst balloons, palindrome partitioning. O(n²) states, O(n³) total.
+
+3. **Knapsack (Bounded selection)** — choose a subset of items under a constraint to maximize value. O(n × W) where W is the weight limit. The key insight: `dp[i][w] = max(dp[i-1][w], dp[i-1][w-weight[i]] + value[i])` — either skip item i or include it.
+
+4. **LCS / Edit Distance** — two-sequence problems. `dp[i][j]` represents the answer for the first i characters of one string and j of the other. O(n × m) time and space, reducible to O(min(n,m)) space.
+
+5. **DP on trees** — subproblem is defined per subtree. Compute children first (post-order), pass results up. Used in maximum path sum, tree diameter, subtree counting.
+
+```java
+// Longest Common Subsequence — tabulation
+int lcs(String a, String b) {
+    int n = a.length(), m = b.length();
+    int[][] dp = new int[n+1][m+1];
+    for (int i = 1; i <= n; i++)
+        for (int j = 1; j <= m; j++)
+            dp[i][j] = a.charAt(i-1) == b.charAt(j-1)
+                ? dp[i-1][j-1] + 1
+                : Math.max(dp[i-1][j], dp[i][j-1]);
+    return dp[n][m];
+}
+```
+
+**Space optimization:** Many DP problems only require the previous row of the table. Rolling arrays reduce O(n × m) space to O(m). When doing this, be careful about the direction of iteration — filling right-to-left or left-to-right changes whether you read from the current or previous row.
+
+---
+
+### Graph Algorithms: Beyond BFS/DFS
+
+**Topological Sort** orders nodes of a DAG (Directed Acyclic Graph) such that every edge points from an earlier node to a later one. Two implementations:
+- Kahn's algorithm (BFS-based): repeatedly remove nodes with in-degree 0. If all nodes are removed, the sort is valid. If nodes remain, a cycle exists.
+- DFS-based: run DFS and append each node to a stack in post-order. Reverse the stack.
+
+Applications: build systems (Maven, Gradle compile ordering), course scheduling, spreadsheet cell evaluation.
+
+**Union-Find (Disjoint Set Union)** tracks connected components dynamically as edges are added.
+
+```java
+int[] parent, rank;
+
+int find(int x) {
+    if (parent[x] != x) parent[x] = find(parent[x]);  // path compression
+    return parent[x];
+}
+
+void union(int x, int y) {
+    int px = find(x), py = find(y);
+    if (px == py) return;
+    if (rank[px] < rank[py]) { int t = px; px = py; py = t; }
+    parent[py] = px;
+    if (rank[px] == rank[py]) rank[px]++;
+}
+```
+
+With path compression and union by rank, both `find` and `union` run in amortized O(α(n)) — effectively constant. Used in Kruskal's MST algorithm, cycle detection, and network connectivity problems.
+
+**Minimum Spanning Tree (MST):**
+- Kruskal's — sort all edges by weight, greedily add the cheapest edge that does not create a cycle (use Union-Find for cycle detection). O(E log E).
+- Prim's — grow the MST from a starting node, always adding the cheapest edge connecting the current tree to a new node (use a priority queue). O((V+E) log V).
+
+Use Kruskal's for sparse graphs (few edges to sort), Prim's for dense graphs (fewer priority queue operations than sorting all edges).
+
+**Strongly Connected Components (SCC):** A subset of a directed graph where every node is reachable from every other. Kosaraju's algorithm runs two DFS passes — one on the original graph to get finish-order, one on the reversed graph in reverse finish-order. Tarjan's algorithm finds SCCs in a single DFS using a low-link value per node. SCCs appear in compiler optimization, social network analysis, and dependency cycle detection.
+
+---
+
+### Advanced Sorting and Searching
+
+**Timsort** — Java's `Arrays.sort` for objects and Python's `list.sort`. Hybrid of merge sort and insertion sort. Detects naturally sorted "runs" in the input and merges them. Performs at O(n) on nearly-sorted data and O(n log n) worst case. The key insight: real-world data is rarely random — it typically has partial order (logs sorted by time, names partially alphabetized). Timsort exploits this.
+
+**Radix Sort** — processes digits from least significant to most significant (LSD) or most to least (MSD). O(d × (n + k)) where d is digit count and k is the digit range. For fixed-length integers, d is constant, making this O(n) — faster than any comparison sort for large n. Used in integer sorting, string sorting, and as a subroutine in larger algorithms.
+
+**Binary search variations** — the pattern `left + (right - left) / 2` is the template, but the boundary conditions vary:
+
+```java
+// Find first position where condition is true (leftmost true)
+int lo = 0, hi = n;
+while (lo < hi) {
+    int mid = lo + (hi - lo) / 2;
+    if (condition(mid)) hi = mid;
+    else lo = mid + 1;
+}
+// lo is the answer
+
+// Find last position where condition is true (rightmost true)
+int lo = -1, hi = n - 1;
+while (lo < hi) {
+    int mid = lo + (hi - lo + 1) / 2;  // upper-mid to avoid infinite loop
+    if (condition(mid)) lo = mid;
+    else hi = mid - 1;
+}
+```
+
+The template unifies all binary search variants: define what "true" means for the condition, decide whether you want the leftmost or rightmost true, and apply the appropriate boundary update. Getting this wrong is the most common source of off-by-one bugs.
+
+---
+
+### Probabilistic Data Structures
+
+These structures trade exactness for dramatic reductions in memory and computation. They are appropriate when approximate answers are acceptable — which is often true for analytics, monitoring, and deduplication at scale.
+
+**Bloom Filter** — tests set membership. Never has false negatives. Has tunable false positive rate. Uses k hash functions over a bit array of size m.
+
+For n expected insertions at false positive rate p:
+- Optimal m = `-(n × ln(p)) / (ln(2))²`
+- Optimal k = `(m/n) × ln(2)`
+
+At 1% false positive rate: ~10 bits per element. At 0.1%: ~15 bits per element. Storing 10B URLs as strings needs ~800GB; a Bloom filter needs ~12GB at 1%.
+
+Applications: Google BigTable uses Bloom filters to avoid disk reads for non-existent keys. Chrome uses them to check safe-browsing lists without sending URLs to Google's servers.
+
+**Count-Min Sketch** — estimates frequencies. Stores a 2D array of w × d counters with d independent hash functions. To insert: increment one counter per row at the column `hash_i(item) % w`. To query: return the minimum across all d rows. The minimum is an overestimate — it can only be inflated by collisions with other items, never reduced.
+
+Error bound: with probability 1 - δ, the estimated count is within `ε × total_count` of the true count, using `w = e/ε` and `d = ln(1/δ)`.
+
+Applications: tracking heavy hitters in network traffic, per-IP request counting at ISP scale, approximate frequency in streaming data pipelines.
+
+**HyperLogLog** — estimates the cardinality of a set (count distinct). Uses ~1.5KB of memory regardless of set size. Error is typically ±2%. The core insight: the maximum number of leading zeros in any hash value in a stream is correlated with log₂(distinct elements). By tracking this statistic across multiple hash buckets and applying harmonic mean correction, cardinality is estimated with small relative error.
+
+Applications: Redis `PFCOUNT`, counting unique visitors in web analytics, estimating distinct queries in a search engine — any scenario where `SELECT COUNT(DISTINCT ...)` would be too expensive.
+
+---
+
+### Segment Trees and Fenwick Trees
+
+Both answer range queries over an array and support point updates efficiently. The choice depends on what operations you need.
+
+**Fenwick Tree (Binary Indexed Tree)** — answers prefix sum queries and supports point updates. O(log n) per operation, O(n) space. Conceptually simpler and smaller constant than a segment tree.
+
+```java
+int[] bit = new int[n + 1];
+
+void update(int i, int delta) {
+    for (; i <= n; i += i & (-i)) bit[i] += delta;
+}
+
+int query(int i) {
+    int sum = 0;
+    for (; i > 0; i -= i & (-i)) sum += bit[i];
+    return sum;
+}
+
+int rangeQuery(int l, int r) { return query(r) - query(l - 1); }
+```
+
+The `i & (-i)` extracts the lowest set bit of `i`, which determines exactly which cells this index is responsible for. The pattern is elegant but opaque — understanding why it works requires knowing how the BIT maps responsibilities to indices.
+
+**Segment Tree** — a binary tree where each node stores the aggregate (sum, min, max, GCD) of a subarray range. Supports both range queries and range updates (with lazy propagation). O(log n) per operation, O(n) space.
+
+```java
+void build(int[] arr, int node, int start, int end) {
+    if (start == end) { tree[node] = arr[start]; return; }
+    int mid = (start + end) / 2;
+    build(arr, 2*node, start, mid);
+    build(arr, 2*node+1, mid+1, end);
+    tree[node] = tree[2*node] + tree[2*node+1];
+}
+
+int query(int node, int start, int end, int l, int r) {
+    if (r < start || end < l) return 0;
+    if (l <= start && end <= r) return tree[node];
+    int mid = (start + end) / 2;
+    return query(2*node, start, mid, l, r)
+         + query(2*node+1, mid+1, end, l, r);
+}
+```
+
+**Lazy propagation** defers range updates: instead of updating all leaves immediately, mark internal nodes with a pending update and push it down only when the subtree is accessed. This reduces range-update + range-query from O(n) to O(log n).
+
+Use a Fenwick Tree when you only need prefix sums or simple point updates — it is simpler to implement and faster in practice. Use a Segment Tree when you need range updates, custom aggregation functions (max, min, GCD), or lazy propagation.
+
+---
+
+### String Algorithms
+
+**KMP (Knuth-Morris-Pratt)** — finds a pattern of length m in a text of length n in O(n + m). The key is the failure function: a precomputed array that tells the algorithm how far to shift the pattern when a mismatch occurs, without re-examining already-matched characters.
+
+Naive string matching is O(n × m) because it restarts from the beginning of the pattern on every mismatch. KMP avoids this by recognizing that a partial match tells you something about the next possible alignment — the failure function encodes the longest proper prefix of the pattern that is also a suffix of the matched portion.
+
+**Rabin-Karp** — uses a rolling hash to find pattern matches. Compute the hash of the pattern and the hash of each text window of the same length. Advance the window in O(1) by subtracting the outgoing character's contribution and adding the incoming character's. Match the hash first; confirm with character comparison only on matches. O(n + m) average, O(n × m) worst case due to hash collisions. Well-suited for multi-pattern search — hash all patterns into a set and check each window against the set.
+
+**Suffix Arrays and LCP Arrays** — a suffix array is the sorted array of all suffixes of a string. Combined with an LCP (Longest Common Prefix) array, it enables O(log n) substring search, O(n) longest repeated substring, and O(n) longest common substring between two strings. More memory-efficient than suffix trees (which give the same asymptotic bounds) and easier to implement correctly.
+
+---
+
+### Bit Manipulation
+
+Bit operations are O(1) and operate directly on the integer's binary representation. They appear in competitive programming and performance-critical systems code.
+
+```java
+// Check if bit k is set
+boolean isSet(int n, int k) { return (n & (1 << k)) != 0; }
+
+// Set bit k
+int set(int n, int k) { return n | (1 << k); }
+
+// Clear bit k
+int clear(int n, int k) { return n & ~(1 << k); }
+
+// Toggle bit k
+int toggle(int n, int k) { return n ^ (1 << k); }
+
+// Check if n is a power of 2
+boolean isPow2(int n) { return n > 0 && (n & (n-1)) == 0; }
+
+// Count set bits (Brian Kernighan)
+int popcount(int n) {
+    int count = 0;
+    while (n != 0) { n &= (n-1); count++; }
+    return count;
+}
+```
+
+`n & (n-1)` clears the lowest set bit of `n`. This is why the Kernighan popcount loop runs in O(set bits) rather than O(32).
+
+**Bitmask DP** — when the state space can be represented as a subset of a small set (n ≤ 20), represent each subset as an integer bitmask. The number of subsets is 2^n, and each fits in a 32-bit integer. Iterating over subsets of a bitmask `mask` is `for (int sub = mask; sub > 0; sub = (sub-1) & mask)`. Classic application: Travelling Salesman Problem with DP over subsets of visited cities — O(n² × 2^n), feasible for n ≤ 20.
 
 ---
 
 ## Developer Recommendations
 
-- **Know your data structures' time complexities cold** — Choosing a LinkedList when you need O(1) random access leads to O(n) production performance. Memorize the Big O table for Array, List, HashMap, TreeSet, PriorityQueue, and HashSet. The trade-off: HashMap is O(1) average but uses more memory and has poor cache locality vs arrays.
+- **Know your data structures' time complexities cold** — Choosing a `LinkedList` when you need O(1) random access results in O(n) production performance. Memorize the Big O table for Array, List, HashMap, TreeSet, PriorityQueue, and HashSet. The underlying memory model matters as much as the asymptotic bound — cache-friendly structures consistently outperform theoretically equivalent ones at scale.
 
-- **Start with a brute force solution, then optimize** — During interviews, get a working solution first (even O(n²)), then discuss trade-offs and improve. Premature optimization leads to buggy code and wasted time. Use the BUD (Bottlenecks, Unnecessary work, Duplicated work) framework to find optimization opportunities.
+- **Start with brute force, then optimize** — Get a working solution first, even at O(n²). Then apply the BUD framework: find Bottlenecks (the slowest step), eliminate Unnecessary work (redundant computation), and remove Duplicated work (overlapping subproblems). Premature optimization before the brute force is correct leads to buggy, hard-to-debug solutions.
 
-- **Use hash-based structures for lookup-heavy problems** — If your algorithm repeatedly searches for elements (contains, indexOf on lists), insert them into a HashSet or HashMap first. The trade-off: O(n) memory for O(1) lookups. This is almost always worth it for non-trivial n.
+- **Use hash-based structures for lookup-heavy problems** — If your algorithm repeatedly calls `contains()` or `indexOf()` on a list, insert elements into a `HashSet` or `HashMap` first. The O(n) memory cost to build the set is almost always worth the O(1) per-lookup improvement.
 
-- **Prefer iterative over recursive for production code** — Recursion is elegant for trees but risks stack overflow for deep structures (thousands of levels). Iterative solutions with explicit stacks are safer. The trade-off: iterative solutions are often more verbose and harder to reason about.
+- **Prefer iterative over recursive for production code** — Recursion is elegant for tree and divide-and-conquer problems but risks stack overflow for deep structures (thousands of levels). Convert to iterative using an explicit `Deque` as the stack. The logic is identical — you are just managing the stack yourself rather than relying on the call stack.
 
-- **Benchmark before optimizing** — O(n log n) may outperform O(n) for small n due to constants and cache effects. Quicksort (O(n log n) average) often beats merge sort in practice because of in-place memory access patterns. Profile first, optimize second.
+- **Benchmark before optimizing** — O(n log n) may outperform O(n) for small n due to constants and cache effects. Quicksort often beats merge sort in practice because its in-place access pattern is more cache-friendly despite the same asymptotic bound. Profile before rewriting.
 
-- **Practice the sliding window pattern** — Many subarray/substring problems (max sum, longest unique, smallest window) reduce to a single sliding window template. Recognizing this pattern saves 30 minutes of problem-solving. Trade-off: not all window-like problems fit — validate that the window can shrink/grow monotonically.
+- **Practice the sliding window pattern** — Many subarray and substring problems reduce to a single template: expand the right pointer, contract the left pointer when the window violates a condition. The key invariant is that the window is always valid after contraction. Recognizing this eliminates the need for nested loops.
 
-- **Test with edge cases before considering done** — Empty input, single element, duplicates, negative numbers, overflow, null values. 90% of bugs in DSA code come from edge cases, not the core algorithm. Write test assertions for these cases during practice.
+- **Test with edge cases before considering done** — empty input, single element, all duplicates, negative numbers, integer overflow, null values. Most DSA bugs live at boundaries, not in the core logic. Write assertions for these cases during practice.
 
-- **Use divide and conquer for complex problems** — Split the problem into smaller independent subproblems, solve each, combine. Merge sort, quicksort, binary search, and many tree algorithms follow this pattern. Trade-off: recursion overhead and stack depth limits.
+- **Use divide and conquer for problems that decompose cleanly** — When a problem on n elements can be split into two independent subproblems on n/2 elements and the combination step is O(n) or cheaper, the total complexity is O(n log n) by the Master Theorem. Merge sort, quicksort, binary search, closest pair of points, and many tree algorithms follow this pattern.
