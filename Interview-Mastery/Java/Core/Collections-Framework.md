@@ -250,9 +250,13 @@ The `remove(key)` in `snapshotAndReset()` is not incidental — it ensures count
 
 Use `ConcurrentHashMap<String, AtomicInteger>` where each product's stock is an `AtomicInteger` using compare-and-swap at the hardware level, eliminating synchronized blocks for single-value updates. The `ConcurrentHashMap` provides per-bucket concurrency, so workers scanning different products proceed in parallel. For multi-step operations, use `compute()` which is atomic per key: `inventory.compute("SKU-123", (k, v) -> v == null ? 0 : v.decrementAndGet())`. This eliminates the put-if-absent race condition where two threads read the same value and overwrite each other's update. For batch operations like end-of-day reconciliation, `forEachKey()` or `reduceKeys()` enable parallel bulk processing without external synchronization.
 
+> **Interview follow-up:** The candidate mentioned `compute()` — but `compute()` locks the bucket, not just the key. What happens if two unrelated keys hash to the same bucket? How would you prove contention is negligible before putting this in production?
+
 **Q: You have a REST API that returns paginated results from a leaderboard. Users can view any page. The leaderboard changes every few seconds. How do you ensure that a user viewing page 2 does not see duplicates or miss items?**
 
 Use a `CopyOnWriteArrayList` for the leaderboard snapshot — sort it once per refresh interval and atomically replace the reference. Each page request reads `subList(fromIndex, toIndex)` from the current snapshot, so users never experience rankings shifting mid-pagination. The stale-snapshot problem (a user may see an older leaderboard state) is a deliberate and acceptable trade-off for a leaderboard updating every 5–10 seconds. For stricter consistency, use a `volatile` reference to an `unmodifiableList` and replace atomically — this provides a happens-before guarantee between the writer and all reader threads.
+
+> **Interview follow-up:** The `CopyOnWriteArrayList` creates an array copy on every sort. With 10K leaderboard entries sorted every 5 seconds, what is the per-minute allocation rate, and at what point does this become a GC problem?
 
 **Q: You are designing a rate limiter that tracks requests per user in a 1-second sliding window. The system handles 50K QPS across 10K users. How do you store and expire request timestamps efficiently?**
 

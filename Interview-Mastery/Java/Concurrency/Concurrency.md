@@ -13,6 +13,8 @@
 ## The Java Memory Model (JMM)
 
 - **Definition** — The Java Memory Model defines the formal rules for how threads interact through memory and when changes made by one thread become visible to others. Without the JMM, compilers and CPUs could reorder instructions freely, making unsynchronized concurrent access completely unpredictable across different hardware platforms.
+
+  **Why was the JMM formally specified (JSR 133, Java 5)?** Before Java 5, the memory model was incomplete — it did not prevent common hardware reorderings on platforms like Alpha (which allowed reordering of normal loads). Double-checked locking was widely used but broken because it relied on the assumption that the constructor completed before the reference was published — the old model allowed the compiler to reorder the writes to the object's fields after the write of the reference to the shared variable. JSR 133 fixed this by: strengthening the `volatile` semantics (volatile write → happens-before → volatile read), defining the `final` field guarantee (properly constructed object with final fields is safe to publish without synchronization), and establishing transitive happens-before ordering as the backbone of the model.
 - **Happens-Before** — The JMM is built on the happens-before relationship: if action A happens-before action B, then A's results are visible to B, and A must appear before B in program order regardless of compiler or CPU optimizations. The key happens-before rules are program order within a single thread, monitor lock release before subsequent acquisition of the same lock, volatile write before subsequent read of the same field, `Thread.start()` before any action in the started thread, all actions in a thread before `Thread.join()` returns successfully, and transitivity across the chain.
 - **Importance** — Understanding the JMM is essential for diagnosing visibility bugs where one thread writes a value but another thread never sees it — the most common symptom of missing synchronization.
 
@@ -217,6 +219,10 @@ Using a `String` as a lock object is dangerous because string interning means tw
 
 Not handling `InterruptedException` properly — catching it and ignoring it loses the interrupt signal, leaving the thread unable to respond to cancellation requests. The correct pattern is either to propagate the exception or restore the interrupt flag with `Thread.currentThread().interrupt()`.
 
+Publishing `this` from a constructor in a concurrent context — starting a thread or registering a listener in a constructor — exposes a partially-constructed object to other threads, violating the JMM's final-field safety guarantee. Even if the field is `final`, the JMM guarantees safe publication only for objects whose constructors have completed. Use a factory method (`create()`) or `@PostConstruct` that starts threads after the constructor returns.
+
+Assuming `ConcurrentHashMap.entrySet().stream()` gives a consistent snapshot is false — `ConcurrentHashMap` iterators reflect the state at the time of iteration and are weakly consistent (they may reflect some, all, or none of the concurrent modifications). For a truly consistent snapshot, use `new HashMap<>(concurrentMap)` which copies all entries at a point in time.
+
 ---
 
 ## Real-World Scenarios
@@ -243,6 +249,8 @@ public class OrderBook {
 ```
 
 `ConcurrentSkipListMap` provides thread-safe sorted access with O(log n) insertion and query, maintaining price-time priority ordering without external synchronization. `headMap()` returns a navigable view of entries with keys less than or equal to the incoming order's price, enabling efficient price-level matching. Each price level uses a `ConcurrentLinkedQueue` for FIFO ordering among same-price orders, using lock-free CAS operations to avoid contention. The skip-list's probabilistic balancing and lock-free reads allow multiple matching threads to operate on different price levels simultaneously, scaling with the number of CPU cores.
+
+**Why this approach?** The alternative — a single `PriorityQueue` protected by `synchronized` — would serialize all order insertions and matching, capping throughput at roughly 50K orders/second regardless of CPU cores. The concurrent skip-list + per-price-level queue design allows order matching at 1M+ orders/second because: (1) multiple matching threads work on different price levels with zero contention; (2) the skip-list's lock-free reads let matching threads scan the book without blocking; (3) `ConcurrentLinkedQueue`'s CAS-based enqueue handles burst arrivals without lock contention. The trade-off is higher per-element overhead (~80 bytes per node) and O(log n) reads vs O(1) for `HashMap` — acceptable because price levels rarely exceed 10K entries.
 
 ### Scenario 2: Distributed Tracing with CompletableFuture
 
@@ -276,6 +284,8 @@ public class AggregationService {
 
 `CompletableFuture.allOf()` combines three independent async calls and completes when all three complete or any one fails. The `applyToEither()` with `timeoutAfter()` implements a deadline race — if the 200ms aggregate deadline arrives before all services respond, the dashboard uses fallback data from `getNow()`. Each individual call has a 150ms timeout via `orTimeout()`, preventing a single slow service from consuming the entire latency budget. The dedicated `executor` with 20 threads isolates the I/O operations from the common ForkJoinPool, preventing thread starvation across the application.
 
+**Why this approach?** The blocking alternative — launching three threads, calling `future.get(150ms)` on each, catching timeouts, and returning fallback — requires manual thread management and explicit timeout handling. `CompletableFuture` composes these concerns declaratively: `orTimeout()` sets per-call deadlines, `allOf()` + `applyToEither()` with a 200ms global timeout implements the deadline race, and `getNow()` provides fallback values without checking individual completion states. The dedicated executor (20 threads vs 8 cores) is sized for I/O — each thread spends most of its time waiting for HTTP responses, so more threads than cores improves throughput.
+
 ### Scenario 3: Database Migration with Phaser
 
 A schema migration tool must run 8 migration scripts in parallel across 4 database shards. After all migrations complete, the tool validates constraints and then switches traffic to the new schema. The phases must be coordinated: all shards complete script 1 before any starts script 2.
@@ -308,6 +318,8 @@ public class MigrationCoordinator {
 ```
 
 `Phaser` is the ideal choice for this multi-phase parallel workload because it supports dynamic party registration (each shard registers upon creation), reusable barriers across multiple phases, and automatic phase advancement without manual reset. Each shard worker registers as a party, runs all three scripts — advancing through the phaser after each script to ensure all shards complete before any starts the next — and deregisters when finished. The main thread participates as party 1, advancing through phases after each migration script and running validation and traffic switching after all shards have deregistered. Compared to `CyclicBarrier`, `Phaser` avoids the need to know the exact party count at construction time.
+
+**Why this approach?** A `CountDownLatch` per script would need three separate latches with manual wiring — one for each script phase, plus error handling if a shard fails mid-migration. `CyclicBarrier` requires knowing the party count at construction (4 shards + 1 main = 5), but if a shard goes offline, the barrier waits forever. `Phaser` handles both problems: dynamic registration (`phaser.register()`) means shards can join as they start, and `arriveAndDeregister()` lets failed shards be cleanly removed without blocking the remaining shards. The main thread participates as an ordinary party, so it naturally advances through phases alongside the shards.
 
 ---
 
@@ -516,3 +528,5 @@ Always clear `ThreadLocal` values in `finally` blocks when using thread pools be
 Add timeouts to all blocking operations — `future.get()`, `queue.take()`, `latch.await()`, `lock.tryLock()`, and `completableFuture.join()` can all block indefinitely. Always use the timeout overload: `future.get(5, SECONDS)`. For `CompletableFuture`, use `.orTimeout(5, SECONDS)`. When a timeout expires, clean up by cancelling futures and interrupting threads.
 
 Use `StampedLock` for read-mostly workloads where `ReadWriteLock` causes writer starvation. `StampedLock` with `tryOptimisticRead()` never blocks writers — if a writer arrives during an optimistic read, the stamp validation fails and the read falls back to a regular read lock. This gives superior throughput for read-heavy data structures like configuration registries and lookup tables.
+
+Profile lock contention before optimizing — many teams prematurely replace `synchronized` with `ReentrantLock` or `StampedLock` based on intuition rather than data. Use `jstack` thread dumps, async profiler's lock profiling, or JFR (Java Flight Recorder) to measure actual contention. If lock acquisition takes less than 1% of CPU time, optimizing the lock is premature — the performance bottleneck lies elsewhere. Contention optimization should follow a priority order: eliminate shared state → reduce critical section size → use lock striping → use lock-free algorithms → replace locking mechanism.

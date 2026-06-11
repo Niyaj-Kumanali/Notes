@@ -91,6 +91,8 @@ thread.setName("worker-pool-1");
 
 Modern JVMs (HotSpot) use a 1:1 threading model where each Java thread maps directly to a native kernel thread managed by the operating system. The OS thread scheduler decides which thread runs on which core, and Java does not guarantee any scheduling order or fairness. Each thread gets its own stack of approximately 1MB by default (configurable with `-Xss`), which stores local variables and method call frames and is not shared between threads. Context switching between threads costs approximately 1-10 microseconds per switch, including saving and restoring CPU registers, flushing the TLB (Translation Lookaside Buffer), and incurring cache misses when the thread resumes on a different core. Thread creation costs approximately 1-2 microseconds for the JVM call plus the OS thread creation, and with 1MB default stack size, 1024 threads consume 1GB of virtual memory just for thread stacks — this is the fundamental scalability limit of the thread-per-connection model.
 
+**Why did Java drop green threads?** Early JVMs (Java 1.0-1.3 on Solaris) used N:1 "green threads" — multiple Java threads scheduled onto a single OS thread by the JVM itself. This avoided OS thread creation cost but had two fatal flaws: (1) a blocking system call from any Java thread blocked the entire JVM because all Java threads shared one OS thread; (2) only one Java thread could run at a time on a multi-core machine, negating parallelism. The 1:1 model (HotSpot since Java 1.3) delegates scheduling to the OS kernel, which handles blocking syscalls correctly per-thread and distributes threads across cores. The trade-off is higher per-thread memory cost (~1MB stack) and creation latency, making thread pooling mandatory.
+
 ---
 
 ## Thread Pools (ExecutorService)
@@ -127,6 +129,10 @@ Swallowing `InterruptedException` in an empty `catch` block loses the interrupt 
 
 Not shutting down executor services causes thread leaks that prevent the JVM from ever exiting. Always call `executor.shutdown()` in a `@PreDestroy` method or `finally` block.
 
+Starting a thread in a constructor (the `this` escape problem) publishes the partially-constructed object to another thread before the constructor completes, violating the JMM's constructor safety guarantee. Never start threads from constructors — use a factory method or `@PostConstruct` instead.
+
+Relying on `Thread.stop()` silently corrupts shared objects because it releases all acquired monitors immediately, leaving shared data structures in an inconsistent state visible to other threads. It has been deprecated since Java 1.2. Use `interrupt()` with explicit cancellation checks in the running code instead.
+
 ---
 
 ## Real-World Scenarios
@@ -155,6 +161,8 @@ public class ImageProcessingPipeline {
 ```
 
 Separating CPU-bound operations (resizing, moderation) into their own pool sized to `availableProcessors()` and I/O-bound operations (metadata extraction) into a `cachedThreadPool()` prevents I/O threads from starving CPU work. The entire pipeline is non-blocking — the HTTP request thread submits the work via `CompletableFuture.supplyAsync()` and returns immediately, freeing the thread to handle the next request. Each processing step starts asynchronously when the previous step completes, without any thread blocking on `get()` or `join()`.
+
+**Why this approach?** A single shared thread pool for both CPU and I/O tasks would let I/O-bound tasks (metadata extraction waiting on disk) occupy threads that CPU-bound tasks (resizing) need, underutilizing cores. The dual-pool design isolates the two work types so each pool is sized correctly — CPU pool at `availableProcessors()` to keep cores saturated, I/O pool unbounded (cached) because waiting tasks do not consume CPU. `CompletableFuture` chains are used instead of `Future.get()` because `get()` blocks the calling thread; `thenApplyAsync()` lets the next step be scheduled when the previous completes, keeping all threads productive.
 
 ### Scenario 2: WebSocket Connection Manager
 
@@ -187,6 +195,8 @@ public class WebSocketManager {
 ```
 
 `CopyOnWriteArrayList` provides thread-safe iteration without locks — reads (the broadcast loop) are never blocked by concurrent modifications (users joining or leaving rooms). The `broadcastPool` with 16 bounded threads prevents a flood of edits from creating unlimited threads, while the `synchronized(member)` block ensures ordered delivery per connection — edits to the same user are sent one at a time in FIFO order without interleaving. This design maintains 50,000 connections using only 16 broadcast threads because threads are used for sending and then returned to the pool, not held waiting for each connection.
+
+**Why this approach?** Alternative designs fail in different ways: a thread-per-connection model would need 50,000 threads (impossible — 50GB of stack memory); a `synchronized` block on the entire broadcast loop would serialize all broadcasts, making 50,000 connections no faster than 1. `CopyOnWriteArrayList` is chosen because member list modifications (join/leave) are infrequent and the iteration overhead of copying is acceptable. The `synchronized(member)` block ensures FIFO delivery per connection without a per-connection queue, trading lock contention for ordering guarantees — correct for a collaborative editing application where message order matters per user.
 
 ### Scenario 3: Graceful Shutdown in a Payment Gateway
 
@@ -225,9 +235,25 @@ public class PaymentGateway {
 
 The `CountDownLatch` tracks the exact number of in-flight requests, incrementing on each submission and decrementing in the `finally` block of each completed task. The three-phase shutdown — `shutdown()` (prevent new tasks), `awaitTermination()` (wait politely), `shutdownNow()` (force with interrupts) — is the standard pattern for graceful degradation. Each phase provides a fallback: first wait politely for up to 30 seconds, then force-interrupt remaining tasks, then log the count of tasks that were forcibly cancelled for operational visibility.
 
+**Why this approach?** Without explicit tracking, an executor's `awaitTermination()` only waits for tasks that are already submitted — if a new task is submitted between `shutdown()` and `awaitTermination()`, it is rejected, but in-flight tasks that submit further subtasks are invisible to the count. The `CountDownLatch` captures the true in-flight count including recursively spawned tasks. The 30-second timeout prevents indefinite blocking — if a payment API hangs, the gateway must stop waiting and mark those transactions as failed so another instance can retry during the next deployment.
+
 ---
 
 ## Scenario-Based Questions
+
+**Q: A production application using `ThreadLocal` for request-scoped data (user ID, transaction ID) develops a slow memory leak. Thread dumps show hundreds of pooled threads holding references to stale request data. The objects are never garbage collected. What is the root cause and how do you fix it?**
+
+A: Thread pools reuse threads — a thread's `ThreadLocal` values persist across requests unless explicitly removed. If the last request using a thread stored user data in a `ThreadLocal` and the thread is returned to the pool, that data remains reachable for the thread's lifetime (which is the application's lifetime for core threads), preventing GC of the user data and everything it references:
+```java
+// Fix: always clear ThreadLocal in finally blocks
+try {
+    threadLocal.set(requestData);
+    processRequest();
+} finally {
+    threadLocal.remove(); // critical in thread pools
+}
+```
+The pattern is: set in a try block, use in the same block, remove in the finally block. Never set a `ThreadLocal` in one request handler and expect it to be cleared by GC — pooled threads never die, so `ThreadLocal` entries are never reclaimed. This is the most common source of `ThreadLocal`-related memory leaks in production Java applications and the reason why web frameworks like Spring clear their `RequestContextHolder` after each request.
 
 **Q: You are building a WebSocket-based live auction system. Each auction item has a countdown timer. When the timer reaches zero, no more bids are accepted. The timer must be accurate to within 100ms even under heavy load. How do you schedule and manage thousands of simultaneous auction timers?**
 

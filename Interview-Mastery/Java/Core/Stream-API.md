@@ -298,9 +298,15 @@ public class MetricsAggregator {
 
 Two stream pipelines process the same source data: the first computes per-service averages using `groupingBy` with a downstream `summarizingDouble` collector that captures count, sum, min, max, and average in a single pass. The second pipeline filters metrics that deviate more than 3 standard deviations from their service's mean and groups the anomalies by service for dashboard highlighting. Stream fusion ensures each pipeline processes elements one at a time, keeping memory O(1) per pipeline — for 1000 servers, 4 metrics, and 6 readings (24K elements), the entire aggregation completes in under 100ms on modern hardware.
 
+**Why this approach?** The imperative alternative would require nested loops: outer loop over services, inner loop over metrics — three passes (compute averages, compute stddev, detect anomalies) with manual state accumulation. The stream version uses two separate pipelines for two separate concerns (aggregation vs. anomaly detection), each self-contained and independently testable. `DoubleSummaryStatistics` captures 5 metrics in one pass without custom collector code. The grouping is done by the framework rather than manual `Map.computeIfAbsent()` calls, reducing boilerplate. The cost is two passes over the same data — acceptable for 24K elements (sub-millisecond each), but for 24M elements, a single pass with a custom collector would be warranted.
+
 ---
 
 ## Scenario-Based Questions
+
+**Q: A developer writes `Stream<String> stream = list.stream(); stream.forEach(System.out::println); long count = stream.count();` and gets `IllegalStateException: stream has already been operated upon or closed`. They ask: "Can't I reuse the stream? It still has the same filter and map stages defined." What do you tell them?**
+
+A: Streams are single-use pipelines, not reusable query definitions. Think of a stream as a cursor traversing the source collection — once it reaches the end, it cannot be rewound. Even if the pipeline defines the same intermediate operations, the stream does not replay them from the source; the source's `Spliterator` is consumed irreversibly. The fix is to create a new stream for each terminal operation: `list.stream().forEach(System.out::println); long count = list.stream().count();`. If the same pipeline is reused frequently, extract the source + intermediate stages to a method: `Stream<String> pipeline() { return list.stream().filter(s -> s.length() > 3).map(String::toUpperCase); }`. Each call to `pipeline()` creates a fresh stream backed by a fresh `Spliterator` from the collection, allowing unlimited reuse of the pipeline definition.
 
 **Q: You are building a search autocomplete feature. Users type a query, and you must return the top 10 suggestions from a dictionary of 500K phrases. The suggestions must match by prefix and be ordered by popularity. Users type every keystroke — response must be under 50ms. How do you use streams?**
 

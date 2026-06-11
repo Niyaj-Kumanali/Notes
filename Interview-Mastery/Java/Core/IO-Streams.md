@@ -6,6 +6,8 @@
 
 - **Purpose** — Java I/O Streams are a fundamental API for reading from and writing to data sources — files, network sockets, memory buffers, and the system console — using the abstraction of a continuous flow of data.
 - **Three Generations** — Java provides the original blocking `java.io` stream API (Java 1.0), the `java.nio` buffer-and-channel API with selectors for non-blocking I/O (Java 1.4), and the NIO.2 file system API in `java.nio.file` with asynchronous channels (Java 7). NIO.2 `Path` and `Files` should be your default for all new file I/O code.
+
+  **Why three generations?** Java 1.0's I/O was designed for the thread-per-connection model of the 90s — blocking reads, simple streams, adequate for applets and desktop apps. By Java 1.4, web servers needed to handle 10K+ concurrent connections without 10K threads (each consuming ~1MB of native stack). NIO introduced `Selector` and `Channel` to scale with non-blocking multiplexed I/O. By Java 7, the legacy `java.io.File` class was beyond repair — its boolean return values, symbolic link blindness, and filesystem-ignorant design drove the creation of NIO.2 `Path`, `Files`, and asynchronous channel APIs. Each generation layers on top of the previous: you can still use blocking I/O with NIO channels, and NIO.2 files can be accessed through NIO channels.
 - **Memory-Mapped Files** — `MappedByteBuffer` maps file regions directly into virtual memory, allowing the OS to handle paging transparently and providing 10-100x speed improvements for large-file random access.
 - **Cardinal Rule** — Always close resources using try-with-resources (Java 7+), which guarantees that `close()` is called even when an exception is thrown.
 
@@ -115,6 +117,8 @@ try (Stream<Path> walk = Files.walk(rootDir)) {
 - **Solution** — `BufferedInputStream` wraps an input stream with an internal 8192-byte buffer, reading from the source in large chunks and serving individual bytes from the in-memory buffer. This reduces system calls from 1 billion to approximately 125K for the same 1GB file — a 10,000x reduction.
 - **Default Buffer Size** — 8192 bytes is sufficient for most use cases. Larger buffers (64KB) can help on high-latency storage like network file systems. Always wrap streams with `BufferedInputStream` for binary data and `BufferedReader` for text data.
 
+  **Why 8192?** The default 8192 bytes is exactly 2 × 4096 (the standard OS page size). This alignment means most reads naturally span two page boundaries, allowing the OS to prefetch the next page while processing the current one. Smaller buffers (512 bytes) increase system call frequency. Larger buffers (64KB) provide diminishing returns for sequential access because modern storage subsystems already batch at the kernel level. The 8192 default is a sweet spot that works well across HDDs, SSDs, and network file systems with no tuning required.
+
 ```java
 // BAD: One syscall per byte — extremely slow
 FileInputStream in = new FileInputStream("file");
@@ -166,6 +170,8 @@ MappedByteBuffer buffer = channel.map(
 - **Reading Without Buffering** — Each unbuffered `read()` or `write()` call translates to a system call, and for files processed byte by byte, the overhead of millions of kernel context switches dominates the I/O time. A 500MB file read one byte at a time takes approximately 45 minutes; wrapping with `BufferedInputStream` reduces this to under one minute.
 - **Ignoring Partial Reads** — `InputStream.read(buffer)` is not guaranteed to fill the buffer — it returns the number of bytes actually read, which may be less than the array length. Only `DataInputStream.readFully()` guarantees the requested number of bytes. Processing partial buffers without checking the return value leads to processing stale data from previous reads.
 - **TOCTOU Race Condition** — Using `File.exists()` before accessing a file introduces a Time-of-Check-Time-of-Use race condition — the file could be deleted between the check and the open call. Instead, attempt the operation directly and handle the `FileNotFoundException` or `NoSuchFileException`.
+- **Not Flushing After Writes** — `BufferedOutputStream`, `BufferedWriter`, and `PrintWriter` buffer data in memory. If the JVM crashes before the buffer is flushed to disk, data is silently lost. Always call `flush()` before critical checkpoints or close the stream properly (try-with-resources calls `close()` which flushes). For transactional writes, use `Files.write()` which opens, writes, flushes, and closes atomically.
+- **Assuming available() Returns File Size** — `InputStream.available()` returns the number of bytes that can be read *without blocking*, not the total file size. For a `SocketInputStream`, `available()` may return 0 even though data is arriving. For a `FileInputStream`, it returns the remaining bytes in the file — but only for local files, not for network or pipe streams. Always use `Files.size()` for file length or read in a loop until `read()` returns -1.
 
 ---
 
@@ -195,6 +201,8 @@ public class LogIngestor {
 
 `GZIPInputStream` wraps the underlying `FileInputStream` to decompress gzip data on the fly, avoiding the need to decompress the entire file to disk first. `BufferedReader` wraps the `InputStreamReader` for line-based reading with internal 8KB buffering, ensuring that system call overhead is amortized across many lines. The entire pipeline reads one line at a time — memory consumption stays at approximately 8KB for the buffer plus the size of one line, regardless of whether the file is 10MB or 10GB. Without buffering, each `readLine()` call would cause a system call, and without streaming decompression, the entire decompressed file (potentially 500MB) would need to fit in memory.
 
+**Why this approach?** A naive alternative would decompress the gzip file to a temporary file on disk (`GZIPInputStream` in → `FileOutputStream` out), then re-read the temp file for parsing. This doubles disk I/O (write decompressed data, then read it back) and requires free disk space equal to the decompressed file size (up to 10GB). The streaming pipeline avoids this entirely — data moves from disk → kernel buffer → decompression → character decoding → line parsing in one pass with no intermediate storage. The decorator pattern (`GZIPInputStream` wraps `FileInputStream`, `BufferedReader` wraps `InputStreamReader`) makes each concern independently testable: you can test log parsing with a `StringReader`, decompression with a `ByteArrayInputStream`, and the full pipeline by providing a test gzip file.
+
 ### Scenario 2: Multipart File Upload with Progress
 
 A web application allows users to upload large video files up to 2GB. The server must stream the file directly to disk without loading it entirely into memory, and it must track upload progress to display a progress bar to the user.
@@ -218,6 +226,8 @@ public ResponseEntity<String> handleUpload(HttpServletRequest request) throws IO
 ```
 
 The `ServletInputStream` provides bytes as they arrive over the network, and the `FileOutputStream` writes them directly to disk. The 8KB reusable buffer keeps memory constant regardless of the 2GB file size — no part of the file is ever held in the Java heap. The progress tracker is updated after every buffer write, giving the UI real-time feedback. For further optimization, `FileChannel.transferFrom()` could use zero-copy to write directly from the network socket to the file system without passing through user space.
+
+**Why this approach?** The alternative — reading the entire request body into a `byte[]` or `ByteArrayOutputStream` — would require 2GB of contiguous heap memory, almost certainly triggering an `OutOfMemoryError`. The streaming approach uses fixed memory regardless of file size. The 8KB buffer is small enough to stay in L1 CPU cache, making the read-write loop CPU-efficient as well as memory-efficient. `FileChannel.transferFrom()` with zero-copy would be even faster (no kernel→user→kernel data movement) but requires NIO channels, not the standard `ServletInputStream`.
 
 ### Scenario 3: Configurable Data Export with Character Encoding
 
@@ -243,9 +253,25 @@ public class CsvExporter {
 
 The `OutputStreamWriter` bridges the byte stream to a character stream using the caller-specified charset, and `BufferedOutputStream` ensures that writes are batched into 8KB chunks before hitting the disk. Without explicit charset control via `OutputStreamWriter`, using `FileWriter` would silently use the platform default encoding, corrupting non-Latin text. The `delimiter` parameter allows switching between comma (for standard CSV) and semicolon (for European locales where comma is the decimal separator), and each field is properly quoted and escaped to handle embedded commas, quotes, and newlines.
 
+**Why this approach?** `PrintWriter` is the conventional CSV-writing tool (`println()`, `printf()`) but its auto-flush behavior flushes after every line, turning a single export of 1M records into 1M system calls. The `BufferedOutputStream` + `OutputStreamWriter` + manual `for` loop design batches writes into 8KB chunks, reducing system calls from 1M to roughly 125 (at ~60 bytes per CSV line). The manual loop also allows field-level escaping that would require a library like OpenCSV to achieve with `PrintWriter`. For production CSV exports with millions of records, the difference between buffered and unbuffered writes is seconds versus hours.
+
 ---
 
 ## Scenario-Based Questions
+
+**Q: A microservice receives CSV files from clients in the US, Europe, and Japan. US clients send UTF-8 files, European clients send ISO-8859-1 files, and Japanese clients send Shift-JIS files. The parser reads every file and produces garbled text for non-UTF-8 files. How do you fix this without asking every client to change their encoding?**
+
+A: Never use `FileReader` or the no-arg `Files.readString()` — both use the platform default charset, which on the server is likely UTF-8 and will corrupt ISO-8859-1 and Shift-JIS files. The fix is to detect or negotiate the charset per client. The simplest approach is to accept a `charset` query parameter or HTTP header: `Content-Type: text/csv; charset=Shift-JIS`. For clients that cannot declare encoding, detect it heuristically by examining byte-order marks (BOM) or the byte distribution:
+```java
+try (InputStream in = Files.newInputStream(path)) {
+    Charset detected = detectCharset(in); // read BOM or analyze bytes
+    try (Reader reader = new BufferedReader(
+            new InputStreamReader(in, detected))) {
+        // parse CSV with correct charset
+    }
+}
+```
+Third-party libraries like Apache Tika or `juniversalchardet` implement charset detection using Mozilla's charset detection algorithm. Once the charset is known, wrap the `InputStream` with an `InputStreamReader` specifying the detected charset explicitly. The fundamental rule: `InputStreamReader` is the bridge between bytes and characters, and `Charset` is a mandatory parameter, not optional. Default charset is never correct for a multi-region deployment.
 
 **Q: You are building a file watcher service that monitors a directory for new CSV files, processes them, and moves them to an archive. Files arrive at unpredictable times (from 1 to 1000 per minute). Each file is 100MB-2GB. How do you design the I/O pipeline to handle bursts without OOM or thread starvation?**
 
@@ -560,3 +586,4 @@ In Java 9+, the `InputStreamReader(InputStream)` constructor is annotated with `
 - **Use try-with-resources for every I/O resource** — Unclosed file handles accumulate until the process hits the OS's file descriptor limit (typically 1024 on Linux), causing all subsequent file operations to fail with `Too many open files`. Every `Files.lines()` call must be wrapped: `try (Stream<String> lines = Files.lines(path)) { ... }`.
 - **Use DataInputStream for binary data with known structure** — The `readFully()` method guarantees that the requested number of bytes is read or throws `EOFException`, unlike `InputStream.read(byte[])` which may return fewer bytes. For network protocols and binary file formats, `readInt()`, `readLong()`, and `readUTF()` handle byte ordering and framing correctly.
 - **Use memory-mapped files for random-access operations on large files** — `FileChannel.map()` maps a file region into virtual memory, and the OS manages the page cache, keeping frequently accessed pages in physical memory. For a 10GB database file with random 4KB page accesses, memory-mapped I/O can be 10-100x faster than `RandomAccessFile`.
+- **Know that Files.walk() traverses depth-first, not breadth-first** — `Files.walk()` performs a depth-first pre-order traversal (children before siblings). For operations like deleting a directory tree, the depth-first order is correct — you must delete children before parents. For operations that need breadth-first (e.g., limiting recursion depth), use `Files.walk()` with a max depth parameter `Files.walk(root, maxDepth)` or collect into levels with `Files.list()` in a loop.
