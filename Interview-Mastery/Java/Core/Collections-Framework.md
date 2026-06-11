@@ -280,33 +280,49 @@ A sorted, concurrent map per partition — which is exactly what systems like Ka
 
 Use `HashSet<Node>` for both the current-path set (cycle detection via recursion stack tracking) and the fully-processed set (avoid revisiting resolved subgraphs). On entering a node, add it to the path set — if it is already present, a cycle exists. After processing all children, remove it from the path set (backtracking) and add it to the processed set so future paths reaching this node skip the subtree. Both sets must be `HashSet` because O(1) membership checks are essential at millions of nodes — `TreeSet`'s O(log n) would add tens of millions of comparisons. For memory-constrained environments with sequential integer node IDs, a `BitSet` or `RoaringBitmap` stores millions of visited states in a few megabytes.
 
+> **Interview follow-up:** The recursive DFS approach uses a call stack that may overflow for millions of nodes. How would you implement this iteratively while still using the same path-set and processed-set collections?
+
 **Q: An ad-serving platform needs the top 50 ads by revenue from a stream of 10 million impressions per hour. Only one pass is allowed.**
 
 Use a min-heap via `PriorityQueue` capped at 51 elements. For each impression, add the ad to the heap; if size exceeds 50, evict the minimum. After the full stream, the heap contains exactly the top 50. Time complexity is O(n log 50) — effectively O(n) — compared to O(n log n) for full sorting. For parallel processing, each thread maintains its own local top-50 heap, and the heaps are merged at the end using the same eviction approach. This "top-K with heap eviction" pattern is the basis for top-K aggregation in MapReduce, Spark, and Flink.
+
+> **Interview follow-up:** The candidate mentioned merging per-thread heaps at the end. What if the stream is infinite (a live ad feed) — how would you maintain a sliding-window top-K over the last hour without storing the entire hour's data?
 
 **Q: You are designing a connection pool. Threads borrow and return connections. If all connections are in use, a thread must wait. When a connection is returned, waiting threads should be notified. What collection do you use?**
 
 Use `LinkedBlockingQueue<Connection>` with a fixed capacity. Borrowing calls `poll(timeout, unit)` — returns null on timeout rather than blocking indefinitely. Returning calls `offer(conn)`, which internally wakes one waiting thread via a `Condition` object backed by `LockSupport.park()`/`unpark()`. Separate `ReentrantLock` instances for take and put allow concurrent borrowers and returners with minimal contention. Constructing with `fairness=true` enforces FIFO waiting, preventing starvation under high load — in production systems without fairness, some threads can wait indefinitely while others acquire connections repeatedly.
 
+> **Interview follow-up:** The candidate chose fairness=true to prevent starvation. Under what throughput condition does fairness become a bottleneck rather than a benefit, and would a `Semaphore` wrapping a non-blocking queue behave differently?
+
 **Q: A collaborative editing application must merge edits from multiple users. Each edit has a timestamp and a position. How do you track edit history for OT or CRDT?**
 
 Use `ConcurrentSkipListMap<Position, Edit>` for the current document state. It provides O(log n) insertion, ordered iteration, and snapshot iterators for consistent reads during live sessions. Per-user edit histories are `LinkedList<Edit>` (append-only), merged to compute the OT transformation function when concurrent edits conflict. The skip-list is particularly well-suited here because it achieves probabilistic balancing without rebalancing locks — unlike a Red-Black tree, no exclusive lock is acquired during restructuring. The `subMap()` and `headMap()` views allow efficient range queries to identify spatially overlapping edits for conflict resolution.
+
+> **Interview follow-up:** The candidate mentioned per-user `LinkedList` histories for OT merging. If a user goes offline for hours and reconnects, their edit history may grow unbounded. How would you prune or compact per-user histories without losing correctness?
 
 **Q: You need a multi-level cache (L1: heap, L2: Redis, L3: database). Concurrent requests for the same missing key must not cascade. How do you coordinate?**
 
 Use `ConcurrentHashMap<K, CompletableFuture<V>>` as L1. On a cache miss, call `cache.computeIfAbsent(key, k -> fetchFromL2(k))` — atomically ensures only the first caller triggers the fetch while all concurrent callers for the same key block on the same `CompletableFuture`. The fetch checks L2, then L3 on L2 miss, and populates both before completing the future. This "future-based deduplication" or "coalescing cache" pattern prevents the thundering-herd problem where thousands of concurrent requests for an uncached key simultaneously hit the database. Error handling must cache a sentinel value (e.g., `Optional.empty()`) on failure — if the future throws and is not cached, every subsequent caller triggers a new fetch, amplifying load exponentially.
 
+> **Interview follow-up:** The candidate mentioned caching a sentinel on failure. How long should the sentinel remain in the cache before the system is willing to retry the actual fetch?
+
 **Q: A production service uses `ConcurrentHashMap.computeIfAbsent()` to lazily load configuration. After a deployment, database load spikes 100× and the service becomes unresponsive. What happened?**
 
 The mapping function threw an exception — likely a database timeout. When the mapping function throws, `computeIfAbsent()` does not cache the result. Every subsequent caller retries, each hitting the already-overloaded database and failing, creating a feedback loop. Fix: wrap the mapping function to catch exceptions and cache a sentinel value (`Optional.empty()`), then add a circuit breaker to stop retrying after a threshold of consecutive failures.
+
+> **Interview follow-up:** The candidate mentioned a circuit breaker to stop retrying. How would you distinguish between a transient failure (database timeout, worth retrying soon) and a permanent failure (invalid key, never worth retrying) when choosing the sentinel's expiration strategy?
 
 **Q: After migrating from JDK 8 to JDK 11, memory usage increases for `HashMap`-heavy workloads. What changed?**
 
 Most likely: if `-Djdk.map.althashing.threshold` was set in JDK 8 for hash-collision DoS protection, it was removed in JDK 11 (deprecated and dropped). This can increase collision rates for certain key distributions. The JDK 11 compact strings change (Latin-1 encoding by default) also alters `hashCode()` distribution for ASCII strings. Diagnose with a heap dump comparing bucket fill distributions before and after migration.
 
+> **Interview follow-up:** The candidate suggested checking for `althashing` but the default threshold is Integer.MAX_VALUE in JDK 8, meaning it was never enabled unless explicitly configured. What other JDK 11 change could increase HashMap memory, such as the removal of the permanent generation or changes to string deduplication?
+
 **Q: A developer replaced `ConcurrentHashMap` with `HashMap` wrapped in `Collections.synchronizedMap()` because "they are equivalent." After deployment, p99 latency increases from 10ms to 500ms. Why?**
 
 `synchronizedMap()` acquires a single intrinsic lock on every read and write. With 100 concurrent threads, 99 queue up on that mutex — and reads block each other even though reads could safely proceed in parallel. `ConcurrentHashMap` reads are entirely lock-free. Additionally, `synchronizedMap` provides no atomic compound operations, so the replacement likely introduced `get()`+`put()` patterns with race windows where `computeIfAbsent()` or `merge()` were previously used.
+
+> **Interview follow-up:** The candidate identified that reads block each other as the main cause. If the workload was 99% reads and 1% writes, would the 10ms → 500ms degradation still hold, or would biased locking in older JDKs have mitigated this?
 
 ---
 

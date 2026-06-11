@@ -308,9 +308,13 @@ Two stream pipelines process the same source data: the first computes per-servic
 
 A: Streams are single-use pipelines, not reusable query definitions. Think of a stream as a cursor traversing the source collection — once it reaches the end, it cannot be rewound. Even if the pipeline defines the same intermediate operations, the stream does not replay them from the source; the source's `Spliterator` is consumed irreversibly. The fix is to create a new stream for each terminal operation: `list.stream().forEach(System.out::println); long count = list.stream().count();`. If the same pipeline is reused frequently, extract the source + intermediate stages to a method: `Stream<String> pipeline() { return list.stream().filter(s -> s.length() > 3).map(String::toUpperCase); }`. Each call to `pipeline()` creates a fresh stream backed by a fresh `Spliterator` from the collection, allowing unlimited reuse of the pipeline definition.
 
+> **Interview follow-up:** The candidate said streams are single-use but suggested a method that returns a new stream each time. If the stream's source is a `Collection`, each call creates a fresh `Spliterator`. But what if the source is `Files.lines()` — does the same pattern apply, and what about resource cleanup for the returned stream?
+
 **Q: You are building a search autocomplete feature. Users type a query, and you must return the top 10 suggestions from a dictionary of 500K phrases. The suggestions must match by prefix and be ordered by popularity. Users type every keystroke — response must be under 50ms. How do you use streams?**
 
 A: Do not use streams for the online hot path — stream pipeline overhead (spliterator creation, lambda dispatch, collector allocation) adds 1-5ms per evaluation, which is too expensive within a 50ms budget that also includes network latency and prefix matching. Instead, use a `Trie` data structure for the prefix lookup (O(k) time where k is the query length, with zero allocation) and a priority queue for ranking the top results. Streams are appropriate for the offline index build: `dictionary.stream().sorted(byPopularity).collect(Collectors.toList())` pre-sorts the dictionary by popularity before building the trie. The lesson: streams prioritize readability and declarativeness over raw performance — avoid them in latency-critical hot paths where every microsecond counts.
+
+> **Interview follow-up:** The candidate ruled out streams for the hot path but used them for the offline sort. If the dictionary updates in real-time (new phrases added every minute), how would you incrementally update the sorted popularity index without re-sorting 500K phrases on every update?
 
 **Q: You have a microservice that receives a list of order IDs from the API gateway. You need to fetch each order from a downstream service (HTTP call), enrich it with customer data from another service, and return the combined result. Each fetch takes 50-200ms. How do you run these calls concurrently with streams?**
 
@@ -324,6 +328,8 @@ List<Order> orders = futures.stream()
     .toList();
 ```
 The first stream creates all HTTP call futures asynchronously (non-blocking, O(1) per submission), and the second stream joins them, blocking the current thread on each future. Using a dedicated `executor` with a bounded thread pool sized to `cores * (1 + waitTime / computeTime)` prevents resource exhaustion and isolates the I/O threads from the compute pool. This pattern provides N-way concurrency limited only by the thread pool size.
+
+> **Interview follow-up:** The candidate used two streams — one to submit all futures, then another to join them. Why is this two-pass approach (submit all, then join all) better than submitting and joining each future in a single `map()` call within the same stream?
 
 **Q: You have a list of 10M transactions and need to compute: total revenue, average transaction value, number of fraudulent transactions, and revenue by merchant category. How do you avoid iterating 4 times?**
 
@@ -344,6 +350,8 @@ Stats stats = transactions.stream().collect(Collector.of(
 ```
 For the category grouping in the same pass, `Collectors.teeing()` combines two collectors: one for the aggregate stats and another for the `groupingBy` on merchant category. A single pass over 10M elements is approximately 10ms on modern hardware — four separate passes would be 40ms with higher cache miss rates.
 
+> **Interview follow-up:** The candidate used a custom `Collector` with mutable accumulator arrays. If the stream is parallelized, the combiner function merges partial results — does `teeing()` handle parallel accumulation correctly for both collectors, or does it require the combiner to be associative and thread-safe?
+
 **Q: A stream pipeline processes a file with `Files.lines()`. Halfway through, a line has malformed data and throws a runtime exception. The file handle is never closed. How do you ensure robust resource cleanup?**
 
 A: Always wrap `Files.lines()` in a try-with-resources statement so that `close()` is invoked on the stream even when an exception is thrown inside the pipeline:
@@ -356,6 +364,8 @@ try (Stream<String> lines = Files.lines(path)) {
 }
 ```
 Without try-with-resources, if a lambda in `map()` or `forEach()` throws an uncaught `RuntimeException`, the stream's `onClose()` handlers never execute and the underlying `FileChannel` is leaked. This leak is particularly dangerous in long-running applications because the operating system limits the number of open file descriptors per process, and once exhausted, all file I/O operations fail with `IOException: Too many open files`. For production robustness, also catch exceptions within individual `map()` calls, log the problematic line, filter out the null, and let the pipeline continue with the remaining records.
+
+> **Interview follow-up:** The candidate mentioned catching exceptions within `map()` and filtering nulls to continue processing. If a line causes an exception, the stream pipeline catches it, logs, and returns null — does `forEach()` then attempt to process the null element? How would you design the pipeline to skip that element entirely?
 
 **Q: You need to paginate through a large dataset (1M records) returned from a database cursor in batches of 100. The cursor is stateful and not thread-safe. How do you process all records using streams without loading them all into memory?**
 
@@ -376,6 +386,8 @@ public class CursorSpliterator<T> extends Spliterators.AbstractSpliterator<T> {
 // Use: StreamSupport.stream(new CursorSpliterator<>(cursor), false)
 ```
 The custom spliterator reads one record at a time from the database cursor via `tryAdvance()`, which is called by the stream pipeline for each element. The pipeline chains operations (filter, map, collect) without ever holding all 1M records in memory because the spliterator pulls records on demand. For parallel processing, implement `trySplit()` to partition the cursor by key range, but note that the cursor itself is not thread-safe — each partition must use its own cursor or the data must be pre-partitioned in the database query.
+
+> **Interview follow-up:** The candidate mentioned implementing `trySplit()` for parallel processing by key range. If the data is not evenly distributed (e.g., 90% of records fall in a single key range), how would the work imbalance affect parallel performance, and what alternative splitting strategy would you use?
 
 **Q: A system streams sensor readings at 100K events per second. You need to compute the moving average over a 5-second sliding window. The stream is infinite. How do you maintain only the relevant data?**
 
@@ -400,9 +412,13 @@ public class SlidingWindowAverage {
 ```
 This is O(1) per event with zero heap allocation after the initial buffer allocation — no `ArrayList` resizing, no `LinkedList` node creation, no garbage collection pressure. The running sum avoids iterating the entire 500K-element window on each event, which would be prohibitive at 100K events per second. After the buffer fills, each new event evicts the oldest value, subtracts it from the sum, adds the new value, and computes the average — all in a few nanoseconds. In real-time stream processing, this allocation-free pattern is essential because GC pauses at 100K events per second would cause data loss while the application is stopped.
 
+> **Interview follow-up:** The candidate used a running sum to avoid iterating the window. What happens if the window needs to support min, max, or percentile (p99) instead of just average — can the running-sum trick be adapted, or do those metrics require a different data structure like a segment tree or a deque for a monotonic queue?
+
 **Q: You are building a data validation service. Each record must pass 15 validation rules (some are cheap string checks, others are expensive DB lookups). You want to fail fast — stop at the first violation — but also want to collect ALL violations for the audit log. How do you design this with streams?**
 
 A: Use two separate stream pipelines with different terminal operations for the two different requirements. For the fail-fast path used in the request thread, use `rules.stream().filter(r -> !r.test(record)).findFirst()` — the `findFirst()` short-circuits immediately on the first rule violation and returns an `Optional` of the failing rule, allowing the API to return an error response to the client in milliseconds instead of waiting for all 15 rules to evaluate. For the full audit path, use `rules.stream().map(r -> r.validate(record)).filter(Objects::nonNull).collect(toList())`, which evaluates all rules, collects every violation message, and logs the complete results to the audit store. Submit the full validation to a background `ExecutorService` so the request thread returns immediately with either a pass or the first failure, while the audit trail is populated asynchronously without affecting response latency. The key architectural insight is that streams support both short-circuit and full-evaluation modes through different terminal operations — you do not need separate implementations.
+
+> **Interview follow-up:** The candidate suggested submitting the full audit validation to a background `ExecutorService`. If the request thread's fail-fast check passes but the background audit pipeline finds violations, how would you handle the inconsistency — the client was told the record passed, but auditing later flags it as a violation?
 
 **Q: You have a stream of events, each with a `LocalDateTime timestamp`. Events can arrive out of order (up to 30 seconds late). You need to group events into 1-minute windows and process each window in chronological order. How do you handle the watermark and late data?**
 
@@ -426,6 +442,8 @@ public class WindowedProcessor {
 ```
 The watermark is the point in event-time before which the system considers all events to have been received — events with timestamps older than `currentTime - watermark` are discarded or processed in a late-data handler. The `TreeMap` keeps windows sorted by their timestamp key, and `headMap()` efficiently retrieves and removes all completed windows (those whose end time is older than the watermark). This is exactly how Apache Flink's `TumblingEventTimeWindows` and Kafka Streams' windowed aggregations work internally.
 
+> **Interview follow-up:** The candidate used a `TreeMap` with `headMap()` to evict completed windows. If late-arriving events arrive after `headMap().clear()` has already been called, they are lost. How would you implement a late-data handler that stores these events separately for reprocessing rather than silently dropping them?
+
 **Q: You need to join two streams: a stream of Orders and a stream of Payments. Each order has multiple payments. You must enrich each order with its total paid amount. Both streams are large (millions). How do you join them with streams?**
 
 A: Use a two-pass hash join approach: the first stream pass collects payments into a lookup map, and the second pass enriches orders using map lookups:
@@ -444,6 +462,8 @@ List<EnrichedOrder> enriched = orders.stream()
 ```
 The first pass builds a `HashMap` in O(n) time and O(n) memory where n is the number of payments, using `groupingBy` with a downstream `reducing` collector that sums amounts per order ID. The second pass iterates orders and performs O(1) lookups into the map, producing the enriched result. For datasets too large to fit in memory, streams are not the right tool — use an external sort-merge join (sort both datasets by the join key and merge with a cursor) or push the join down to the database. Streams excel for in-memory hash joins but have no native support for streaming joins across unbounded sources, which is where Apache Flink, Kafka Streams, or Spark Structured Streaming are appropriate.
 
+> **Interview follow-up:** The candidate mentioned an external sort-merge join for datasets too large for memory. If both the orders and payments streams are infinite and unbounded (a live event stream), how would you implement a streaming join that accounts for late payments arriving minutes after the corresponding order — does the hash-join approach still work, or does it require a state store with TTL?
+
 **Q: A stream of transactions produces a side effect (logging) in `peek()` for debugging. The pipeline is later parallelized, and the log output is jumbled across threads. How do you safely add logging to a stream pipeline?**
 
 A: `peek()` is documented as a debugging aid and is not guaranteed to execute in order when the stream is parallelized — elements from different partitions are logged by different threads, and the output interleaves non-deterministically. For safe, ordered logging with parallel streams, use `forEachOrdered()` instead of `forEach()` as the terminal operation:
@@ -453,6 +473,8 @@ transactions.parallelStream()
     .forEachOrdered(t -> log.info("Large tx: {}", t.getId()));
 ```
 `forEachOrdered()` respects encounter order, so log output is deterministic and ordered even in parallel execution — though the ordering guarantee reduces parallelism because elements must be re-sequenced after processing. A better approach is to separate logging from the pipeline entirely: log in the terminal operation, not in `peek()`, or use `collect(Collectors.collectingAndThen(toList(), list -> { list.forEach(t -> log.info(...)); return list; }))` which logs the entire result after the pipeline completes, providing clean, ordered, and deterministic log output regardless of parallelism.
+
+> **Interview follow-up:** The candidate suggested `collectingAndThen` which materializes the entire stream into a list before logging. For a stream of 10 million transactions, this list holds 10 million objects in memory at once. How would you add ordered logging to a parallel stream without materializing the entire result set first?
 
 ---
 

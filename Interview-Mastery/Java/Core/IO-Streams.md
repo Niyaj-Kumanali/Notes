@@ -273,6 +273,8 @@ try (InputStream in = Files.newInputStream(path)) {
 ```
 Third-party libraries like Apache Tika or `juniversalchardet` implement charset detection using Mozilla's charset detection algorithm. Once the charset is known, wrap the `InputStream` with an `InputStreamReader` specifying the detected charset explicitly. The fundamental rule: `InputStreamReader` is the bridge between bytes and characters, and `Charset` is a mandatory parameter, not optional. Default charset is never correct for a multi-region deployment.
 
+> **Interview follow-up:** The candidate mentioned heuristic charset detection using byte distribution. For a high-throughput pipeline processing 10K files per day, how would you avoid running detection on every file and instead cache or negotiate the charset per client?
+
 **Q: You are building a file watcher service that monitors a directory for new CSV files, processes them, and moves them to an archive. Files arrive at unpredictable times (from 1 to 1000 per minute). Each file is 100MB-2GB. How do you design the I/O pipeline to handle bursts without OOM or thread starvation?**
 
 A: Use a bounded thread pool with a `BlockingQueue<Path>` to decouple file discovery from processing, and stream each file lazily via `Files.lines()`:
@@ -302,6 +304,8 @@ try (WatchService watcher = FileSystems.getDefault().newWatchService()) {
 }
 ```
 The four key design decisions are: `Files.lines()` streams each file lazily without loading it entirely into memory, preventing OOM regardless of file size; a bounded thread pool of 4 workers prevents thread starvation during bursts of 1000 files per minute; the `BlockingQueue` decouples high-speed file discovery from slower processing with natural backpressure when the queue fills; and `WatchService` uses OS-level file system events (inotify on Linux, ReadDirectoryChanges on Windows) so there is zero CPU cost when no files are arriving.
+
+> **Interview follow-up:** The candidate chose 4 worker threads for the pool. If files arrive at 1000 per minute and each takes 30 seconds to process, the queue grows by ~500 files per minute. How would you decide whether to add more workers or add backpressure by rejecting files when the queue exceeds a threshold?
 
 **Q: A service must read a config file that is updated atomically (write to temp file, rename). The service should use the latest config within 5 seconds of a change without polling every few seconds. How do you design this with NIO.2?**
 
@@ -335,6 +339,8 @@ public class HotReloadConfig {
 ```
 `WatchService` uses OS-level file system event notifications with no polling overhead — the thread sleeps in the kernel until a file system event occurs. The `volatile` keyword on the `config` reference provides the happens-before guarantee required for other threads to see the updated config immediately. The atomic write pattern (`Files.move(temp, target, ATOMIC_MOVE)`) ensures that the reader never sees a partially written file, and `Files.readString()` reads the entire config in one operation — acceptable because config files are typically under 1MB.
 
+> **Interview follow-up:** The candidate used `WatchService.poll(5, SECONDS)` and a `volatile` reference. If the config file is updated twice within the same 5-second polling interval, would the second update be missed? How would you coalesce rapid consecutive updates?
+
 **Q: A microservice communicates with a legacy system over a TCP socket using a custom binary protocol. Messages are length-prefixed (4 bytes big-endian length + payload). The connection is long-lived. How do you read messages without blocking the entire application?**
 
 A: Use a dedicated single thread with `DataInputStream` for its framing guarantees, isolating the blocking I/O from the rest of the application:
@@ -359,6 +365,8 @@ public class TcpClient {
 }
 ```
 `DataInputStream.readInt()` correctly assembles 4 bytes into a big-endian `int`, and `readFully()` guarantees that exactly `length` bytes are read — unlike raw `InputStream.read(byte[])` which may return fewer bytes. The dedicated single-thread executor keeps the blocking I/O isolated so the rest of the application handles requests concurrently. For higher throughput with fewer threads, use NIO's `Selector` with a `ByteBuffer` to accumulate partial reads, but for a single long-lived connection, the dedicated thread approach is simpler and equally efficient.
+
+> **Interview follow-up:** The candidate mentioned NIO Selector as an alternative. If the legacy system sends 1000 messages per second over the same connection, at what message rate does the Selector-based approach become meaningfully better than the dedicated thread with DataInputStream?
 
 **Q: A batch job processes 1M records. For each record, it reads a file from disk, transforms it, and writes a new file. The job takes 6 hours. Profiling shows 40% CPU and 60% I/O wait. How do you overlap computation with I/O to improve throughput?**
 
@@ -388,6 +396,8 @@ CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 ```
 `AsynchronousFileChannel` uses OS-level asynchronous I/O where available (IOCP on Windows) or a thread-pool-backed implementation (on Linux). Processing four files concurrently allows overlapping — while file A's I/O is waiting, file B's data is being transformed on the CPU. This converts the 60% I/O wait time into useful computation, reducing total processing time from 6 hours to approximately 3.5 hours. The `ioExecutor` is a dedicated thread pool sized to the number of concurrent file operations, preventing the I/O tasks from competing with the application's main processing threads.
 
+> **Interview follow-up:** The candidate estimated a reduction from 6 hours to 3.5 hours with 4 concurrent files. The remaining 3.5 hours is still mostly I/O wait — at what concurrency level does adding more parallel files stop improving throughput and start increasing latency due to disk contention?
+
 **Q: A Spring Boot application serves static assets (images, CSS, JS). Under load, file reads show high latency. The OS cache helps, but first requests are slow. How do you reduce file I/O latency for static assets?**
 
 A: Preload commonly accessed files into `MappedByteBuffer` at application startup and serve from memory with zero-copy buffer duplication:
@@ -412,6 +422,8 @@ public class AssetCache {
 }
 ```
 `FileChannel.map()` creates a memory-mapped region — the OS loads pages on demand when the data is first accessed, but the mapping itself is established at startup rather than per-request, eliminating per-request `open()` and `close()` overhead. The `.duplicate()` method returns a new `ByteBuffer` that shares the same backing memory, providing zero-copy reads — no data is copied from the mapped buffer to the application heap. For a production system, combine this with proper HTTP caching headers (ETag, Cache-Control) and a CDN; the memory-mapped cache optimizes the server-side path for requests that miss the CDN cache.
+
+> **Interview follow-up:** The candidate used `MappedByteBuffer` with `.duplicate()` for zero-copy reads. If an asset file is updated on disk (e.g., a new version of `app.js` deployed), do memory-mapped readers see the new content immediately, or would they need to remap?
 
 **Q: You need to tail a growing log file (like `tail -f`) and stream new lines to a WebSocket client. The log file is written by another process. How do you read only new data without re-reading the entire file?**
 
@@ -440,6 +452,8 @@ public class LogTailer {
 ```
 `FileChannel` allows seeking to any byte position with `position()`, so we track where we left off and only read the bytes beyond that point. `RandomAccessFile` opens the file in read mode without locking, so the writer process is not blocked. The 100ms polling interval is a reasonable trade-off between near-real-time latency (max 100ms delay) and CPU usage (10 polls per second). For production use, libraries like Apache Commons IO `Tailer` handle log rotation detection, encoding, and configurable polling with less code.
 
+> **Interview follow-up:** The candidate used a 100ms polling interval. If the log file is rotated (deleted and replaced by the writer), the `RandomAccessFile` still references the deleted file's inode. How would you detect log rotation and reopen the file handle?
+
 **Q: A file parser reads a binary format where records are variable-length but have a fixed-size header (32 bytes) containing the record length. The file is 50GB. How do you parse it efficiently using memory-mapped I/O?**
 
 A: Memory-map the file in 1GB regions and parse sequentially with `ByteBuffer`, handling the edge case where records span region boundaries:
@@ -467,6 +481,8 @@ public class BinaryParser {
 ```
 Memory-mapping avoids copying data between kernel space and user space — the file data is directly accessible as a `ByteBuffer` in the process's virtual address space. The 1GB `REGION_SIZE` maps a large chunk at a time, with the OS handling demand paging so only the accessed pages are loaded into physical memory. Sequential access within a mapped region is fast because the OS prefetches subsequent pages. The outer loop handles the edge case where a record header at the end of one region's data would exceed the mapped region — in that case, the inner loop breaks, the position is updated, and a new 1GB region is mapped starting from the record boundary.
 
+> **Interview follow-up:** The candidate chose 1GB as the mapping region size. On a 32-bit JVM, the virtual address space limits individual mappings. What is the maximum `MappedByteBuffer` size on a 32-bit JVM, and how does this change the parsing strategy for a 50GB file?
+
 **Q: A REST API aggregates data from 10 upstream services. Each upstream call returns JSON. The API currently calls each service sequentially (10 x 200ms = 2s total). How do you use NIO to parallelize the HTTP calls without creating 10 threads per request?**
 
 A: Use Java 11+ `HttpClient` with `sendAsync()` which uses NIO non-blocking I/O internally, allowing a single small thread pool to handle thousands of concurrent connections:
@@ -486,6 +502,8 @@ public CompletableFuture<AggregatedResponse> aggregate() {
 }
 ```
 Java 11's `HttpClient` uses NIO `Selector` internally, so a single HTTP connection pool of 10-20 connections handles all concurrent calls without a thread-per-connection model. The `sendAsync()` method returns immediately with a `CompletableFuture`, and the underlying NIO selector processes the responses as they arrive. The total response time drops from 2 seconds (serial 200ms x 10) to approximately 200ms (the slowest upstream service), with the connection pool shared across all API requests so that 100 concurrent API requests do not create 1000 threads.
+
+> **Interview follow-up:** The candidate mentioned a shared connection pool across requests. If one of the 10 upstream services takes 10 seconds to respond, does the NIO selector thread block, or can it continue processing other requests while waiting?
 
 **Q: A service receives files via FTP, processes them, and archives them to S3. Files are 10MB-5GB. Occasionally a file is truncated (FTP transfer interrupted). How do you detect incomplete files before processing?**
 
@@ -508,6 +526,8 @@ try (InputStream in = Files.newInputStream(path)) {
 }
 ```
 The marker file approach is simpler: the FTP process creates a `.done` file atomically only after the upload is fully complete, and the processing service only looks for files with a matching `.done` marker. For stronger guarantees against network corruption during transfer, compute a SHA-256 hash during upload and compare it against a distributed checksum file. The `Files.newInputStream()` with `DigestUtils.sha256()` streams the file without loading it into memory, making it safe for 5GB files.
+
+> **Interview follow-up:** The candidate suggested the marker file approach. If the FTP process crashes after the data file is fully written but before the `.done` file is created, the file is never processed. How would you implement a periodic reconciliation that detects orphaned data files without a corresponding `.done` marker?
 
 **Q: A legacy application writes logs using `System.out.println()`. You need to redirect all stdout to a rolling file without modifying the application code. How do you do this at the JVM level?**
 
@@ -541,6 +561,8 @@ public class StdoutRedirector {
 }
 ```
 `System.setOut()` replaces the global stdout `PrintStream` with a custom implementation. The custom `OutputStream` wraps a rolling file writer that creates a new log file every hour, with `BufferedOutputStream` batching the many small `write()` calls from `println()` into 8KB chunks. The `autoFlush=true` parameter ensures each line is written to disk promptly — a trade-off between durability and write amplification. For production use, a proper logging framework like Logback handles rotation, compression, retention, and cleanup with far less custom code.
+
+> **Interview follow-up:** The candidate mentioned `System.setOut()` wrapped in a custom `OutputStream`. If the legacy application also calls `System.err.println()`, those messages are lost to stderr. How would you capture both stdout and stderr into the same rolling file without modifying the application code?
 
 ---
 
