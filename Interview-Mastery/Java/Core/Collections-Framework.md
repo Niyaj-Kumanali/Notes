@@ -262,13 +262,19 @@ Use a `CopyOnWriteArrayList` for the leaderboard snapshot — sort it once per r
 
 Use `ConcurrentHashMap<String, ArrayDeque<Long>>` with per-key atomicity via `compute()`. The remapping function runs under a bucket-level lock scoped to that specific key: it evicts timestamps older than 1 second from the deque's head, checks whether the count exceeds the limit, and pushes the current timestamp to the tail — all atomically. Concurrent requests for different users proceed without contention; concurrent requests for the same user serialize only at that bucket. A background task should periodically clean up entries whose deques are empty to prevent memory growth from users who hit the limiter once and never return.
 
+> **Interview follow-up:** The `ArrayDeque` grows unbounded for a user who never stops sending requests. How would you bound per-user memory without breaking the sliding-window semantics?
+
 **Q: You are implementing an undo/redo system for a text editor. Users can perform thousands of operations. The undo stack must not grow unbounded. How do you design this with standard collections?**
 
 Use `ArrayDeque` as a bounded stack by manually enforcing a capacity limit — when pushing a new operation, if the deque is at capacity, poll the oldest entry from the front before pushing the new one to the back. The redo stack is a separate `ArrayDeque` that is cleared on every new user action that is not an undo or redo, because any new action invalidates the forward history. `ArrayDeque` is correct here: no per-node allocation means no GC pressure on every keystroke, and O(1) amortized `addLast()`/`pollFirst()` means the cost is constant regardless of how deep the history grows.
 
+> **Interview follow-up:** The candidate mentioned clearing the redo stack on new actions. What happens if the user does undo → edit → undo? Should the re-applied operation appear in the original undo history, or is that a separate branch?
+
 **Q: A microservice produces events and consumers must process them in order per partition. If consumer A dies, another consumer must resume from the last committed offset. Which collection model does this resemble?**
 
 A sorted, concurrent map per partition — which is exactly what systems like Kafka use internally. `ConcurrentSkipListMap` fits the model: monotonically increasing offsets as keys, O(log n) lookups, and `subMap()` range queries to retrieve records from offset X to Y without scanning the full partition. The skip-list's naturally concurrent structure supports lock-free reads and fine-grained write locking, which mirrors how consumers track positions: a sorted map where the current offset advances sequentially and any consumer can seek to an arbitrary position. Snapshot iterators allow consistent traversal during consumer rebalancing, even while producers continue writing new offsets.
+
+> **Interview follow-up:** The candidate mentioned snapshot iterators as a benefit. What happens to the snapshot's memory when the producer keeps writing new offsets while a consumer is iterating a large range? Does the snapshot grow, or is it fixed at creation time?
 
 **Q: You are building a dependency resolver that must detect circular dependencies. You have millions of nodes. Which collection do you use for the DFS visited set?**
 
