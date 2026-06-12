@@ -125,12 +125,18 @@ public void handleOrderPlaced(OrderPlacedEvent event) {
 
 ## Common Mistakes
 
-- **Self-invocation of `@Transactional` methods** — The AOP proxy is bypassed, so no transaction is started. Extract the method to a separate bean to fix this. This *looks correct* because both methods are in the same service class and the annotation is clearly present; the proxy bypass is invisible at the source code level.
-- **Catching and swallowing exceptions inside `@Transactional`** — Spring never sees the exception, so the transaction commits despite the error. Always re-throw or call `setRollbackOnly()`. This *looks correct* because standard exception handling patterns (try/catch/log) work everywhere else in Java; the silent commit happens because Spring's interceptor never receives the exception signal.
-- **`@Transactional` on private methods** — AOP proxies cannot intercept private method calls, so the annotation is silently ignored on private methods. This *looks correct* because the annotation compiles and the IDE doesn't warn; the silent failure only surfaces when the database shows uncommitted partial changes.
-- **Long-running transactions** — Holding database locks across slow operations increases contention and reduces throughput. Keep transactions as short as possible. This *looks correct* because a single transaction seems safer (atomicity guarantees), and the contention cost is invisible until concurrent requests pile up waiting for the same locked rows.
-- **Not setting `rollbackFor` for checked exceptions** — Checked exceptions do not trigger rollback by default. Always explicitly configure `rollbackFor` when a checked exception should cause a rollback. This *looks correct* because an exception being thrown intuitively should roll back the transaction; the Spring default of only rolling back on RuntimeException is a design decision that surprises most developers.
-- **`REQUIRES_NEW` exhausting the connection pool** — Each `REQUIRES_NEW` holds a separate database connection. Using them in a loop can exhaust a 50-connection pool after 50 iterations. This *looks correct* because each individual `REQUIRES_NEW` call works fine; the exhaustion only manifests when the loop count exceeds the pool size, which may never happen in test environments.
+- **Self-invocation of `@Transactional` methods** — The AOP proxy is bypassed, so no transaction is started. Extract the method to a separate bean to fix this.
+  - **Why it looks correct:** Both methods are in the same service class and the annotation is clearly present; the proxy bypass is invisible at the source code level.
+- **Catching and swallowing exceptions inside `@Transactional`** — Spring never sees the exception, so the transaction commits despite the error. Always re-throw or call `setRollbackOnly()`.
+  - **Why it looks correct:** Standard exception handling patterns (try/catch/log) work everywhere else in Java; the silent commit happens because Spring's interceptor never receives the exception signal.
+- **`@Transactional` on private methods** — AOP proxies cannot intercept private method calls, so the annotation is silently ignored on private methods.
+  - **Why it looks correct:** The annotation compiles and the IDE doesn't warn; the silent failure only surfaces when the database shows uncommitted partial changes.
+- **Long-running transactions** — Holding database locks across slow operations increases contention and reduces throughput. Keep transactions as short as possible.
+  - **Why it looks correct:** A single transaction seems safer (atomicity guarantees), and the contention cost is invisible until concurrent requests pile up waiting for the same locked rows.
+- **Not setting `rollbackFor` for checked exceptions** — Checked exceptions do not trigger rollback by default. Always explicitly configure `rollbackFor` when a checked exception should cause a rollback.
+  - **Why it looks correct:** An exception being thrown intuitively should roll back the transaction; the Spring default of only rolling back on RuntimeException is a design decision that surprises most developers.
+- **`REQUIRES_NEW` exhausting the connection pool** — Each `REQUIRES_NEW` holds a separate database connection. Using them in a loop can exhaust a 50-connection pool after 50 iterations.
+  - **Why it looks correct:** Each individual `REQUIRES_NEW` call works fine; the exhaustion only manifests when the loop count exceeds the pool size, which may never happen in test environments.
 
 ---
 
@@ -204,40 +210,59 @@ Only the current batch is lost on failure, not the entire 1M records.
 
 ## Scenario-Based Questions
 
-- **Q: You are building an order system where placing an order must deduct inventory, charge the customer, and send a confirmation. The payment gateway call takes 5 seconds. How do you structure transactions to avoid holding database locks for 5 seconds?** A: Split into multiple short transactions. Reserve inventory with a short transaction (`UPDATE inventory SET reserved = reserved + 1 WHERE id = ?`). Call the payment gateway outside any transaction. Confirm the order in a new transaction. If payment fails, release the reservation in a compensating transaction (Saga pattern).
-
-> **Interview follow-up:** Between the inventory reservation and the payment confirmation, another request times out the reservation. How do you handle expired reservations without overselling?
-- **Q: A `@Transactional` method catches all exceptions and logs them, but the transaction still commits even when a database constraint is violated. Why?** A: Catching the exception prevents Spring's transaction interceptor from seeing it, so it assumes success. To roll back while handling the error, re-throw a RuntimeException or call `TransactionAspectSupport.currentTransactionStatus().setRollbackOnly()`.
-
-> **Interview follow-up:** The method calls `setRollbackOnly()` and then proceeds to call an external API. The external API succeeds. Now the database rollback contradicts the external side effect. How do you prevent this?
-- **Q: A `@Transactional(propagation = Propagation.REQUIRES_NEW)` method is called in a loop. After 50 iterations, the application hangs. What's happening?** A: Each `REQUIRES_NEW` suspends the current transaction and acquires a new database connection. If your pool has 50 connections, the 51st iteration deadlocks waiting for a connection held by a suspended transaction. Use `REQUIRES_NEW` sparingly or enlarge the pool.
-
-> **Interview follow-up:** You enlarge the pool to 200 connections. Now the database server's `max_connections` is reached, and all other services lose connectivity. How do you bound the total connections across all application instances?
-- **Q: A service method without `@Transactional` calls a `@Transactional` method on a different bean. Transaction A works, transaction B works, but combined, B's changes appear before A commits. Why?** A: Each `@Transactional` method runs in its own transaction when called from a non-transactional context. The database may flush B's changes before A's. Use a single `@Transactional` on the entry point to wrap both operations.
-- **Q: Your app uses `@Transactional(readOnly = true)` for a reporting endpoint. Users can still successfully write data through this endpoint. Why isn't it preventing writes?** A: `readOnly = true` is a hint to Hibernate to skip dirty checking — it does not prevent writes at the database level. Most databases don't enforce read-only at the transaction level. Use database-level privileges or a read-only replica to truly prevent writes.
-- **Q: A transaction saves an entity and fires a `@TransactionalEventListener(phase = AFTER_COMMIT)`. The event handler queries the DB but doesn't see the saved entity. What's wrong?** A: The entity may not be flushed yet if FlushMode is AUTO and no query triggers a flush. Ensure `entityManager.flush()` is called before the transaction completes, or add `@Transactional(propagation = REQUIRES_NEW)` on the event handler.
-- **Q: Two concurrent transactions both read an account balance of $100, both add $50, and both write $150. The balance should be $200 but ends at $150. You're using READ COMMITTED. How do you prevent this?** A: This is a lost update. Use optimistic locking with `@Version` — the second commit fails with `OptimisticLockException`. Or use pessimistic locking with `@Lock(PESSIMISTIC_WRITE)` issuing `SELECT ... FOR UPDATE`.
-- **Q: A batch job runs in a single `@Transactional` and processes 100K records. It fails at 90K with OOM. All 90K inserts roll back. How do you fix this?** A: The single transaction holds all 90K entities in Hibernate's first-level cache. Flush and clear periodically: `entityManager.flush()` and `entityManager.clear()` every 1000 records. Only the last batch is lost on failure.
-- **Q: Your Spring Boot test uses `@Transactional` on the test method, and the test passes. But against a real DB, the scenario fails. Why?** A: `@Transactional` on a test rolls back after the test, but the test runs in a single transaction where Hibernate's first-level cache returns the same entity for repeated reads — masking non-repeatable read issues. Remove `@Transactional` from tests that verify transaction behavior.
-- **Q: A method annotated with `@Transactional` calls another method in the same class also `@Transactional(propagation = REQUIRES_NEW)`. The inner method's transaction does not start independently. Why?** A: Self-invocation bypasses the AOP proxy, so the inner `@Transactional` is ignored. Extract the inner method to a separate Spring bean, inject a self-reference, or use `TransactionTemplate` programmatically.
+- **Q:** You are building an order system where placing an order must deduct inventory, charge the customer, and send a confirmation. The payment gateway call takes 5 seconds. How do you structure transactions to avoid holding database locks for 5 seconds?
+  - **A:** Split into multiple short transactions. Reserve inventory with a short transaction (`UPDATE inventory SET reserved = reserved + 1 WHERE id = ?`). Call the payment gateway outside any transaction. Confirm the order in a new transaction. If payment fails, release the reservation in a compensating transaction (Saga pattern).
+  - **Interview follow-up:** Between the inventory reservation and the payment confirmation, another request times out the reservation. How do you handle expired reservations without overselling?
+- **Q:** A `@Transactional` method catches all exceptions and logs them, but the transaction still commits even when a database constraint is violated. Why?
+  - **A:** Catching the exception prevents Spring's transaction interceptor from seeing it, so it assumes success. To roll back while handling the error, re-throw a RuntimeException or call `TransactionAspectSupport.currentTransactionStatus().setRollbackOnly()`.
+  - **Interview follow-up:** The method calls `setRollbackOnly()` and then proceeds to call an external API. The external API succeeds. Now the database rollback contradicts the external side effect. How do you prevent this?
+- **Q:** A `@Transactional(propagation = Propagation.REQUIRES_NEW)` method is called in a loop. After 50 iterations, the application hangs. What's happening?
+  - **A:** Each `REQUIRES_NEW` suspends the current transaction and acquires a new database connection. If your pool has 50 connections, the 51st iteration deadlocks waiting for a connection held by a suspended transaction. Use `REQUIRES_NEW` sparingly or enlarge the pool.
+  - **Interview follow-up:** You enlarge the pool to 200 connections. Now the database server's `max_connections` is reached, and all other services lose connectivity. How do you bound the total connections across all application instances?
+- **Q:** A service method without `@Transactional` calls a `@Transactional` method on a different bean. Transaction A works, transaction B works, but combined, B's changes appear before A commits. Why?
+  - **A:** Each `@Transactional` method runs in its own transaction when called from a non-transactional context. The database may flush B's changes before A's. Use a single `@Transactional` on the entry point to wrap both operations.
+- **Q:** Your app uses `@Transactional(readOnly = true)` for a reporting endpoint. Users can still successfully write data through this endpoint. Why isn't it preventing writes?
+  - **A:** `readOnly = true` is a hint to Hibernate to skip dirty checking — it does not prevent writes at the database level. Most databases don't enforce read-only at the transaction level. Use database-level privileges or a read-only replica to truly prevent writes.
+- **Q:** A transaction saves an entity and fires a `@TransactionalEventListener(phase = AFTER_COMMIT)`. The event handler queries the DB but doesn't see the saved entity. What's wrong?
+  - **A:** The entity may not be flushed yet if FlushMode is AUTO and no query triggers a flush. Ensure `entityManager.flush()` is called before the transaction completes, or add `@Transactional(propagation = REQUIRES_NEW)` on the event handler.
+- **Q:** Two concurrent transactions both read an account balance of $100, both add $50, and both write $150. The balance should be $200 but ends at $150. You're using READ COMMITTED. How do you prevent this?
+  - **A:** This is a lost update. Use optimistic locking with `@Version` — the second commit fails with `OptimisticLockException`. Or use pessimistic locking with `@Lock(PESSIMISTIC_WRITE)` issuing `SELECT ... FOR UPDATE`.
+- **Q:** A batch job runs in a single `@Transactional` and processes 100K records. It fails at 90K with OOM. All 90K inserts roll back. How do you fix this?
+  - **A:** The single transaction holds all 90K entities in Hibernate's first-level cache. Flush and clear periodically: `entityManager.flush()` and `entityManager.clear()` every 1000 records. Only the last batch is lost on failure.
+- **Q:** Your Spring Boot test uses `@Transactional` on the test method, and the test passes. But against a real DB, the scenario fails. Why?
+  - **A:** `@Transactional` on a test rolls back after the test, but the test runs in a single transaction where Hibernate's first-level cache returns the same entity for repeated reads — masking non-repeatable read issues. Remove `@Transactional` from tests that verify transaction behavior.
+- **Q:** A method annotated with `@Transactional` calls another method in the same class also `@Transactional(propagation = REQUIRES_NEW)`. The inner method's transaction does not start independently. Why?
+  - **A:** Self-invocation bypasses the AOP proxy, so the inner `@Transactional` is ignored. Extract the inner method to a separate Spring bean, inject a self-reference, or use `TransactionTemplate` programmatically.
 
 ## Interview Questions
 
-- **What are the ACID properties?** A: Atomicity — all or nothing. Consistency — database remains valid. Isolation — concurrent transactions don't interfere. Durability — committed changes persist after crash.
-- **What happens when a RuntimeException is thrown inside a @Transactional method?** A: Spring rolls back for RuntimeException and Error by default. Checked exceptions do NOT trigger rollback. Use `rollbackFor` to customize this behavior.
-- **What is the self-invocation problem?** A: Calling a `@Transactional` method from within the same class bypasses the AOP proxy, so the annotation is ignored. Fix by extracting to a separate bean or using TransactionTemplate.
-- **What is propagation REQUIRES_NEW?** A: Suspends the current transaction and creates an independent new one. The suspended transaction resumes after the new one commits. Each REQUIRES_NEW holds a separate DB connection.
-- **What does @Transactional(readOnly = true) actually do?** A: It is a hint to Hibernate to skip dirty checking and set FlushMode to MANUAL. It does NOT prevent writes at the database level. Improves performance by not tracking entity changes.
-- **What is the difference between NESTED and REQUIRES_NEW?** A: NESTED uses a savepoint within the current transaction and can roll back partially. REQUIRES_NEW suspends and creates a fully independent transaction. NESTED is JDBC-only, not supported by JPA.
-- **What is a transactional event listener?** A: `@TransactionalEventListener` binds a listener to a transaction phase (AFTER_COMMIT, AFTER_ROLLBACK). The event fires only when the transaction reaches that phase.
-- **What causes a long-running transaction to be problematic?** A: Long transactions hold locks longer, increasing contention and deadlock probability. They also delay WAL cleanup and can exhaust connection pools.
-- **How does OSIV interact with transactions?** A: OSIV keeps the Hibernate session open for the entire HTTP request, enabling lazy loading in views. It does NOT create a transaction. Disabled by default in Spring Boot 3.x.
-- **How do you ensure a checked exception triggers a transaction rollback?** A: Use `@Transactional(rollbackFor = {CheckedException.class})`. By default, only RuntimeException and Error trigger rollback because checked exceptions represent business conditions.
+- **What are the ACID properties?**
+  - **A:** Atomicity — all or nothing. Consistency — database remains valid. Isolation — concurrent transactions don't interfere. Durability — committed changes persist after crash.
+- **What happens when a RuntimeException is thrown inside a @Transactional method?**
+  - **A:** Spring rolls back for RuntimeException and Error by default. Checked exceptions do NOT trigger rollback. Use `rollbackFor` to customize this behavior.
+- **What is the self-invocation problem?**
+  - **A:** Calling a `@Transactional` method from within the same class bypasses the AOP proxy, so the annotation is ignored. Fix by extracting to a separate bean or using TransactionTemplate.
+- **What is propagation REQUIRES_NEW?**
+  - **A:** Suspends the current transaction and creates an independent new one. The suspended transaction resumes after the new one commits. Each REQUIRES_NEW holds a separate DB connection.
+- **What does @Transactional(readOnly = true) actually do?**
+  - **A:** It is a hint to Hibernate to skip dirty checking and set FlushMode to MANUAL. It does NOT prevent writes at the database level. Improves performance by not tracking entity changes.
+- **What is the difference between NESTED and REQUIRES_NEW?**
+  - **A:** NESTED uses a savepoint within the current transaction and can roll back partially. REQUIRES_NEW suspends and creates a fully independent transaction. NESTED is JDBC-only, not supported by JPA.
+- **What is a transactional event listener?**
+  - **A:** `@TransactionalEventListener` binds a listener to a transaction phase (AFTER_COMMIT, AFTER_ROLLBACK). The event fires only when the transaction reaches that phase.
+- **What causes a long-running transaction to be problematic?**
+  - **A:** Long transactions hold locks longer, increasing contention and deadlock probability. They also delay WAL cleanup and can exhaust connection pools.
+- **How does OSIV interact with transactions?**
+  - **A:** OSIV keeps the Hibernate session open for the entire HTTP request, enabling lazy loading in views. It does NOT create a transaction. Disabled by default in Spring Boot 3.x.
+- **How do you ensure a checked exception triggers a transaction rollback?**
+  - **A:** Use `@Transactional(rollbackFor = {CheckedException.class})`. By default, only RuntimeException and Error trigger rollback because checked exceptions represent business conditions.
 
 ## Developer Recommendations
 
-- **Keep transactions as short as possible** — Holding locks across slow operations (HTTP calls, file I/O, user input) increases contention and deadlock risk. Read in one transaction, process in application code, write in another. A team wrapped an entire REST endpoint in `@Transactional`, including a slow file upload. Under load, all concurrent requests queued behind the upload transaction, causing a 30-second p99 latency and exhausting the connection pool within minutes of deployment.
-- **Never catch and swallow exceptions inside @Transactional methods** — Swallowing an exception prevents Spring from detecting the failure. Always re-throw or call `setRollbackOnly()` if you must handle the exception locally. A payment processing service caught all exceptions in a `@Transactional` method to log them. A constraint violation on the audit log caused silent commit of incomplete financial records, leading to a $50K reconciliation effort and a 3-day incident.
+- **Keep transactions as short as possible** — Holding locks across slow operations (HTTP calls, file I/O, user input) increases contention and deadlock risk. Read in one transaction, process in application code, write in another.
+  - **Production story:** A team wrapped an entire REST endpoint in `@Transactional`, including a slow file upload. Under load, all concurrent requests queued behind the upload transaction, causing a 30-second p99 latency and exhausting the connection pool within minutes of deployment.
+- **Never catch and swallow exceptions inside @Transactional methods** — Swallowing an exception prevents Spring from detecting the failure. Always re-throw or call `setRollbackOnly()` if you must handle the exception locally.
+  - **Production story:** A payment processing service caught all exceptions in a `@Transactional` method to log them. A constraint violation on the audit log caused silent commit of incomplete financial records, leading to a $50K reconciliation effort and a 3-day incident.
 - **Use REQUIRES_NEW sparingly** — Each REQUIRES_NEW holds a separate database connection. In a loop of 50 iterations, this can exhaust a 50-connection pool. Prefer short, independent transactions.
 - **Configure explicit rollbackFor for checked exceptions** — Checked exceptions don't trigger rollback by default. If `InsufficientFundsException` should roll back, declare it in `rollbackFor`.
 - **Avoid @Transactional on private methods** — AOP proxies cannot intercept private method calls. The annotation is silently ignored on private methods.

@@ -231,15 +231,24 @@ stompClient.activate();
 
 ## Common Mistakes
 
-- **Not authenticating at handshake** — verify identity before establishing the connection. This *looks correct* because the WebSocket connects successfully — the vulnerability only matters when an attacker probes topics they shouldn't access.
-- **Missing authorization** — validate which topics/queues each user can subscribe to. This *looks correct* because the user is authenticated at connect time — assuming the same identity implies blanket access to every topic is a subtle leap.
-- **Not using WSS** — always encrypt WebSocket traffic in production. This *looks correct* because the WebSocket protocol works over plain TCP just fine — the data is readable in transit but the developer never sees the traffic they aren't intercepting.
-- **Memory leaks** — clean up sessions and subscriptions on disconnect. This *looks correct* because the server doesn't crash immediately after a disconnect — the leaked session object sits in memory, accumulating across thousands of disconnects until the OOM killer acts.
-- **No backpressure** — can overwhelm clients with too many messages. This *looks correct* because sending a message succeeds instantly — the buffer fills silently on the slow client, eventually causing the connection to drop without explanation.
-- **Synchronous processing in listeners** — never block the event loop. This *looks correct* because a single blocking operation completes quickly — only under concurrent connections does the event loop stall become visible as dropped heartbeats and timeouts.
-- **Ignoring heartbeat** — without heartbeats, dead connections go undetected. This *looks correct* because the server has no way to distinguish a silent but alive connection from a dead one — stale sessions accumulate with no symptom until memory pressure mounts.
-- **Not scaling the broker** — in-memory broker won't work across multiple instances. This *looks correct* because the application works fine with one server — the problem only manifests when a second instance is added and messages published on one server never reach users on the other.
-- **Large messages** — keep messages small; compress or paginate large payloads. This *looks correct* because a single 10MB message sends fine — the cumulative cost in serialization time, network throughput, and client memory only appears at scale.
+- **Not authenticating at handshake** — verify identity before establishing the connection.
+  - **Why it looks correct:** The WebSocket connects successfully — the vulnerability only matters when an attacker probes topics they shouldn't access.
+- **Missing authorization** — validate which topics/queues each user can subscribe to.
+  - **Why it looks correct:** The user is authenticated at connect time — assuming the same identity implies blanket access to every topic is a subtle leap.
+- **Not using WSS** — always encrypt WebSocket traffic in production.
+  - **Why it looks correct:** The WebSocket protocol works over plain TCP just fine — the data is readable in transit but the developer never sees the traffic they aren't intercepting.
+- **Memory leaks** — clean up sessions and subscriptions on disconnect.
+  - **Why it looks correct:** The server doesn't crash immediately after a disconnect — the leaked session object sits in memory, accumulating across thousands of disconnects until the OOM killer acts.
+- **No backpressure** — can overwhelm clients with too many messages.
+  - **Why it looks correct:** Sending a message succeeds instantly — the buffer fills silently on the slow client, eventually causing the connection to drop without explanation.
+- **Synchronous processing in listeners** — never block the event loop.
+  - **Why it looks correct:** A single blocking operation completes quickly — only under concurrent connections does the event loop stall become visible as dropped heartbeats and timeouts.
+- **Ignoring heartbeat** — without heartbeats, dead connections go undetected.
+  - **Why it looks correct:** The server has no way to distinguish a silent but alive connection from a dead one — stale sessions accumulate with no symptom until memory pressure mounts.
+- **Not scaling the broker** — in-memory broker won't work across multiple instances.
+  - **Why it looks correct:** The application works fine with one server — the problem only manifests when a second instance is added and messages published on one server never reach users on the other.
+- **Large messages** — keep messages small; compress or paginate large payloads.
+  - **Why it looks correct:** A single 10MB message sends fine — the cumulative cost in serialization time, network throughput, and client memory only appears at scale.
 
 ---
 
@@ -353,7 +362,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
 1. **Q: Design a real-time chat system for 10M users. Requirements: group chat (1M users in a room), private messaging, message history, and horizontal scalability. How do you architect the WebSocket layer?**
     - A: (1) Use STOMP over WebSocket with an external broker (RabbitMQ) for horizontal scaling. (2) Load balancer with sticky sessions (hash by user ID). (3) Group chat: each room has a topic `/topic/chat/{roomId}` — 1M users in one room means 1M subscribers. Use fanout per server (the broker sends one message per server, not per user). (4) Private messaging: use `/user/{userId}/queue/messages` — RabbitMQ routes to the specific server where the user is connected. (5) Message history: persist in Cassandra/DynamoDB. On connect, query last N messages and send via WebSocket. (6) Presence tracking: Redis with user → server mapping, heartbeats, and TTL.
-    > **Interview follow-up:** With 1M subscribers to a single room, fanout per server means one message is published once per connected server — but what happens when the fanout message must be replicated across 100 servers? Does the STOMP relay itself become a bottleneck?
+      - **Interview follow-up:** With 1M subscribers to a single room, fanout per server means one message is published once per connected server — but what happens when the fanout message must be replicated across 100 servers? Does the STOMP relay itself become a bottleneck?
 
 2. **Q: Your WebSocket server runs on a single instance with 10,000 connections. During a deployment, all connections drop. Users must manually refresh the page. How do you implement zero-downtime WebSocket deploys?**
    - A: (1) Graceful shutdown: register a JVM shutdown hook that stops accepting new connections, then gracefully closes existing connections with a "server restarting" message and a suggested reconnect delay. (2) Client reconnection: the client receives the close frame with the delay, waits for the specified duration, then reconnects. (3) Rolling update with a load balancer: remove one server from the pool, drain its connections gracefully, update, add back. (4) Session persistence: store session state in Redis — on reconnect, the new server picks up the user's subscriptions and state. (5) Use Kubernetes preStop hook: `sleep 30` before SIGTERM — gives connections time to drain.
@@ -363,7 +372,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
 4. **Q: Your collaborative document editor uses WebSockets with Operational Transformation. When 100 users edit the same document simultaneously, the server CPU spikes to 100% and some operations are lost. How do you scale the server-side processing?**
     - A: (1) Use CRDTs (Conflict-Free Replicated Data Types) instead of OT — CRDTs are commutative and don't require a central ordering server, reducing server CPU. (2) Batch operations: don't process each keystroke individually — buffer edits for 50ms and apply as a batch. (3) Shard by document ID: route all operations for document A to Server 1, document B to Server 2. (4) Use a dedicated OT/CRDT processing cluster separate from the WebSocket server. (5) Rate limit operations per user (e.g., 10 ops/second) — human typing speed is <10 chars/second; higher rates indicate automated edits.
-    > **Interview follow-up:** CRDTs guarantee convergence but not ordering — two users editing the same sentence concurrently can produce a grammatically incorrect result that neither intended. How do you handle the UX of semantically-conflicting edits that CRDTs resolve by arbitrary merge rules?
+    - **Interview follow-up:** CRDTs guarantee convergence but not ordering — two users editing the same sentence concurrently can produce a grammatically incorrect result that neither intended. How do you handle the UX of semantically-conflicting edits that CRDTs resolve by arbitrary merge rules?
 
 5. **Q: How do you handle 1M+ concurrent WebSocket connections on a single server?**
    - A: (1) Use Netty (NIO event-loop model) — handles millions of connections with a few threads. (2) OS tuning: increase `fs.file-max` and `ulimit -n` to 2M+, enable `SO_REUSEPORT` for multi-threaded accept, tune TCP keepalive. (3) Memory per connection: ~50KB. 1M connections = 50GB RAM. Use off-heap memory and efficient session storage. (4) Use epoll (Linux) for O(1) event notification. (5) In practice: scale horizontally. Each server handles 100K-200K connections. Use a load balancer (HAProxy, Nginx) with `least-connections` algorithm and proxy protocol for client IP preservation.
@@ -376,7 +385,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
 8. **Q: Your WebSocket server sometimes sends messages faster than clients can process them. Messages queue up in the client's receive buffer, memory grows, and the connection becomes unresponsive. How do you implement backpressure?**
     - A: (1) Monitor the client's send buffer: `session.getTextMessageSizeLimit()` or Netty's `Channel.isWritable()`. If the buffer exceeds a threshold (e.g., 64KB), stop sending to that client. (2) Sliding window protocol: the server maintains a window of N in-flight messages per client. Each message requires a client ACK. When the window is full, stop sending. (3) Prioritize messages: drop non-critical messages (typing indicators, presence updates) under backpressure. Always deliver critical messages (chat, notifications). (4) Implement adaptive rate limiting: if a client's ACK rate drops below a threshold, reduce send rate.
-    > **Interview follow-up:** If you drop non-critical messages like typing indicators under backpressure, how do you prevent the dropped updates from creating a permanently incorrect UI state — for example, a user who appears to still be typing because the "stopped typing" event was also dropped?
+    - **Interview follow-up:** If you drop non-critical messages like typing indicators under backpressure, how do you prevent the dropped updates from creating a permanently incorrect UI state — for example, a user who appears to still be typing because the "stopped typing" event was also dropped?
 
 9. **Q: You need to implement a real-time multiplayer game server. Requirements: <50ms latency, 60 updates/second, 100 players per game session. Why would you choose raw WebSocket over STOMP?**
    - A: (1) STOMP adds framing overhead: each STOMP frame has a command header, content-type, and destination header. For 60 updates/second, this overhead is significant. (2) Raw WebSocket has minimal framing: just opcode + payload. (3) Raw WebSocket supports binary frames — send compressed game state as Protocol Buffers or FlatBuffers instead of JSON. (4) Custom protocol: define your own message types (1 byte message ID + payload) — far more efficient than STOMP's text-based protocol. (5) STOMP's pub-sub model adds routing overhead. In a game, you typically broadcast to all players in a session — raw WebSocket with a session collection is simpler and faster.
@@ -422,7 +431,8 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
 ## Developer Recommendations
 
-- **Always authenticate at the WebSocket handshake, not just in subscriptions** — Authenticating only in subscription handlers allows an attacker to open a WebSocket connection and keep it alive without identity. Authenticate the `CONNECT` frame (STOMP) or the handshake request itself. Reject connections with invalid or missing tokens immediately. After authentication, authorize every subscription against the user's permissions — don't assume that a connected user is authorized for all topics. One team learned this the hard way when a security audit found that an intern's demo script — left running overnight — had an open WebSocket that was still receiving admin alerts because subscriptions were never re-validated.
+- **Always authenticate at the WebSocket handshake, not just in subscriptions** — Authenticating only in subscription handlers allows an attacker to open a WebSocket connection and keep it alive without identity. Authenticate the `CONNECT` frame (STOMP) or the handshake request itself. Reject connections with invalid or missing tokens immediately. After authentication, authorize every subscription against the user's permissions — don't assume that a connected user is authorized for all topics.
+  - **Production story:** One team learned this the hard way when a security audit found that an intern's demo script — left running overnight — had an open WebSocket that was still receiving admin alerts because subscriptions were never re-validated.
 
 - **Use an external STOMP broker for multi-instance deployments** — The in-memory STOMP broker works only on a single server instance. As soon as you have 2+ servers, messages published on Server 1 never reach users connected to Server 2. Use RabbitMQ or ActiveMQ as a STOMP relay: all servers connect to the broker, and messages fan out through it. The configuration change is minimal (swap `enableSimpleBroker` for `enableStompBrokerRelay`). Don't wait until you need it — set it up from day one.
 

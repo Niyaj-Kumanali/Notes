@@ -57,13 +57,17 @@ var right = (ConstantExpression)body.Right;   // 2
 ## Common Mistakes
 
 - **Closure over loop variable** — In C# 4 and earlier, capturing `for` loop variable captured the same variable (all iterations get the final value). C# 5+ hoists `for` loop variables outside the loop, but `foreach` always creates a new variable per iteration. To be safe, manually copy: `int copy = i; list.Add(() => Console.WriteLine(copy));`
-  This *looks correct* because the lambda references `i` by name and the code reads naturally, but the compiler generates a single closure instance shared across all iterations, so every lambda sees the final value of `i` after the loop completes.
+  - **Why it looks correct:** the lambda references `i` by name and the code reads naturally, but the compiler generates a single closure instance shared across all iterations, so every lambda sees the final value of `i` after the loop completes.
 - **Accidental variable capture causing memory leaks** — Capturing a large object in an event handler lambda prevents GC of that object until the delegate is unsubscribed. The closure keeps ALL captured variables alive, not just the ones used.
-  This *looks correct* because the lambda only references one small field from the captured object, but the closure holds a reference to the entire object graph reachable from the captured variable, preventing GC of everything.
-- **Modifying captured variable after delegate creation** — The closure captures the variable, not its value. Changes after delegate creation are visible when the delegate executes. This *looks correct* because the variable assignment appears complete at the point of delegate creation, but the closure holds a reference to the variable's storage location, so any subsequent assignment changes what the delegate reads.
-- **Overuse of lambdas vs local functions** — Lambdas allocate a delegate each time (unless cached). Local functions are methods on the enclosing type — zero allocation. Prefer local functions when you don't need to pass the delegate as an argument. This *looks correct* because a lambda and a local function appear syntactically similar, but every lambda in a hot path allocates a delegate object (and a closure if capturing), while a local function is just a method call with no heap allocation.
-- **Expression tree with non-serializable captures** — If an expression tree captures a method call that the provider cannot translate, it throws `InvalidOperationException`. Keep expression tree captures to simple member access. This *looks correct* because the expression compiles to valid `Expression` nodes, but the database provider cannot translate arbitrary method calls to SQL and throws a runtime exception when the query is executed.
-- **`Span<T>` cannot be captured in lambdas** — `ref struct` types cannot be boxed (required for closure), so they cannot be captured. This *looks correct* because `Span<T>` is used naturally in the enclosing method, but the compiler enforces this restriction at compile time — the error message "cannot use ref struct type inside lambda expression" surfaces immediately rather than causing a runtime failure.
+  - **Why it looks correct:** the lambda only references one small field from the captured object, but the closure holds a reference to the entire object graph reachable from the captured variable, preventing GC of everything.
+- **Modifying captured variable after delegate creation** — The closure captures the variable, not its value. Changes after delegate creation are visible when the delegate executes.
+  - **Why it looks correct:** the variable assignment appears complete at the point of delegate creation, but the closure holds a reference to the variable's storage location, so any subsequent assignment changes what the delegate reads.
+- **Overuse of lambdas vs local functions** — Lambdas allocate a delegate each time (unless cached). Local functions are methods on the enclosing type — zero allocation. Prefer local functions when you don't need to pass the delegate as an argument.
+  - **Why it looks correct:** a lambda and a local function appear syntactically similar, but every lambda in a hot path allocates a delegate object (and a closure if capturing), while a local function is just a method call with no heap allocation.
+- **Expression tree with non-serializable captures** — If an expression tree captures a method call that the provider cannot translate, it throws `InvalidOperationException`. Keep expression tree captures to simple member access.
+  - **Why it looks correct:** the expression compiles to valid `Expression` nodes, but the database provider cannot translate arbitrary method calls to SQL and throws a runtime exception when the query is executed.
+- **`Span<T>` cannot be captured in lambdas** — `ref struct` types cannot be boxed (required for closure), so they cannot be captured.
+  - **Why it looks correct:** `Span<T>` is used naturally in the enclosing method, but the compiler enforces this restriction at compile time — the error message "cannot use ref struct type inside lambda expression" surfaces immediately rather than causing a runtime failure.
 
 ```csharp
 // Memory leak via event handler
@@ -226,33 +230,33 @@ var result = pipeline.Process(sourceImage);
 ## Scenario-Based Questions
 
 1. **Q: You are building a real-time event processing pipeline where 100K events/sec are routed through a chain of transforms (filter → enrich → transform → publish). Each transform is a lambda. How do you minimize allocation overhead?**
-   A: Use static lambdas (C# 9+ `static x => ...`) for transform steps that don't capture variables — the compiler caches the delegate in a static field, allocating once. For steps that need captured state (e.g., a threshold value), use a struct-based approach with `Func<...>` pointing to a method on a reusable struct. Avoid statement lambdas in hot paths (they always allocate). Pre-compose the pipeline using `Aggregate` into a single delegate that chains all steps — this eliminates per-event delegate dispatch overhead.
+   - **A:** Use static lambdas (C# 9+ `static x => ...`) for transform steps that don't capture variables — the compiler caches the delegate in a static field, allocating once. For steps that need captured state (e.g., a threshold value), use a struct-based approach with `Func<...>` pointing to a method on a reusable struct. Avoid statement lambdas in hot paths (they always allocate). Pre-compose the pipeline using `Aggregate` into a single delegate that chains all steps — this eliminates per-event delegate dispatch overhead.
 
 2. **Q: You have a memory leak suspected from event handlers with lambdas. The subscriber is never garbage collected. How do you diagnose and fix?**
-   A: Take a memory dump and analyze with `dotnet-dump analyze`: run `!dumpheap -type <>c__DisplayClass` to find closure instances. The closure holds references to ALL captured variables, including the subscriber object (`this`). Fix: use a weak event pattern (e.g., `WeakEventManager` from `Microsoft.Toolkit.Mvvm`), or manually unsubscribe: `button.Click -= OnClick`. For lambdas, store the delegate in a field and unsubscribe via `button.Click -= _handler`. Consider `static` lambdas that don't capture `this`.
-   > **Interview follow-up:** If the subscriber holds the only reference to the delegate, can a weak event pattern still leak if the publisher outlives the subscriber — and if so, what's the alternative?
+   - **A:** Take a memory dump and analyze with `dotnet-dump analyze`: run `!dumpheap -type <>c__DisplayClass` to find closure instances. The closure holds references to ALL captured variables, including the subscriber object (`this`). Fix: use a weak event pattern (e.g., `WeakEventManager` from `Microsoft.Toolkit.Mvvm`), or manually unsubscribe: `button.Click -= OnClick`. For lambdas, store the delegate in a field and unsubscribe via `button.Click -= _handler`. Consider `static` lambdas that don't capture `this`.
+   - **Interview follow-up:** If the subscriber holds the only reference to the delegate, can a weak event pattern still leak if the publisher outlives the subscriber — and if so, what's the alternative?
 
 3. **Q: You are writing an EF Core query with a complex `Where` clause that combines optional filters. Building the expression tree dynamically is error-prone — how do you design it?**
-   A: Start with a `true` expression (`.Where(x => true)`). Conditionally append filter expressions using `Expression.AndAlso`. Use a reusable `AndAlso` extension method that combines two `Expression<Func<T, bool>>` by replacing parameters. For nullable filters: `if (filter.MinPrice.HasValue) query = query.Where(p => p.Price >= filter.MinPrice.Value)`. This avoids complex expression tree manipulation for simple cases. For truly dynamic rules (user-defined), build the expression tree with `Expression` APIs.
+   - **A:** Start with a `true` expression (`.Where(x => true)`). Conditionally append filter expressions using `Expression.AndAlso`. Use a reusable `AndAlso` extension method that combines two `Expression<Func<T, bool>>` by replacing parameters. For nullable filters: `if (filter.MinPrice.HasValue) query = query.Where(p => p.Price >= filter.MinPrice.Value)`. This avoids complex expression tree manipulation for simple cases. For truly dynamic rules (user-defined), build the expression tree with `Expression` APIs.
 
 4. **Q: You are refactoring a codebase that passes lambdas to `Task.Run` in a loop. The closures capture the loop variable incorrectly. What happens and how do you fix it?**
-   A: If using a `for` loop in C# < 9 or with explicit delegate creation: `for (int i = 0; i < 10; i++) Task.Run(() => Work(i))` — all tasks see the final value of `i` (10). Fix: capture a copy per iteration: `int captured = i; Task.Run(() => Work(captured))`. In C# 9+, this is the default behavior for `for` loops. For `foreach`, C# 5+ already creates a new variable per iteration. Always be explicit about the capture intent.
+   - **A:** If using a `for` loop in C# < 9 or with explicit delegate creation: `for (int i = 0; i < 10; i++) Task.Run(() => Work(i))` — all tasks see the final value of `i` (10). Fix: capture a copy per iteration: `int captured = i; Task.Run(() => Work(captured))`. In C# 9+, this is the default behavior for `for` loops. For `foreach`, C# 5+ already creates a new variable per iteration. Always be explicit about the capture intent.
 
 5. **Q: You need to pass a lambda as a parameter to a method, but the lambda captures a `Span<byte>`. The compiler refuses. How do you work around this?**
-   A: `Span<T>` is a `ref struct` — it cannot be boxed, so it cannot be captured in a lambda's closure. Workarounds: (1) Use a local function instead — local functions can capture `Span<T>` because they're methods on the enclosing type without heap allocation. (2) Pass the span as a parameter instead of capturing it: `MemoryOwner<byte> owner; Process(buffer => HandleBuffer(owner.Span, buffer))`. (3) For async code, copy the span content to a pooled array and capture that.
+   - **A:** `Span<T>` is a `ref struct` — it cannot be boxed, so it cannot be captured in a lambda's closure. Workarounds: (1) Use a local function instead — local functions can capture `Span<T>` because they're methods on the enclosing type without heap allocation. (2) Pass the span as a parameter instead of capturing it: `MemoryOwner<byte> owner; Process(buffer => HandleBuffer(owner.Span, buffer))`. (3) For async code, copy the span content to a pooled array and capture that.
 
 6. **Q: You are profiling a hot path where a non-capturing lambda is allocated on every call despite the compiler's caching. Why?**
-   A: The compiler caches non-capturing lambdas when assigned to a `Func<>`/`Action<>` delegate type. However, if the lambda is converted to a custom delegate type (e.g., `Func<int, int> f = x => x * x;` is cached; `MyDelegate f = x => x * x;` may NOT be cached), the compiler may not cache. Also, if the lambda is created inside a generic method or as part of a LINQ expression, caching behavior varies. Fix: explicitly cache in a static readonly field: `private static readonly Func<int, int> _square = x => x * x;`.
-   > **Interview follow-up:** How does the compiler determine whether a lambda is "the same" for caching purposes — does identical source text in two locations share one delegate, or does each location get its own?
+   - **A:** The compiler caches non-capturing lambdas when assigned to a `Func<>`/`Action<>` delegate type. However, if the lambda is converted to a custom delegate type (e.g., `Func<int, int> f = x => x * x;` is cached; `MyDelegate f = x => x * x;` may NOT be cached), the compiler may not cache. Also, if the lambda is created inside a generic method or as part of a LINQ expression, caching behavior varies. Fix: explicitly cache in a static readonly field: `private static readonly Func<int, int> _square = x => x * x;`.
+   - **Interview follow-up:** How does the compiler determine whether a lambda is "the same" for caching purposes — does identical source text in two locations share one delegate, or does each location get its own?
 
 7. **Q: You are implementing a retry mechanism using a lambda that captures a `CancellationToken`. The token changes on each retry. What happens?**
-   A: The closure captures the token variable, not the token value. If the variable is reassigned (e.g., creating a new linked CTS per retry), the lambda sees the latest value only if it's captured as a mutable variable. Better: capture the token at the point of lambda creation — create a local copy inside the retry loop: `var ct = currentCt; Task.Run(() => Work(ct))`. Or, pass the token as a parameter to the lambda: `Task.Run(ct => Work(ct), ct)`.
+   - **A:** The closure captures the token variable, not the token value. If the variable is reassigned (e.g., creating a new linked CTS per retry), the lambda sees the latest value only if it's captured as a mutable variable. Better: capture the token at the point of lambda creation — create a local copy inside the retry loop: `var ct = currentCt; Task.Run(() => Work(ct))`. Or, pass the token as a parameter to the lambda: `Task.Run(ct => Work(ct), ct)`.
 
 8. **Q: You need to serialize and deserialize a C# expression tree for a rules engine that runs on a different machine. How do you approach this?**
-   A: Use `System.Linq.Expressions` serialization via a library like `Serialize.Linq`. Alternatively, define the rules as a DSL (JSON/YAML) and build expression trees from them — this is more portable and version-tolerant. For example: represent filters as `{ "field": "Price", "op": "gt", "value": 100 }`. Build the expression tree from these rule objects. This avoids serializing compiled IL and works across .NET versions.
+   - **A:** Use `System.Linq.Expressions` serialization via a library like `Serialize.Linq`. Alternatively, define the rules as a DSL (JSON/YAML) and build expression trees from them — this is more portable and version-tolerant. For example: represent filters as `{ "field": "Price", "op": "gt", "value": 100 }`. Build the expression tree from these rule objects. This avoids serializing compiled IL and works across .NET versions.
 
 9. **Q: You are writing a library that uses `Expression<Func<T, bool>>` for filtering. How do you compose two expression trees with `OR` without an external library?**
-   A: Use `Expression.OrElse` and combine the parameters. Since the two expressions have different `ParameterExpression` instances, you must replace them: create a new parameter, invoke both expressions with the new parameter, then combine:
+   - **A:** Use `Expression.OrElse` and combine the parameters. Since the two expressions have different `ParameterExpression` instances, you must replace them: create a new parameter, invoke both expressions with the new parameter, then combine:
 
 ```csharp
 public static Expression<Func<T, bool>> Or<T>(
@@ -270,52 +274,54 @@ public static Expression<Func<T, bool>> Or<T>(
 This uses `Invoke` which may not translate to SQL in LINQ-to-SQL providers. For EF Core, use `Expression.AndAlso`/`OrElse` with parameter replacement via `ParameterRebinder` — a class that walks the tree replacing parameters.
 
 10. **Q: You are debugging why a lambda inside a loop captures the same variable for all iterations. You find the IL shows a single closure shared across all iterations. Why?**
-     A: The compiler hoists variables captured by multiple lambdas in the same scope into a single closure. If a `for` loop variable is captured by lambdas created in different iterations, all lambdas share the same closure instance and thus the same variable. In C# 5+, `foreach` loop variables are scoped per iteration (new variable each time). For `for` loops, the variable is scoped outside the loop body. Fix: declare a local variable inside the loop: `for (int i = 0; i < n; i++) { int copy = i; list.Add(() => Console.WriteLine(copy)); }`.
-    > **Interview follow-up:** If two lambdas in the same method capture disjoint sets of variables, does the compiler generate one closure or two — and what determines the answer?
+     - **A:** The compiler hoists variables captured by multiple lambdas in the same scope into a single closure. If a `for` loop variable is captured by lambdas created in different iterations, all lambdas share the same closure instance and thus the same variable. In C# 5+, `foreach` loop variables are scoped per iteration (new variable each time). For `for` loops, the variable is scoped outside the loop body. Fix: declare a local variable inside the loop: `for (int i = 0; i < n; i++) { int copy = i; list.Add(() => Console.WriteLine(copy)); }`.
+    - **Interview follow-up:** If two lambdas in the same method capture disjoint sets of variables, does the compiler generate one closure or two — and what determines the answer?
 
 ---
 
 ## Interview Questions
 
 1. **What is a lambda expression?**
-   A: An anonymous function that can contain expressions or statements and can be converted to a delegate or expression tree. Syntax: `(parameters) => expression` or `(parameters) => { statements; }`.
+   - **A:** An anonymous function that can contain expressions or statements and can be converted to a delegate or expression tree. Syntax: `(parameters) => expression` or `(parameters) => { statements; }`.
 
 2. **What is a closure?**
-   A: A lambda that captures variables from its enclosing scope. The compiler generates a class (closure) with fields for each captured variable and creates an instance on the heap. The captured variables stay alive as long as the delegate reference exists.
+   - **A:** A lambda that captures variables from its enclosing scope. The compiler generates a class (closure) with fields for each captured variable and creates an instance on the heap. The captured variables stay alive as long as the delegate reference exists.
 
 3. **What is the difference between `Func<T, bool>` and `Expression<Func<T, bool>>`?**
-   A: `Func<T, bool>` is a delegate — compiled IL that executes directly. `Expression<Func<T, bool>>` is an expression tree — a tree of node objects representing the code. Expression trees can be inspected, modified, and translated (e.g., to SQL) but must be compiled to execute.
+   - **A:** `Func<T, bool>` is a delegate — compiled IL that executes directly. `Expression<Func<T, bool>>` is an expression tree — a tree of node objects representing the code. Expression trees can be inspected, modified, and translated (e.g., to SQL) but must be compiled to execute.
 
 4. **What is a static lambda (C# 9+)?**
-   A: A lambda declared with the `static` keyword that cannot capture variables from the enclosing scope: `static x => x * x`. The compiler errors if any capture is attempted. Guarantees zero allocation (compiler caches the delegate in a static field).
+   - **A:** A lambda declared with the `static` keyword that cannot capture variables from the enclosing scope: `static x => x * x`. The compiler errors if any capture is attempted. Guarantees zero allocation (compiler caches the delegate in a static field).
 
 5. **Can lambdas capture `ref`, `out`, or `in` parameters?**
-   A: No. Lambda parameters cannot have `ref`, `out`, or `in` modifiers. Local functions support these modifiers, but lambdas don't because they can be converted to delegate types that don't support ref-like parameters.
+   - **A:** No. Lambda parameters cannot have `ref`, `out`, or `in` modifiers. Local functions support these modifiers, but lambdas don't because they can be converted to delegate types that don't support ref-like parameters.
 
 6. **What is a method group conversion?**
-   A: Creating a delegate from a method name: `Func<int, int> f = int.Parse;`. The compiler resolves overloads and generates a delegate pointing to the method. If the method is static, no closure is allocated.
+   - **A:** Creating a delegate from a method name: `Func<int, int> f = int.Parse;`. The compiler resolves overloads and generates a delegate pointing to the method. If the method is static, no closure is allocated.
 
 7. **Why can't lambdas capture `Span<T>`?**
-   A: `Span<T>` is a `ref struct` — it's stack-only and cannot be boxed. Lambdas capture variables by storing them in a heap-allocated closure class, which requires boxing. `ref struct` types cannot be boxed, so they cannot be captured. Local functions can capture `Span<T>` because they don't require heap allocation.
+   - **A:** `Span<T>` is a `ref struct` — it's stack-only and cannot be boxed. Lambdas capture variables by storing them in a heap-allocated closure class, which requires boxing. `ref struct` types cannot be boxed, so they cannot be captured. Local functions can capture `Span<T>` because they don't require heap allocation.
 
 8. **Explain the difference between expression lambda and statement lambda.**
-   A: Expression lambda has a single expression as the body: `x => x * x`. Statement lambda uses braces with optional return: `x => { return x * x; }`. Expression lambdas can be converted to both delegates and expression trees; statement lambdas can only be delegates.
+   - **A:** Expression lambda has a single expression as the body: `x => x * x`. Statement lambda uses braces with optional return: `x => { return x * x; }`. Expression lambdas can be converted to both delegates and expression trees; statement lambdas can only be delegates.
 
 9. **What is the `Invoke` method on an expression tree used for?**
-   A: `Expression.Invoke` applies a lambda expression to arguments. Used when composing expression trees: `Expression.Invoke(leftExpression, argumentExpression)`. EF Core can translate `Invoke` in some cases, but it may cause client evaluation. Prefer direct parameter replacement for better SQL translation.
+   - **A:** `Expression.Invoke` applies a lambda expression to arguments. Used when composing expression trees: `Expression.Invoke(leftExpression, argumentExpression)`. EF Core can translate `Invoke` in some cases, but it may cause client evaluation. Prefer direct parameter replacement for better SQL translation.
 
 10. **How does the compiler cache non-capturing lambdas?**
-    A: The compiler generates a sealed class with a static readonly field holding the cached delegate. The delegate is created once via a static initializer. All uses of the same non-capturing lambda expression reference this cached instance. This applies per lambda expression literal, not per identical content.
+    - **A:** The compiler generates a sealed class with a static readonly field holding the cached delegate. The delegate is created once via a static initializer. All uses of the same non-capturing lambda expression reference this cached instance. This applies per lambda expression literal, not per identical content.
 
 ---
 
 ## Developer Recommendations
 
-- **Prefer local functions over lambdas when you don't need a delegate** — Local functions are methods on the enclosing type with zero allocation. Lambdas allocate a delegate (and a closure if capturing). A local function can always be converted to a delegate when needed (`var d = (Func<int, int>)LocalFunc;`), but this still allocates. Use lambdas only when passing as an argument to a method that expects a delegate. A high-throughput API once used lambdas for every request validation step, allocating thousands of delegates per second and causing frequent Gen 0 GC collections — switching to local functions eliminated the allocation entirely.
+- **Prefer local functions over lambdas when you don't need a delegate** — Local functions are methods on the enclosing type with zero allocation. Lambdas allocate a delegate (and a closure if capturing). A local function can always be converted to a delegate when needed (`var d = (Func<int, int>)LocalFunc;`), but this still allocates. Use lambdas only when passing as an argument to a method that expects a delegate.
+  - **Production story:** A high-throughput API once used lambdas for every request validation step, allocating thousands of delegates per second and causing frequent Gen 0 GC collections — switching to local functions eliminated the allocation entirely.
 
 - **Use `static` lambdas (C# 9+) to prevent accidental captures** — Marking a lambda as `static` forces the compiler to error if `this` or local variables are referenced. This prevents unintended closures that extend object lifetimes and prevents delegate re-allocation. Make it a habit to start with `static` and remove it only when a capture is intentional.
 
-- **Avoid capturing large objects in event handler lambdas** — The closure keeps ALL captured variables alive as long as the delegate is subscribed. If an event handler lambda captures `this` (implicitly through instance method access), the entire object cannot be GC'd until the event is unsubscribed. Store the delegate in a field for manual unsubscription or use weak event patterns. A chat service once leaked hundreds of megabytes because a long-lived `ConnectionManager` event handler captured a `Room` object with a large message buffer — the `Room` could not be collected until the `ConnectionManager` was disposed, keeping the buffer alive indefinitely.
+- **Avoid capturing large objects in event handler lambdas** — The closure keeps ALL captured variables alive as long as the delegate is subscribed. If an event handler lambda captures `this` (implicitly through instance method access), the entire object cannot be GC'd until the event is unsubscribed. Store the delegate in a field for manual unsubscription or use weak event patterns.
+  - **Production story:** A chat service once leaked hundreds of megabytes because a long-lived `ConnectionManager` event handler captured a `Room` object with a large message buffer — the `Room` could not be collected until the `ConnectionManager` was disposed, keeping the buffer alive indefinitely.
 
 - **Prefer expression trees over reflection for dynamic member access** — Building an `Expression<Func<T, TResult>>` and compiling it is ~10x faster than `PropertyInfo.GetValue` for repeated access. The compilation cost is amortized over subsequent invocations. Use for serializers, mappers, and dynamic property accessors in hot paths.
 

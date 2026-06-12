@@ -127,14 +127,22 @@ test('matches snapshot', () => {
 
 ## Common Mistakes
 
-- **Using `toBe` for objects** — `toBe` uses `Object.is`, fails for objects. Use `toEqual`. This *looks correct* because `toBe` works perfectly for primitives and the distinction between reference and value equality is subtle — a test that passes locally with one object reference may fail in CI where module caching differs.
-- **Not clearing mocks between tests** — Mock state leaks: call `jest.clearAllMocks()` in `beforeEach`. This *looks correct* because each test appears to work in isolation during development, and mock state leakage only manifests as hard-to-reproduce failures in specific test orderings.
-- **Not awaiting async assertions** — `expect(fn()).resolves.toBe('x')` without `await` exits before promise resolves. This *looks correct* because the assertion does not throw synchronously — it returns a promise, and without `await` the test completes before the promise settles, producing a quiet false pass.
-- **Missing `done` with callbacks** — Async callback test exits before callback runs. This *looks correct* because the test function returns immediately and Jest reports it as passing — the assertion inside the callback either never runs or fires after the test already finished.
-- **Not using `expect.assertions`** — Async test with try/catch can pass without reaching the assertion. This *looks correct* because the test looks complete with a try/catch block, and the assertion inside the try seems guaranteed to execute unless you consciously consider the catch path silently swallowing failures.
-- **Over-mocking** — Mocking everything (DB, cache, logger, queue) means you're testing mocks, not code. This *looks correct* because mocked tests are fast, deterministic, and never fail due to infrastructure issues, creating the illusion of thorough coverage.
-- **Testing implementation, not behavior** — Checking internal state instead of observable output. This *looks correct* because internal state is easier to access and assert on than figuring out what observable output the behavior produces, and it feels like a more thorough verification.
-- **Shared mutable test data** — Tests become order-dependent and flaky. This *looks correct* because sharing setup reduces boilerplate and seems efficient, and the flakiness appears random rather than structural until a specific ordering consistently breaks the suite.
+- **Using `toBe` for objects** — `toBe` uses `Object.is`, fails for objects. Use `toEqual`.
+  - **Why it looks correct:** `toBe` works perfectly for primitives and the distinction between reference and value equality is subtle — a test that passes locally with one object reference may fail in CI where module caching differs.
+- **Not clearing mocks between tests** — Mock state leaks: call `jest.clearAllMocks()` in `beforeEach`.
+  - **Why it looks correct:** Each test appears to work in isolation during development, and mock state leakage only manifests as hard-to-reproduce failures in specific test orderings.
+- **Not awaiting async assertions** — `expect(fn()).resolves.toBe('x')` without `await` exits before promise resolves.
+  - **Why it looks correct:** The assertion does not throw synchronously — it returns a promise, and without `await` the test completes before the promise settles, producing a quiet false pass.
+- **Missing `done` with callbacks** — Async callback test exits before callback runs.
+  - **Why it looks correct:** The test function returns immediately and Jest reports it as passing — the assertion inside the callback either never runs or fires after the test already finished.
+- **Not using `expect.assertions`** — Async test with try/catch can pass without reaching the assertion.
+  - **Why it looks correct:** The test looks complete with a try/catch block, and the assertion inside the try seems guaranteed to execute unless you consciously consider the catch path silently swallowing failures.
+- **Over-mocking** — Mocking everything (DB, cache, logger, queue) means you're testing mocks, not code.
+  - **Why it looks correct:** Mocked tests are fast, deterministic, and never fail due to infrastructure issues, creating the illusion of thorough coverage.
+- **Testing implementation, not behavior** — Checking internal state instead of observable output.
+  - **Why it looks correct:** Internal state is easier to access and assert on than figuring out what observable output the behavior produces, and it feels like a more thorough verification.
+- **Shared mutable test data** — Tests become order-dependent and flaky.
+  - **Why it looks correct:** Sharing setup reduces boilerplate and seems efficient, and the flakiness appears random rather than structural until a specific ordering consistently breaks the suite.
 
 ---
 
@@ -240,13 +248,15 @@ A legacy project uses Mocha + Chai + Sinon + Istanbul. The team wants Jest for b
 
 ## Developer Recommendations
 
-- **Prefer `toEqual` over `toBe` for objects** — `toBe` uses reference equality; two objects with identical content will fail. `toEqual` deep-compares. The trade-off: `toEqual` is slower for large objects. Benefit: tests actually verify the data, not the memory reference. In a production incident, a team compared two identical user objects with `toBe` — the test passed locally (same reference from module cache) but failed in CI (different references from fresh loads), wasting an entire day of debugging before someone noticed the matcher was wrong.
+- **Prefer `toEqual` over `toBe` for objects** — `toBe` uses reference equality; two objects with identical content will fail. `toEqual` deep-compares. The trade-off: `toEqual` is slower for large objects. Benefit: tests actually verify the data, not the memory reference.
+  - **Production story:** In a production incident, a team compared two identical user objects with `toBe` — the test passed locally (same reference from module cache) but failed in CI (different references from fresh loads), wasting an entire day of debugging before someone noticed the matcher was wrong.
 
 - **Always clear mocks in `beforeEach`** — Mock state leaks between tests if not reset. Use `jest.clearAllMocks()` or `jest.resetAllMocks()` in `beforeEach`. Trade-off: one line of boilerplate per test file. Benefit: tests are truly isolated — no order-dependent failures.
 
 - **Never use `toBe` with floating-point numbers** — Floating-point arithmetic is imprecise (0.1 + 0.2 !== 0.3). Use `toBeCloseTo(expected, precision)`. Trade-off: you must specify precision. Benefit: tests pass even with tiny representation errors.
 
-- **Use `expect.assertions` for async tests** — An async test with try/catch can pass without running any assertion if the promise rejects unexpectedly. `expect.assertions(1)` ensures at least one assertion ran. Trade-off: you must count expected assertions. Benefit: false positives are eliminated. A team had an async test with try/catch that silently passed for six months because the API endpoint returned an unexpected 500 error, the catch block logged nothing, and no assertion ever ran — the false sense of security delayed discovery of a critical regression by two release cycles.
+- **Use `expect.assertions` for async tests** — An async test with try/catch can pass without running any assertion if the promise rejects unexpectedly. `expect.assertions(1)` ensures at least one assertion ran. Trade-off: you must count expected assertions. Benefit: false positives are eliminated.
+  - **Production story:** A team had an async test with try/catch that silently passed for six months because the API endpoint returned an unexpected 500 error, the catch block logged nothing, and no assertion ever ran — the false sense of security delayed discovery of a critical regression by two release cycles.
 
 - **Use `jest --changedSince=main` in CI** — Running all tests on every commit is wasteful. `--changedSince` runs only tests related to changed files. Trade-off: may miss integration failures across unchanged files. Benefit: CI time drops from minutes to seconds for most commits.
 

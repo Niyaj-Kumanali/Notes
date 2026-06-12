@@ -55,13 +55,20 @@ public class ProductConfiguration : IEntityTypeConfiguration<Product>
 
 ## Common Mistakes
 
-- **Context lifecycle too long (Captive context)** — DbContext should be scoped per request in ASP.NET Core. Long-lived contexts grow the change tracker, consuming memory and returning stale data. This *looks correct* because the DbContext is injected via DI and appears to work indefinitely, but the change tracker accumulates every loaded entity as a tracked snapshot — after processing 10K records the context holds references to all of them, and `SaveChanges` becomes increasingly slow as `DetectChanges` iterates over every tracked entity.
-- **Missing async** — `_context.Products.ToList()` blocks the thread. Use `ToListAsync()` in async contexts. This *looks correct* because the code compiles and returns the expected results, but the synchronous call blocks the ASP.NET thread pool thread for the duration of the database query — under load this causes thread pool starvation and cascading latency spikes across all requests.
-- **Tracking overhead for read-only queries** — Default tracking creates snapshots for every loaded entity. Use `.AsNoTracking()` for reads. This *looks correct* because the query returns correct data either way, but tracking stores an original-value snapshot for each row in a dictionary — for a 10K-row result set this adds megabytes of memory and CPU overhead from snapshot comparison on `SaveChanges` even though no changes were made.
-- **Including too much (Cartesian explosion)** — Multiple `Include` + `ThenInclude` on a single query generates JOINs that multiply rows. Use `.AsSplitQuery()` to issue multiple queries instead. This *looks correct* because `Include` is the standard way to load related data and the code reads naturally, but each collection `Include` adds a JOIN that multiplies the row count — three collection includes can turn 100 orders into 100 × 5 items × 3 shipments × 2 payments = 3,000 rows, and the database sends all that duplicated data over the wire.
-- **Client-side evaluation of WHERE clause** — Calling `.ToList()` before `Where()` pulls all data into memory before filtering. Apply filters to `IQueryable` before materialization. This *looks correct* because the code compiles and returns the right results, but the entire table is transferred from the database before filtering happens in memory — for a table with 1M rows where only 100 match the filter, 999,900 unnecessary rows cross the network and are allocated as objects before being discarded.
-- **N+1 via lazy loading** — Accessing navigation properties in a loop triggers one query per iteration. Disable lazy loading or use `Include` for eager loading. This *looks correct* because `order.Customer.Name` is a simple property access that returns the expected value, but behind the scenes the lazy loading proxy intercepts the getter and issues a new SQL query — in a loop of 1,000 orders this produces 1,001 queries instead of 1, turning a 10ms operation into a 5-second one.
-- **Disposing context before lazy load completes** — Accessing a navigation property after disposing the context throws `ObjectDisposedException`. This *looks correct* because the entity object is still in scope and appears usable, but its navigation properties are proxied — accessing them requires an active `DbContext` to issue the lazy load query, and after disposal the proxy throws instead of returning data.
+- **Context lifecycle too long (Captive context)** — DbContext should be scoped per request in ASP.NET Core. Long-lived contexts grow the change tracker, consuming memory and returning stale data.
+  - **Why it looks correct:** the DbContext is injected via DI and appears to work indefinitely, but the change tracker accumulates every loaded entity as a tracked snapshot — after processing 10K records the context holds references to all of them, and `SaveChanges` becomes increasingly slow as `DetectChanges` iterates over every tracked entity.
+- **Missing async** — `_context.Products.ToList()` blocks the thread. Use `ToListAsync()` in async contexts.
+  - **Why it looks correct:** the code compiles and returns the expected results, but the synchronous call blocks the ASP.NET thread pool thread for the duration of the database query — under load this causes thread pool starvation and cascading latency spikes across all requests.
+- **Tracking overhead for read-only queries** — Default tracking creates snapshots for every loaded entity. Use `.AsNoTracking()` for reads.
+  - **Why it looks correct:** the query returns correct data either way, but tracking stores an original-value snapshot for each row in a dictionary — for a 10K-row result set this adds megabytes of memory and CPU overhead from snapshot comparison on `SaveChanges` even though no changes were made.
+- **Including too much (Cartesian explosion)** — Multiple `Include` + `ThenInclude` on a single query generates JOINs that multiply rows. Use `.AsSplitQuery()` to issue multiple queries instead.
+  - **Why it looks correct:** `Include` is the standard way to load related data and the code reads naturally, but each collection `Include` adds a JOIN that multiplies the row count — three collection includes can turn 100 orders into 100 × 5 items × 3 shipments × 2 payments = 3,000 rows, and the database sends all that duplicated data over the wire.
+- **Client-side evaluation of WHERE clause** — Calling `.ToList()` before `Where()` pulls all data into memory before filtering. Apply filters to `IQueryable` before materialization.
+  - **Why it looks correct:** the code compiles and returns the right results, but the entire table is transferred from the database before filtering happens in memory — for a table with 1M rows where only 100 match the filter, 999,900 unnecessary rows cross the network and are allocated as objects before being discarded.
+- **N+1 via lazy loading** — Accessing navigation properties in a loop triggers one query per iteration. Disable lazy loading or use `Include` for eager loading.
+  - **Why it looks correct:** `order.Customer.Name` is a simple property access that returns the expected value, but behind the scenes the lazy loading proxy intercepts the getter and issues a new SQL query — in a loop of 1,000 orders this produces 1,001 queries instead of 1, turning a 10ms operation into a 5-second one.
+- **Disposing context before lazy load completes** — Accessing a navigation property after disposing the context throws `ObjectDisposedException`.
+  - **Why it looks correct:** the entity object is still in scope and appears usable, but its navigation properties are proxied — accessing them requires an active `DbContext` to issue the lazy load query, and after disposal the proxy throws instead of returning data.
 
 ```csharp
 // N+1 queries — each order.Customer triggers a DB query
@@ -248,7 +255,7 @@ public class DashboardService
 ## Scenario-Based Questions
 
 1. **Q: You have a query that loads orders with their items and shipments. Response time is 30s for 1000 orders. The SQL generated has a massive Cartesian product. How do you fix it?**
-   A: This is the Cartesian explosion problem — multiple `Include` calls on collection navigations generate JOINs that multiply rows (1000 orders × 5 items × 2 shipments = 10K rows, but the JOIN multiplies to 10K × ...). Fix: use `AsSplitQuery()` to issue one query per collection navigation:
+   - **A:** This is the Cartesian explosion problem — multiple `Include` calls on collection navigations generate JOINs that multiply rows (1000 orders × 5 items × 2 shipments = 10K rows, but the JOIN multiplies to 10K × ...). Fix: use `AsSplitQuery()` to issue one query per collection navigation:
 ```csharp
 var orders = await _context.Orders
     .Include(o => o.Items)
@@ -259,17 +266,17 @@ var orders = await _context.Orders
 This generates 3 queries: one for orders, one for items (JOIN orders), one for shipments (JOIN orders). Trade-off: more round trips but no row multiplication. For even better performance, use `Select` projections to pick only needed columns.
 
 2. **Q: You are troubleshooting a production issue where `SaveChangesAsync` takes 5 seconds. The change tracker has 10K tracked entities. What's happening?**
-   A: `DetectChanges` is called automatically before `SaveChanges`. With 10K tracked entities, it iterates each entity and compares all property values against their snapshots — O(n * properties). For bulk operations, disable auto-detection: `_context.ChangeTracker.AutoDetectChangesEnabled = false` and call `DetectChanges()` manually at strategic points. Also consider: if you're loading entities only to update a single property, use `ExecuteUpdate` (EF Core 7+) instead — it issues a single SQL UPDATE without loading data.
-   > **Interview follow-up:** If you disable `AutoDetectChangesEnabled`, which EF Core operations still implicitly call `DetectChanges` and might surprise you with inconsistent tracked state?
+   - **A:** `DetectChanges` is called automatically before `SaveChanges`. With 10K tracked entities, it iterates each entity and compares all property values against their snapshots — O(n * properties). For bulk operations, disable auto-detection: `_context.ChangeTracker.AutoDetectChangesEnabled = false` and call `DetectChanges()` manually at strategic points. Also consider: if you're loading entities only to update a single property, use `ExecuteUpdate` (EF Core 7+) instead — it issues a single SQL UPDATE without loading data.
+   - **Interview follow-up:** If you disable `AutoDetectChangesEnabled`, which EF Core operations still implicitly call `DetectChanges` and might surprise you with inconsistent tracked state?
 
 3. **Q: You are designing a multi-tenant system where each tenant's data must be isolated. You choose a shared database approach. How do you prevent accidentally querying another tenant's data?**
-   A: Use global query filters: `modelBuilder.Entity<T>().HasQueryFilter(e => e.TenantId == _tenantProvider.TenantId)`. This adds `WHERE TenantId = @__tenantProvider_TenantId_0` to EVERY query automatically. The tenant ID is resolved via `IHttpContextAccessor` or scoped service injected into `DbContext`. For truly airtight isolation, also use schema-per-tenant (each tenant gets its own schema). Global query filters can be bypassed with `IgnoreQueryFilters()` — only expose this on dedicated admin endpoints with authorization checks.
+   - **A:** Use global query filters: `modelBuilder.Entity<T>().HasQueryFilter(e => e.TenantId == _tenantProvider.TenantId)`. This adds `WHERE TenantId = @__tenantProvider_TenantId_0` to EVERY query automatically. The tenant ID is resolved via `IHttpContextAccessor` or scoped service injected into `DbContext`. For truly airtight isolation, also use schema-per-tenant (each tenant gets its own schema). Global query filters can be bypassed with `IgnoreQueryFilters()` — only expose this on dedicated admin endpoints with authorization checks.
 
 4. **Q: You are migrating from EF6 to EF Core. Your old system relied on lazy loading extensively, and performance is terrible. How do you refactor?**
-   A: Disable lazy loading by default (`optionsBuilder.UseLazyLoadingProxies(false)`). Use eager loading (`Include`/`ThenInclude`) for all navigation properties you know you'll access. For optional relationships, use explicit loading: `await context.Entry(order).Reference(o => o.Customer).LoadAsync()`. Apply the N+1 detection pattern: log or throw when lazy loading is triggered (EF Core 6+ can warn on unfiltered `Include`). Then systematically replace lazy loads with eager loads in hot paths. For truly optional navigation access, consider a `LazyLoader` that batches loads.
+   - **A:** Disable lazy loading by default (`optionsBuilder.UseLazyLoadingProxies(false)`). Use eager loading (`Include`/`ThenInclude`) for all navigation properties you know you'll access. For optional relationships, use explicit loading: `await context.Entry(order).Reference(o => o.Customer).LoadAsync()`. Apply the N+1 detection pattern: log or throw when lazy loading is triggered (EF Core 6+ can warn on unfiltered `Include`). Then systematically replace lazy loads with eager loads in hot paths. For truly optional navigation access, consider a `LazyLoader` that batches loads.
 
 5. **Q: You need to update 50K products' prices by 10%. The naive approach loads all entities, modifies them, and calls `SaveChanges`. This takes 2 minutes. How do you make it instantaneous?**
-   A: Use `ExecuteUpdate` (EF Core 7+):
+   - **A:** Use `ExecuteUpdate` (EF Core 7+):
 ```csharp
 await _context.Products
     .Where(p => p.CategoryId == categoryId)
@@ -278,7 +285,7 @@ await _context.Products
 This issues a single SQL `UPDATE` statement — no data is loaded into memory. For deletes, use `ExecuteDelete`. Both bypass the change tracker entirely. For complex transformations, use raw SQL with `ExecuteSqlRaw` or `ExecuteSqlInterpolated`.
 
 6. **Q: You are building a search endpoint that returns products with 12 optional filters. The LINQ query becomes a complex expression tree. How do you structure the query for maintainability and performance?**
-   A: Use the specification pattern or conditional `IQueryable` composition:
+   - **A:** Use the specification pattern or conditional `IQueryable` composition:
 ```csharp
 IQueryable<Product> query = _context.Products.AsNoTracking();
 if (request.MinPrice.HasValue) query = query.Where(p => p.Price >= request.MinPrice);
@@ -292,15 +299,15 @@ var products = await query.Select(p => new ProductDto { ... }).ToListAsync();
 This builds a single SQL query with only the relevant WHERE clauses. Each `.Where()` composes into the expression tree without any branching in SQL. Use AutoMapper's `ProjectTo` to generate efficient `SELECT` projections automatically.
 
 7. **Q: You are experiencing deadlocks under high concurrency. Two transactions both read and update the same rows. How do you resolve this with EF Core?**
-   A: Deadlocks often occur when transactions acquire locks in different orders. Fix: (1) Ensure consistent access order — always update entities in the same sequence (e.g., by primary key). (2) Use `IsolationLevel.ReadCommitted` (default) — higher isolation levels like `Serializable` increase deadlock probability. (3) Use short-lived transactions — minimize work between `BeginTransaction` and `Commit`. (4) Use `SqlRetryExecutionStrategy` for automatic retry on deadlock (EF Core's default strategy retries on SQL Server deadlock error 1205):
+   - **A:** Deadlocks often occur when transactions acquire locks in different orders. Fix: (1) Ensure consistent access order — always update entities in the same sequence (e.g., by primary key). (2) Use `IsolationLevel.ReadCommitted` (default) — higher isolation levels like `Serializable` increase deadlock probability. (3) Use short-lived transactions — minimize work between `BeginTransaction` and `Commit`. (4) Use `SqlRetryExecutionStrategy` for automatic retry on deadlock (EF Core's default strategy retries on SQL Server deadlock error 1205):
 ```csharp
 optionsBuilder.UseSqlServer(connStr, o => o.EnableRetryOnFailure(3));
 ```
 (5) For high-contention counters (e.g., inventory), consider optimistic concurrency with retry instead of pessimistic locks.
-   > **Interview follow-up:** If `EnableRetryOnFailure` retries the entire transaction on deadlock, how does it handle side effects from statements that already executed before the deadlock — for example, an `INSERT` that succeeded before the conflicting `UPDATE`?
+   - **Interview follow-up:** If `EnableRetryOnFailure` retries the entire transaction on deadlock, how does it handle side effects from statements that already executed before the deadlock — for example, an `INSERT` that succeeded before the conflicting `UPDATE`?
 
 8. **Q: You need to log every query EF Core executes for debugging. Some queries are generated inefficiently. How do you capture and analyze them?**
-   A: In development, enable logging: `optionsBuilder.LogTo(Console.WriteLine, LogLevel.Information)`. For detailed analysis, use `ToQueryString()` on any `IQueryable` to see the generated SQL:
+   - **A:** In development, enable logging: `optionsBuilder.LogTo(Console.WriteLine, LogLevel.Information)`. For detailed analysis, use `ToQueryString()` on any `IQueryable` to see the generated SQL:
 ```csharp
 var query = _context.Products.Where(p => p.Price > 100).OrderBy(p => p.Name);
 var sql = query.ToQueryString(); // "SELECT ... FROM Products WHERE Price > @__p_0 ORDER BY Name"
@@ -308,7 +315,7 @@ var sql = query.ToQueryString(); // "SELECT ... FROM Products WHERE Price > @__p
 For production, use an interceptor: `optionsBuilder.AddInterceptors(new TaggedQueryCommandInterceptor())`. EF Core 8+ has built-in query tags: `.TagWith("MyQuery")` adds comments to SQL for identification in database logs/profilers.
 
 9. **Q: You are designing a Blazor Server app that holds DbContext open for the lifetime of the user's session. The change tracker grows to 100K entities. How do you fix this?**
-   A: Blazor Server should use `IDbContextFactory<T>` to create short-lived DbContext instances per operation, not a single long-lived one:
+   - **A:** Blazor Server should use `IDbContextFactory<T>` to create short-lived DbContext instances per operation, not a single long-lived one:
 ```csharp
 services.AddDbContextFactory<AppDbContext>(options => ...);
 // In component:
@@ -318,7 +325,7 @@ var products = await context.Products.AsNoTracking().ToListAsync();
 If you must track entities across renders, use detached entities (no tracking) with manual state management. Alternatively, use `AsNoTrackingWithIdentityResolution()` to avoid tracking overhead while still resolving entity identity.
 
 10. **Q: You are implementing the transactional outbox pattern. The background worker publishes outbox messages but sometimes duplicates occur after a crash. How do you handle idempotency?**
-     A: Each outbox message should have a unique, deterministic `MessageId` (e.g., `$"{aggregateType}-{aggregateId}-{eventSequence}"`). The message broker (or consumer) deduplicates by this ID. Use `IOutboxStore` with `ProcessedMessages` tracking:
+     - **A:** Each outbox message should have a unique, deterministic `MessageId` (e.g., `$"{aggregateType}-{aggregateId}-{eventSequence}"`). The message broker (or consumer) deduplicates by this ID. Use `IOutboxStore` with `ProcessedMessages` tracking:
 ```csharp
 public class OutboxProcessor
 {
@@ -341,41 +348,41 @@ public class OutboxProcessor
 }
 ```
 Use `MessageId` for idempotent publishing — the broker checks if it already processed this ID. For exactly-once delivery, combine with consumer-side idempotency (store processed message IDs in the consumer database).
-    > **Interview follow-up:** If the service crashes between publishing the message and saving `ProcessedAt`, the next run re-publishes the same message — is the window between publish and `SaveChanges` acceptable for your system, and how would you narrow or eliminate it?
+    - **Interview follow-up:** If the service crashes between publishing the message and saving `ProcessedAt`, the next run re-publishes the same message — is the window between publish and `SaveChanges` acceptable for your system, and how would you narrow or eliminate it?
 
 ---
 
 ## Interview Questions
 
 1. **What is EF Core?**
-   A: Entity Framework Core is Microsoft's open-source, cross-platform ORM for .NET. It enables working with databases using .NET objects, providing LINQ-to-SQL translation, change tracking, migrations, and multiple database provider support.
+   - **A:** Entity Framework Core is Microsoft's open-source, cross-platform ORM for .NET. It enables working with databases using .NET objects, providing LINQ-to-SQL translation, change tracking, migrations, and multiple database provider support.
 
 2. **What is the difference between `AsNoTracking` and the default tracking behavior?**
-   A: Default tracking creates entity snapshots for change detection on `SaveChanges`. `AsNoTracking` skips snapshot creation, making queries ~30-50% faster with less memory. Use `AsNoTracking` for read-only queries; use tracking when entities will be modified and saved.
+   - **A:** Default tracking creates entity snapshots for change detection on `SaveChanges`. `AsNoTracking` skips snapshot creation, making queries ~30-50% faster with less memory. Use `AsNoTracking` for read-only queries; use tracking when entities will be modified and saved.
 
 3. **What is the N+1 query problem?**
-   A: Lazy loading triggers a separate query each time a navigation property is accessed. In a loop over N parent entities, this produces 1 (parent query) + N (child lazy loads) = N+1 queries. Prevent with eager loading (`Include`/`ThenInclude`), explicit loading, or disabling lazy loading.
+   - **A:** Lazy loading triggers a separate query each time a navigation property is accessed. In a loop over N parent entities, this produces 1 (parent query) + N (child lazy loads) = N+1 queries. Prevent with eager loading (`Include`/`ThenInclude`), explicit loading, or disabling lazy loading.
 
 4. **What is the difference between `Include` and `ThenInclude`?**
-   A: `Include` specifies the first-level navigation property to eager load: `.Include(o => o.Customer)`. `ThenInclude` chains to load nested navigations: `.Include(o => o.Items).ThenInclude(i => i.Product)`. `ThenInclude` always follows an `Include` or another `ThenInclude`.
+   - **A:** `Include` specifies the first-level navigation property to eager load: `.Include(o => o.Customer)`. `ThenInclude` chains to load nested navigations: `.Include(o => o.Items).ThenInclude(i => i.Product)`. `ThenInclude` always follows an `Include` or another `ThenInclude`.
 
 5. **What is `ExecuteUpdate` and when should you use it?**
-   A: Added in EF Core 7, it issues a single SQL `UPDATE` statement without loading entities into memory. Use for bulk updates: `_context.Products.Where(p => p.Price < 10).ExecuteUpdateAsync(setter => setter.SetProperty(p => p.Price, 10))`. Do not use when you need change tracking or validation.
+   - **A:** Added in EF Core 7, it issues a single SQL `UPDATE` statement without loading entities into memory. Use for bulk updates: `_context.Products.Where(p => p.Price < 10).ExecuteUpdateAsync(setter => setter.SetProperty(p => p.Price, 10))`. Do not use when you need change tracking or validation.
 
 6. **What are global query filters?**
-   A: LINQ WHERE predicates applied automatically to all queries for an entity. Configured in `OnModelCreating`: `modelBuilder.Entity<T>().HasQueryFilter(e => !e.IsDeleted)`. Used for soft deletes, multi-tenancy, and access control. Can be bypassed with `IgnoreQueryFilters()`.
+   - **A:** LINQ WHERE predicates applied automatically to all queries for an entity. Configured in `OnModelCreating`: `modelBuilder.Entity<T>().HasQueryFilter(e => !e.IsDeleted)`. Used for soft deletes, multi-tenancy, and access control. Can be bypassed with `IgnoreQueryFilters()`.
 
 7. **What is the difference between `FromSqlRaw` and `FromSqlInterpolated`?**
-   A: `FromSqlInterpolated` uses string interpolation syntax but converts parameters to `SqlParameter` — safe from injection. `FromSqlRaw` takes a raw SQL string — vulnerable to injection if concatenated with user input. Always prefer `FromSqlInterpolated` for dynamic values.
+   - **A:** `FromSqlInterpolated` uses string interpolation syntax but converts parameters to `SqlParameter` — safe from injection. `FromSqlRaw` takes a raw SQL string — vulnerable to injection if concatenated with user input. Always prefer `FromSqlInterpolated` for dynamic values.
 
 8. **What is `AsSplitQuery`?**
-   A: Instructs EF Core to issue separate queries for each collection `Include` instead of one large query with multiple JOINs. Avoids Cartesian explosion (row multiplication from multiple collections) at the cost of additional round trips. Use when including multiple collection navigations.
+   - **A:** Instructs EF Core to issue separate queries for each collection `Include` instead of one large query with multiple JOINs. Avoids Cartesian explosion (row multiplication from multiple collections) at the cost of additional round trips. Use when including multiple collection navigations.
 
 9. **What is the difference between TPH, TPT, and TPC inheritance mapping?**
-   A: **TPH** (default): single table with discriminator column — best performance, nullable subtype columns. **TPT**: one table per type with JOINs — normalized but slower. **TPC** (EF Core 8+): one table per concrete type — no discriminator, no JOINs for leaf types. TPH is usually the best choice.
+   - **A:** **TPH** (default): single table with discriminator column — best performance, nullable subtype columns. **TPT**: one table per type with JOINs — normalized but slower. **TPC** (EF Core 8+): one table per concrete type — no discriminator, no JOINs for leaf types. TPH is usually the best choice.
 
 10. **How does EF Core handle concurrency conflicts?**
-    A: Use `[Timestamp]` (row version) or `[ConcurrencyCheck]` attributes. EF Core includes the original value in the UPDATE/DELETE WHERE clause. If the value changed since load, no rows are affected and `DbUpdateConcurrencyException` is thrown. Handle by refreshing the entity and retrying, or notifying the user.
+    - **A:** Use `[Timestamp]` (row version) or `[ConcurrencyCheck]` attributes. EF Core includes the original value in the UPDATE/DELETE WHERE clause. If the value changed since load, no rows are affected and `DbUpdateConcurrencyException` is thrown. Handle by refreshing the entity and retrying, or notifying the user.
 
 ---
 

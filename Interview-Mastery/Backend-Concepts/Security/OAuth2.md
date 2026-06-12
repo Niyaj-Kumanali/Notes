@@ -41,15 +41,24 @@ public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 
 ## Common Mistakes
 
-- **Not Using PKCE for Public Clients** — Mobile and SPA apps must use PKCE. Without it, authorization code interception is possible. This *looks correct* because the Authorization Code flow already requires a client secret — the developer doesn't realize that public clients cannot keep secrets and the code itself is the only credential.
-- **Storing Tokens Insecurely** — LocalStorage exposes tokens to XSS. Use httpOnly cookies or secure platform storage. This *looks correct* because the token is accessible to JavaScript and the app works — the XSS vector that reads the token is invisible until an attacker finds an injection point.
-- **Long-Lived Access Tokens** — Use short expiry (15-60 min) with refresh tokens. This *looks correct* because the user stays logged in without interruption — the security risk of a stolen long-lived token has no observable symptom until misuse.
-- **Not Validating Redirect URIs** — Can lead to open redirect vulnerabilities. This *looks correct* because the redirect happens on the client side that the user sees — the developer trusts the browser, not realizing an attacker can craft a custom redirect_uri.
-- **Missing State Parameter** — Vulnerable to CSRF attacks on the authorization callback. This *looks correct* because the code exchange succeeds without the state parameter — the CSRF attack is invisible because the tokens are delivered to the attacker, not the legitimate user.
-- **Hardcoded Client Secrets** — Use environment variables, vaults, or managed secrets. This *looks correct* because the code compiles and works — the secret is just a string in the repo, invisible to casual inspection.
-- **Implicit Grant Usage** — The Implicit Grant (deprecated in OAuth 2.1) exposes tokens in the URL fragment, visible in browser history and server logs. Migrate to Authorization Code + PKCE for all clients. This *looks correct* because the token arrives in the browser and the SPA uses it immediately — the developer doesn't check browser history or server logs after their own login.
-- **Missing Token Introspection on Resource Servers** — Resource servers that blindly accept any JWT without validating signature, expiry, issuer, or audience are vulnerable to token forgery attacks. This *looks correct* because the JWT is signed and decodes correctly — the developer trusts the signature alone without verifying that the token was intended for this specific resource server.
-- **Overly Broad Scopes** — Requesting `read_all` or `write_all` instead of granular scopes violates the principle of least privilege. Use fine-grained scopes like `orders:read`, `profile:write`. This *looks correct* because requesting broad scopes means fewer re-authorizations — the security cost is hidden in the damage a compromised token can do across the entire API surface.
+- **Not Using PKCE for Public Clients** — Mobile and SPA apps must use PKCE. Without it, authorization code interception is possible.
+  - **Why it looks correct:** The Authorization Code flow already requires a client secret — the developer doesn't realize that public clients cannot keep secrets and the code itself is the only credential.
+- **Storing Tokens Insecurely** — LocalStorage exposes tokens to XSS. Use httpOnly cookies or secure platform storage.
+  - **Why it looks correct:** The token is accessible to JavaScript and the app works — the XSS vector that reads the token is invisible until an attacker finds an injection point.
+- **Long-Lived Access Tokens** — Use short expiry (15-60 min) with refresh tokens.
+  - **Why it looks correct:** The user stays logged in without interruption — the security risk of a stolen long-lived token has no observable symptom until misuse.
+- **Not Validating Redirect URIs** — Can lead to open redirect vulnerabilities.
+  - **Why it looks correct:** The redirect happens on the client side that the user sees — the developer trusts the browser, not realizing an attacker can craft a custom redirect_uri.
+- **Missing State Parameter** — Vulnerable to CSRF attacks on the authorization callback.
+  - **Why it looks correct:** The code exchange succeeds without the state parameter — the CSRF attack is invisible because the tokens are delivered to the attacker, not the legitimate user.
+- **Hardcoded Client Secrets** — Use environment variables, vaults, or managed secrets.
+  - **Why it looks correct:** The code compiles and works — the secret is just a string in the repo, invisible to casual inspection.
+- **Implicit Grant Usage** — The Implicit Grant (deprecated in OAuth 2.1) exposes tokens in the URL fragment, visible in browser history and server logs. Migrate to Authorization Code + PKCE for all clients.
+  - **Why it looks correct:** The token arrives in the browser and the SPA uses it immediately — the developer doesn't check browser history or server logs after their own login.
+- **Missing Token Introspection on Resource Servers** — Resource servers that blindly accept any JWT without validating signature, expiry, issuer, or audience are vulnerable to token forgery attacks.
+  - **Why it looks correct:** The JWT is signed and decodes correctly — the developer trusts the signature alone without verifying that the token was intended for this specific resource server.
+- **Overly Broad Scopes** — Requesting `read_all` or `write_all` instead of granular scopes violates the principle of least privilege. Use fine-grained scopes like `orders:read`, `profile:write`.
+  - **Why it looks correct:** Requesting broad scopes means fewer re-authorizations — the security cost is hidden in the damage a compromised token can do across the entire API surface.
 
 ---
 
@@ -177,7 +186,8 @@ authRequestUri += "&code_challenge=" + codeChallenge + "&code_challenge_method=S
 
 ## Developer Recommendations
 
-- **Always use PKCE — even for confidential clients** — PKCE was designed for public clients, but it adds defense-in-depth for all clients. If a server's `client_secret` is leaked, PKCE still protects against authorization code interception. The implementation cost is minimal: a few extra random bytes and a hash. OAuth 2.1 requires PKCE for public clients. Make it a default for all OAuth flows, regardless of client type. A real-world breach at a major tech company involved an attacker who obtained a client secret from a compromised backend service — PKCE would have prevented the resulting authorization code interception even with the leaked secret.
+- **Always use PKCE — even for confidential clients** — PKCE was designed for public clients, but it adds defense-in-depth for all clients. If a server's `client_secret` is leaked, PKCE still protects against authorization code interception. The implementation cost is minimal: a few extra random bytes and a hash. OAuth 2.1 requires PKCE for public clients. Make it a default for all OAuth flows, regardless of client type.
+  - **Production story:** A real-world breach at a major tech company involved an attacker who obtained a client secret from a compromised backend service — PKCE would have prevented the resulting authorization code interception even with the leaked secret.
 
 - **Use JWT access tokens with asymmetric signatures for distributed systems** — Opaque tokens require introspection on every request, creating a central bottleneck and adding 30-50ms latency per hop. JWT with RS256/ES256 enables local validation in <1ms using cached public keys from JWKS. The trade-off: token revocation is no longer immediate (valid until `exp`). Mitigate with short token lifetimes (15 min) and an optional blacklist for emergency revocations. The performance gain outweighs the revocation delay for most systems.
 

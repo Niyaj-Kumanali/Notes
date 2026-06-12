@@ -188,11 +188,16 @@ class OrderControllerTest {
 
 ## Common Mistakes
 
-- **Mocking the class under test** — unit tests should test real logic, not mock it. This *looks correct* because the mock compiles and the test passes — but it tests Mockito's default return values, not the actual class behavior. Always test real logic, not mock it.
-- **Not using `@InjectMocks` properly** — constructor injection is most reliable; field/setter injection is fragile. This *looks correct* because the test runs without errors — `@InjectMocks` silently skips mismatched dependencies, leaving fields null until the tested code path triggers an NPE. Constructor injection is most reliable; field/setter injection is fragile.
-- **Over-stubbing** — only stub what's needed for the specific test scenario. This *looks correct* because more stubbing makes the test feel more thorough — but unnecessary stubs make tests brittle, breaking when production code legitimately changes. Only stub what's needed for the specific test scenario.
-- **Mixing matchers and literals** — must use matchers for ALL args if using matchers for ANY arg. This *looks correct* because the code looks reasonable at a glance — the `InvalidUseOfMatchersException` at runtime is confusing, and the developer may not connect it to the mixed usage pattern.
-- **Not verifying interactions** — verify that the expected interactions actually occurred, especially for void methods. This *looks correct* because the test checks the return value, which is sufficient to make the assertion pass — the missing side effect (e.g., an email that wasn't sent) is invisible in the test result.
+- **Mocking the class under test** — unit tests should test real logic, not mock it.
+  - **Why it looks correct:** the mock compiles and the test passes — but it tests Mockito's default return values, not the actual class behavior. Always test real logic, not mock it.
+- **Not using `@InjectMocks` properly** — constructor injection is most reliable; field/setter injection is fragile.
+  - **Why it looks correct:** the test runs without errors — `@InjectMocks` silently skips mismatched dependencies, leaving fields null until the tested code path triggers an NPE. Constructor injection is most reliable; field/setter injection is fragile.
+- **Over-stubbing** — only stub what's needed for the specific test scenario.
+  - **Why it looks correct:** more stubbing makes the test feel more thorough — but unnecessary stubs make tests brittle, breaking when production code legitimately changes. Only stub what's needed for the specific test scenario.
+- **Mixing matchers and literals** — must use matchers for ALL args if using matchers for ANY arg.
+  - **Why it looks correct:** the code looks reasonable at a glance — the `InvalidUseOfMatchersException` at runtime is confusing, and the developer may not connect it to the mixed usage pattern.
+- **Not verifying interactions** — verify that the expected interactions actually occurred, especially for void methods.
+  - **Why it looks correct:** the test checks the return value, which is sufficient to make the assertion pass — the missing side effect (e.g., an email that wasn't sent) is invisible in the test result.
 - **Using `@Spy` when `@Mock` would do** — spies should be rare. This *looks correct* because `@Spy` works and the test passes — the design smell (too many responsibilities) is invisible when tests are green. Always prefer extracting the stubbed method into its own class.
 - **Stubbing `equals()`/`hashCode()`** — don't stub these. This *looks correct* because the IDE autocomplete suggests `equals()` and stubbing it compiles — the developer doesn't realize that Mockito uses these internally for argument matching. Use `refEq()` or `argThat()` for comparison.
 - **Ignoring `verifyNoMoreInteractions()`** — helps detect unexpected calls that may hide bugs. This *looks correct* because the test passes without it, and adding the check feels like over-specification — the extra method call only matters if it has a real side effect that changes behavior.

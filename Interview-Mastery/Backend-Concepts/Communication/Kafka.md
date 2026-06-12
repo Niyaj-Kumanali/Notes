@@ -56,16 +56,26 @@ while (true) {
 
 ## Common Mistakes
 
-- **Too few partitions** — limits parallelism and throughput. This *looks correct* because the topic works fine with a single partition in dev — the throughput ceiling only becomes visible under production traffic.
-- **Consumer lag not monitored** — silently loses processing capability. This *looks correct* because the consumers appear healthy (no errors, no crashes) — the growing lag is invisible until processing delays show up in customer-facing metrics.
-- **No idempotent producer** — duplicate messages on failure. This *looks correct* because duplicates only happen when a producer retries after a timeout — a rare edge case that looks like the network's fault, not the configuration.
-- **Auto offset commit enabled** — risk of missing messages on crash. This *looks correct* because during normal operation the consumer processes everything — the gap only appears after a crash, when the committed offset has moved past unprocessed messages.
-- **Synchronous production in hot path** — blocks and reduces throughput. This *looks correct* because each send returns quickly in isolation — the blocking delay accumulates across thousands of sends per second, throttling the producer.
-- **No dead letter topic** — failed messages are lost forever. This *looks correct* because throwing the exception and moving on keeps the consumer running — the message is silently dropped and never investigated.
-- **Rebalance storms** — frequent rebalances halt processing. This *looks correct* because each rebalance completes in seconds — the cumulative downtime across dozens of rebalances per hour is invisible to any single monitoring check.
-- **Incorrect partitioning strategy** — uneven load across consumers. This *looks correct* because partition counts are balanced during assignment — the uneven data distribution across partitions only appears under real traffic patterns.
-- **Ignoring 1MB default message size limit** — payloads exceeding 1MB are silently rejected by the broker. This *looks correct* because small test messages always succeed — the error surfaces only in production when a legitimate payload hits the ceiling.
-- **Too many partitions** — increases overhead and rebalance time. This *looks correct* because more partitions means more parallelism — the overhead in file descriptors, leader elections, and rebalance latency grows non-linearly and catches teams off guard.
+- **Too few partitions** — limits parallelism and throughput.
+  - **Why it looks correct:** The topic works fine with a single partition in dev — the throughput ceiling only becomes visible under production traffic.
+- **Consumer lag not monitored** — silently loses processing capability.
+  - **Why it looks correct:** The consumers appear healthy (no errors, no crashes) — the growing lag is invisible until processing delays show up in customer-facing metrics.
+- **No idempotent producer** — duplicate messages on failure.
+  - **Why it looks correct:** Duplicates only happen when a producer retries after a timeout — a rare edge case that looks like the network's fault, not the configuration.
+- **Auto offset commit enabled** — risk of missing messages on crash.
+  - **Why it looks correct:** During normal operation the consumer processes everything — the gap only appears after a crash, when the committed offset has moved past unprocessed messages.
+- **Synchronous production in hot path** — blocks and reduces throughput.
+  - **Why it looks correct:** Each send returns quickly in isolation — the blocking delay accumulates across thousands of sends per second, throttling the producer.
+- **No dead letter topic** — failed messages are lost forever.
+  - **Why it looks correct:** Throwing the exception and moving on keeps the consumer running — the message is silently dropped and never investigated.
+- **Rebalance storms** — frequent rebalances halt processing.
+  - **Why it looks correct:** Each rebalance completes in seconds — the cumulative downtime across dozens of rebalances per hour is invisible to any single monitoring check.
+- **Incorrect partitioning strategy** — uneven load across consumers.
+  - **Why it looks correct:** Partition counts are balanced during assignment — the uneven data distribution across partitions only appears under real traffic patterns.
+- **Ignoring 1MB default message size limit** — payloads exceeding 1MB are silently rejected by the broker.
+  - **Why it looks correct:** Small test messages always succeed — the error surfaces only in production when a legitimate payload hits the ceiling.
+- **Too many partitions** — increases overhead and rebalance time.
+  - **Why it looks correct:** More partitions means more parallelism — the overhead in file descriptors, leader elections, and rebalance latency grows non-linearly and catches teams off guard.
 
 ---
 
@@ -229,7 +239,7 @@ kafkaTemplate.send("order.events", event.getOrderId(), event);
 
 2. **Q: Your Kafka consumer processes payment events and writes results to a database. After a crash, some events are processed twice — the database has duplicate payment records. How do you implement exactly-once semantics between Kafka and your database?**
     - A: (1) Enable idempotent producer on the write side. (2) Use Kafka transactions: consume with `isolation.level=read_committed`, process the event, and write the result to DB within a Kafka transaction. (3) Commit the Kafka offset only after the database transaction commits — use a transactional outbox pattern: write the result to DB and the offset to a separate table in the same DB transaction. (4) Use idempotent upserts (`INSERT ... ON CONFLICT DO UPDATE`) in the database — the same event processed twice produces the same result.
-    > **Interview follow-up:** Kafka transactions keep the offset and the result in a single atomic commit across producer and consumer — but the database write happens outside Kafka's control. How do you make the DB write and the offset commit truly atomic?
+    - **Interview follow-up:** Kafka transactions keep the offset and the result in a single atomic commit across producer and consumer — but the database write happens outside Kafka's control. How do you make the DB write and the offset commit truly atomic?
 
 3. **Q: Your topic has 6 partitions and 3 consumers in a group. One consumer crashes. How does Kafka handle the rebalance, and how do you minimize the impact on processing?**
    - A: (1) The group coordinator detects the consumer's session timeout (default 45s). (2) A rebalance triggers: all consumers stop processing, surrender their partitions, and the group leader reassigns partitions (sticky strategy assigns the 6 partitions to the 2 remaining consumers — 3 partitions each). (3) To minimize impact: use `session.timeout.ms=10s` for faster failure detection, use static group membership (`group.instance.id`) to avoid full rebalances, use cooperative sticky rebalancer (incremental rebalancing that doesn't stop all consumers).
@@ -245,7 +255,7 @@ kafkaTemplate.send("order.events", event.getOrderId(), event);
 
 7. **Q: Your consumer group processes order events. One consumer takes 15 minutes to process a single message (PDF generation). The session timeout is 45 seconds. The consumer is kicked out of the group during processing. How do you handle long-running processing without triggering rebalances?**
     - A: (1) Increase `max.poll.interval.ms` to 20 minutes — allows the consumer to take longer between polls. (2) Use manual offset commits: commit the offset before the long-running process (at-least-once). (3) Offload the long-running work to a separate thread/executor — the consumer thread continues polling to send heartbeats and avoid being considered dead. (4) Use pause/resume: `consumer.pause(partition)` before the long task, `consumer.resume(partition)` after. (5) Increase `heartbeat.interval.ms` to detect actual failures sooner while accommodating long processing.
-    > **Interview follow-up:** If you commit the offset before the long process and the consumer crashes mid-way, the message is lost — how do you reconcile at-least-once vs exactly-once when the processing can't be split into poll-sized chunks?
+    - **Interview follow-up:** If you commit the offset before the long process and the consumer crashes mid-way, the message is lost — how do you reconcile at-least-once vs exactly-once when the processing can't be split into poll-sized chunks?
 
 8. **Q: You need geographic routing: orders from EU go to EU consumers, orders from US go to US consumers. How do you design the Kafka partitioner?**
    - A: (1) Implement a custom `Partitioner` interface: extract the region from the message key or value (e.g., from a `region` field or a key prefix like `eu-order-123`). (2) Assign specific partition ranges for each region: EU = partitions 0-3, US = partitions 4-7, APAC = partitions 8-11. (3) Hash the region to its partition range. (4) Configure: `partitioner.class=com.example.RegionPartitioner`. (5) Consumer groups are also region-specific: EU consumers subscribe to partitions 0-3 only. This ensures data locality and reduces cross-region network traffic.
@@ -255,7 +265,7 @@ kafkaTemplate.send("order.events", event.getOrderId(), event);
 
 10. **Q: Your banking application uses Kafka for event sourcing. Each account's state changes are stored as events. To rebuild the account state, you must replay all events from the beginning. After 6 months, replay takes 30 minutes. How do you speed up state rebuilding?**
     - A: (1) Use Kafka's log compaction: keep only the latest state per key (account ID). Compacted topics delete old events and retain only the latest value for each key. (2) Store periodic snapshots: persist the account state in a database every 1000 events. On restart, load the latest snapshot and replay only events newer than the snapshot. (3) Use Kafka Streams' state stores (RocksDB) that persist state locally. On restart, the state store is recovered from the local RocksDB instance (fast) rather than replaying all events. (4) Partition by account ID: each partition handles a subset of accounts, enabling parallel replay.
-    > **Interview follow-up:** Log compaction retains only the latest value per key — what happens to the ordering guarantees if a consumer reads a compacted topic where intermediate events were deleted? Can the consumer still reconstruct state correctly?
+    - **Interview follow-up:** Log compaction retains only the latest value per key — what happens to the ordering guarantees if a consumer reads a compacted topic where intermediate events were deleted? Can the consumer still reconstruct state correctly?
 
 ---
 
@@ -295,7 +305,8 @@ kafkaTemplate.send("order.events", event.getOrderId(), event);
 
 ## Developer Recommendations
 
-- **Always enable idempotent producers** — Without `enable.idempotence=true`, producer retries during transient errors can create duplicate messages. The performance cost of idempotency is negligible (single-digit percentage overhead), and the safety gain is enormous — it eliminates an entire class of data integrity bugs. Set `acks=all` and `enable.idempotence=true` on every producer. This is the single highest-impact configuration change you can make. A team once ran a payment processing pipeline without idempotent producers — a brief network blip caused 2,000 duplicate payment events, double-charging customers before the issue was caught.
+- **Always enable idempotent producers** — Without `enable.idempotence=true`, producer retries during transient errors can create duplicate messages. The performance cost of idempotency is negligible (single-digit percentage overhead), and the safety gain is enormous — it eliminates an entire class of data integrity bugs. Set `acks=all` and `enable.idempotence=true` on every producer. This is the single highest-impact configuration change you can make.
+  - **Production story:** A team once ran a payment processing pipeline without idempotent producers — a brief network blip caused 2,000 duplicate payment events, double-charging customers before the issue was caught.
 
 - **Use a consistent message key for related events** — Kafka guarantees order only within a partition. If events for the same entity (order, user, account) use different keys, they land in different partitions and are processed out of order. Always use the entity ID as the message key. This ensures all events for an entity go to the same partition and are processed sequentially. The trade-off: uneven partition load if some entities have more events. Acceptable for most use cases.
 
@@ -303,6 +314,7 @@ kafkaTemplate.send("order.events", event.getOrderId(), event);
 
 - **Configure appropriate replication factor and min.insync.replicas** — Replication factor 3 is the standard: tolerates one broker failure without data loss. Set `min.insync.replicas=2` with `acks=all` — the producer waits for at least 2 replicas to acknowledge. This prevents the "last write" from being lost if the leader fails immediately after acknowledging. The trade-off: higher latency for each produce request (wait for 2 acks). Worth it for data durability.
 
-- **Use a dead letter topic for poison messages** — A message that cannot be processed (malformed, unexpected schema, business rule violation) will cause the consumer to retry, fail, retry, fail indefinitely if not handled. Implement a dead letter topic: after N retries (typically 3), publish the failed message and original error to a `dead-letter` topic. The consumer acknowledges the original message and continues processing. This prevents a single bad message from blocking the entire partition. In one incident, a schema compatibility change between services caused every event from a deprecated field to fail deserialization — without a DLQ, the consumer stalled for 6 hours while the teams debugged; with a DLQ, it would have been a 10-minute replay.
+- **Use a dead letter topic for poison messages** — A message that cannot be processed (malformed, unexpected schema, business rule violation) will cause the consumer to retry, fail, retry, fail indefinitely if not handled. Implement a dead letter topic: after N retries (typically 3), publish the failed message and original error to a `dead-letter` topic. The consumer acknowledges the original message and continues processing. This prevents a single bad message from blocking the entire partition.
+  - **Production story:** In one incident, a schema compatibility change between services caused every event from a deprecated field to fail deserialization — without a DLQ, the consumer stalled for 6 hours while the teams debugged; with a DLQ, it would have been a 10-minute replay.
 
 - **Design topics for event sourcing with log compaction** — For event-sourced systems, use Kafka's log compaction (`cleanup.policy=compact`). Compaction keeps only the latest state per key, allowing new consumers to rebuild state by reading only the compacted topic (which is much smaller than the full event log). Combine with periodic snapshots stored externally for fast recovery. The trade-off: event history is lost after compaction — use a separate "append-only" topic if you need full audit history.

@@ -35,14 +35,22 @@ String token = Jwts.builder()
 
 ## Common Mistakes
 
-- **Storing JWT in localStorage** — Vulnerable to XSS. Use httpOnly cookies. This *looks correct* because the app works perfectly in development and the token is available to JavaScript for API calls — the XSS vulnerability is invisible until an attacker injects a script tag.
-- **No Token Revocation Mechanism** — Compromised tokens valid until expiry. Maintain a blacklist by `jti` in Redis. This *looks correct* because JWT is "stateless" — the entire point is not needing server-side storage. The inability to revoke is a feature until a token is stolen.
-- **Using Symmetric Keys Across Services** — Shared secret is hard to manage securely. Prefer asymmetric (RS256/ES256). This *looks correct* because the symmetric approach works in a monolith and keeps configuration simple — the risk of secret leakage grows with each additional consumer.
-- **Not Validating Algorithm** — Vulnerable to algorithm confusion attacks. Whitelist expected algorithms. This *looks correct* because the JWT library processes `alg` automatically — the developer never considers that an attacker can change the algorithm header.
-- **Including Sensitive Data in Payload** — Payload is base64 encoded, not encrypted. Never include passwords/PII. This *looks correct* because base64 is unreadable at a glance — the developer mistakes encoding for encryption.
-- **Long Expiry Without Refresh Rotation** — Increased theft window. Use 15-min access tokens with rotating refresh tokens. This *looks correct* because a 24-hour token means fewer logins — the theft window grows silently, with no symptom until the token is compromised.
-- **Not Setting an Appropriate `aud` Claim** — Without audience validation, a token issued for one service can be used against any other service. Always include and validate the `aud` claim to restrict token usage to the intended recipient. This *looks correct* because the token validates against the issuer — the developer doesn't realize a token meant for Service A can authenticate against Service B.
-- **Hardcoding Secrets in Source Code** — Committing JWT signing secrets or private keys to version control exposes the entire authentication system. Use environment variables, secrets managers (Vault, AWS Secrets Manager), or JWKS endpoints for key distribution. This *looks correct* because the repository is private — "nobody outside the team will see it" — until a contractor leaves with access or the repo is accidentally made public.
+- **Storing JWT in localStorage** — Vulnerable to XSS. Use httpOnly cookies.
+  - **Why it looks correct:** The app works perfectly in development and the token is available to JavaScript for API calls — the XSS vulnerability is invisible until an attacker injects a script tag.
+- **No Token Revocation Mechanism** — Compromised tokens valid until expiry. Maintain a blacklist by `jti` in Redis.
+  - **Why it looks correct:** JWT is "stateless" — the entire point is not needing server-side storage. The inability to revoke is a feature until a token is stolen.
+- **Using Symmetric Keys Across Services** — Shared secret is hard to manage securely. Prefer asymmetric (RS256/ES256).
+  - **Why it looks correct:** The symmetric approach works in a monolith and keeps configuration simple — the risk of secret leakage grows with each additional consumer.
+- **Not Validating Algorithm** — Vulnerable to algorithm confusion attacks. Whitelist expected algorithms.
+  - **Why it looks correct:** The JWT library processes `alg` automatically — the developer never considers that an attacker can change the algorithm header.
+- **Including Sensitive Data in Payload** — Payload is base64 encoded, not encrypted. Never include passwords/PII.
+  - **Why it looks correct:** Base64 is unreadable at a glance — the developer mistakes encoding for encryption.
+- **Long Expiry Without Refresh Rotation** — Increased theft window. Use 15-min access tokens with rotating refresh tokens.
+  - **Why it looks correct:** A 24-hour token means fewer logins — the theft window grows silently, with no symptom until the token is compromised.
+- **Not Setting an Appropriate `aud` Claim** — Without audience validation, a token issued for one service can be used against any other service. Always include and validate the `aud` claim to restrict token usage to the intended recipient.
+  - **Why it looks correct:** The token validates against the issuer — the developer doesn't realize a token meant for Service A can authenticate against Service B.
+- **Hardcoding Secrets in Source Code** — Committing JWT signing secrets or private keys to version control exposes the entire authentication system. Use environment variables, secrets managers (Vault, AWS Secrets Manager), or JWKS endpoints for key distribution.
+  - **Why it looks correct:** The repository is private — "nobody outside the team will see it" — until a contractor leaves with access or the repo is accidentally made public.
 
 ---
 
@@ -85,14 +93,14 @@ String token = Jwts.builder()
 
 1. **Q: Your JWT library is vulnerable to algorithm confusion. A security auditor reports that setting `alg: "none"` bypasses validation entirely on some endpoints. How do you fix this across the entire codebase?**
     - A: (1) Configure the JWT library to require a signature — reject tokens with `alg: "none"`, `alg: "None"`, `alg: "NONE"`, `alg: "nOnE"` (case-insensitive check). (2) Whitelist expected algorithms — only `RS256` or `ES256`. (3) Enforce algorithm validation at the library level, not in application code. In Java with Nimbus JOSE: `JWSAlgorithm.parse(tokenHeader.getAlg()).require(expectedAlgs)`. (4) Write a centralized JWT validation utility used by all services — don't duplicate parsing logic. (5) Add a response filter that detects and logs any `alg` values outside the whitelist.
-    > **Interview follow-up:** The centralized JWT utility is a shared library that all services import — what happens when a security patch requires updating the library? How do you ensure every service picks up the fix without manual coordination?
+    - **Interview follow-up:** The centralized JWT utility is a shared library that all services import — what happens when a security patch requires updating the library? How do you ensure every service picks up the fix without manual coordination?
 
 2. **Q: Your refresh tokens use rotation. A legitimate user reports they are randomly logged out during normal usage. Investigation shows their refresh token was rotated but the new token was not received by the client (network issue during refresh response). How do you handle this without compromising security?**
    - A: The user is stuck — old token is invalidated, new token wasn't received. Options: (1) Maintain a grace period: keep the old refresh token valid for 30 seconds after rotation. During this window, either token can be used, but using the old one triggers a new rotation. This handles network failures gracefully. (2) Store refresh tokens in a sliding window: each user has 2-3 valid refresh tokens at any time (rotation keeps a small window of the previous token). (3) Implement re-authentication with limited scope: if refresh fails, allow the user to re-authenticate with their password and issue a new session without losing data.
 
 3. **Q: You need to revoke a specific user's access immediately because their account was compromised. JWTs have 15-minute expiry. How do you achieve instant revocation without switching to opaque tokens?**
     - A: (1) JWT blacklist in Redis: store the `jti` (JWT ID) of the user's current access token with TTL matching remaining expiry. Each service checks the blacklist before processing. (2) Blacklist all tokens by `sub` (user ID): store `user_<id>` in Redis with TTL of 15 minutes. Any JWT with that user ID is rejected. (3) Invalidate all refresh tokens for the user server-side (database/REDIS record). (4) Increment a "token version" claim in the user's DB record — issue new tokens with the incremented version; reject any token with an older version. This is more efficient than individual blacklists.
-    > **Interview follow-up:** The token version approach requires a database read on every request to check the version — doesn't this defeat the stateless validation advantage of JWTs? How do you cache the version check without reintroducing the revocation delay problem?
+    - **Interview follow-up:** The token version approach requires a database read on every request to check the version — doesn't this defeat the stateless validation advantage of JWTs? How do you cache the version check without reintroducing the revocation delay problem?
 
 4. **Q: Your mobile app uses JWT stored in secure device storage. A user uninstalls and reinstalls the app, losing the stored token. The app needs to maintain the session without forcing the user to log in again. How do you handle this?**
    - A: This is a core limitation of client-side token storage — uninstall destroys all local data. Options: (1) Use device-backed encryption (Android Keystore / iOS Keychain) which sometimes survives reinstall if tied to device identity. (2) Use biometric-based key derivation — derive the token encryption key from device biometrics, so it's not stored in app data. (3) Use a server-side session that survives reinstall — store a persistent session identifier server-side, tied to device fingerprint, that allows reissuing tokens after reinstall. (4) Accept the trade-off: require re-authentication on reinstall. This is actually the most secure option — a compromised device is the one edge case where login is desirable.
@@ -114,7 +122,7 @@ String token = Jwts.builder()
 
 10. **Q: A third-party API you integrate with requires a JWT in the Authorization header. The JWT must include a specific `roles` claim that your services use. The third-party's JWT has the same `roles` claim but with different values. When you pass the incoming third-party JWT to your own services, your authorization logic uses the `roles` claim and grants elevated privileges. How do you prevent this cross-system claim conflict?**
     - A: (1) Translation layer: create a gateway/adapter that validates the third-party JWT, maps roles to your system's role format, and issues a new internal JWT with your claims format. Never pass external tokens to internal services. (2) Claim namespacing: use `https://your-domain.com/roles` instead of just `roles`. Third-party tokens won't have this namespaced claim. (3) Always validate `iss` (issuer) and reject tokens with unexpected issuers. (4) Use a dedicated JWT for internal communication with strictly controlled claims. External tokens are consumed and discarded at the boundary.
-    > **Interview follow-up:** The translation layer issues a new JWT signed with your own key — if the translation layer itself is compromised, an attacker can mint tokens with arbitrary roles. How do you protect the translation layer from becoming a privileged escalation point?
+    - **Interview follow-up:** The translation layer issues a new JWT signed with your own key — if the translation layer itself is compromised, an attacker can mint tokens with arbitrary roles. How do you protect the translation layer from becoming a privileged escalation point?
 
 ---
 
@@ -154,7 +162,8 @@ String token = Jwts.builder()
 
 ## Developer Recommendations
 
-- **Always whitelist JWT algorithms** — The algorithm confusion attack is one of the most common JWT vulnerabilities. Libraries like `jjwt` and Nimbus JOSE allow configuring expected algorithms. Never rely on the `alg` header from the token itself to determine verification strategy. Set `parser.setExpectedAlgorithm(RS256)` or equivalent in every JWT validation path. This single defense prevents a whole class of attacks. A well-known incident at a major auth provider involved an attacker changing `alg` from `RS256` to `HS256` and signing with the exposed public key — the token was accepted because the library used the key variable regardless of algorithm type.
+- **Always whitelist JWT algorithms** — The algorithm confusion attack is one of the most common JWT vulnerabilities. Libraries like `jjwt` and Nimbus JOSE allow configuring expected algorithms. Never rely on the `alg` header from the token itself to determine verification strategy. Set `parser.setExpectedAlgorithm(RS256)` or equivalent in every JWT validation path. This single defense prevents a whole class of attacks.
+  - **Production story:** A well-known incident at a major auth provider involved an attacker changing `alg` from `RS256` to `HS256` and signing with the exposed public key — the token was accepted because the library used the key variable regardless of algorithm type.
 
 - **Use asymmetric algorithms (RS256/ES256) for distributed systems** — Symmetric HS256 requires all services to share the same secret. If one service is compromised, the secret is leaked. With RS256, only the authorization server has the private key. Services only need the public key from JWKS, which is not sensitive. Key rotation is also easier — just publish new keys in JWKS without coordinating secret distribution across 20+ services.
 

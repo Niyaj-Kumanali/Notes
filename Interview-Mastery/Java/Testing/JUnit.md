@@ -141,13 +141,17 @@ static Stream<Arguments> provideOrders() {
 
 ## Common Mistakes
 
-Not using `assertAll()` for multiple assertions on the same logical object causes unnecessary fix-rerun cycles. This *looks correct* because each individual `assertEquals` is standard JUnit usage, and the first failure throws an exception — the developer fixes it, reruns, and never realizes that other assertions also failed. Without `assertAll`, the first assertion failure throws an exception, skipping the remaining assertions. You fix the first failure, rerun, find the second failure, fix, rerun — N cycles for N failures. `assertAll()` executes all assertions and reports every failure at once, so you fix everything in one pass.
+- **Not using `assertAll()`** — multiple assertions on the same logical object causes unnecessary fix-rerun cycles.
+  - **Why it looks correct:** each individual `assertEquals` is standard JUnit usage, and the first failure throws an exception — the developer fixes it, reruns, and never realizes that other assertions also failed. Without `assertAll`, the first assertion failure throws an exception, skipping the remaining assertions. You fix the first failure, rerun, find the second failure, fix, rerun — N cycles for N failures. `assertAll()` executes all assertions and reports every failure at once, so you fix everything in one pass.
 
-Declaring `@BeforeAll` or `@AfterAll` methods as non-static without `@TestInstance(Lifecycle.PER_CLASS)` causes a `JUnitException` at runtime. This *looks correct* because the method compiles and the IDE may not flag it — the error only surfaces when the test class actually runs. Either add the `static` keyword or change the test instance lifecycle.
+- **Declaring `@BeforeAll` or `@AfterAll` as non-static** — without `@TestInstance(Lifecycle.PER_CLASS)` causes a `JUnitException` at runtime.
+  - **Why it looks correct:** the method compiles and the IDE may not flag it — the error only surfaces when the test class actually runs.
 
-Writing a parameterized test method without the `@ParameterizedTest` annotation (using `@Test` instead) causes only the first argument set to run — the rest are silently ignored. This *looks correct* because the first test case passes, giving the impression that the test is working — the remaining cases are never executed. Always verify that parameterized tests are annotated with `@ParameterizedTest`, not `@Test`.
+- **Using `@Test` instead of `@ParameterizedTest`** — causes only the first argument set to run, silently ignoring the rest.
+  - **Why it looks correct:** the first test case passes, giving the impression that the test is working — the remaining cases are never executed.
 
-Using `Thread.sleep()` for async testing instead of Awaitility introduces flakiness. This *looks correct* because `Thread.sleep(3000)` is a straightforward approach and usually works on a developer's fast machine — the flakiness only appears on slow CI runners where the async operation occasionally takes 3.1 seconds. Awaitility's `await().atMost(5, SECONDS).untilAsserted(() -> ...)` polls efficiently and completes as soon as the condition is met.
+- **Using `Thread.sleep()` for async testing** — instead of Awaitility introduces flakiness.
+  - **Why it looks correct:** `Thread.sleep(3000)` is a straightforward approach and usually works on a developer's fast machine — the flakiness only appears on slow CI runners where the async operation occasionally takes 3.1 seconds.
 
 ---
 
@@ -246,162 +250,201 @@ Awaitility's `await().untilAsserted()` polls the verification lambda periodicall
 
 ## Scenario-Based Questions
 
-**Q: You are migrating a legacy application from JUnit 4 to JUnit 5. The team has 2000 tests, custom JUnit 4 Rules (`@Rule`), and `@RunWith(Parameterized.class)`. The migration must be incremental — both frameworks must coexist. How do you plan the migration?**
+- **Q: You are migrating a legacy application from JUnit 4 to JUnit 5. The team has 2000 tests, custom JUnit 4 Rules (`@Rule`), and `@RunWith(Parameterized.class)`. The migration must be incremental — both frameworks must coexist. How do you plan the migration?**
+  - Add the `junit-vintage-engine` dependency, which allows JUnit 4 tests to run under the JUnit 5 platform without any code changes. All 2000 existing tests continue passing on the same build.
+  - Then migrate incrementally: replace `@Rule TemporaryFolder` with `@TempDir` (built-in JUnit 5, no additional library), replace `ExpectedException` rule with `assertThrows()`, replace `@RunWith(Parameterized.class)` with `@ParameterizedTest` and its data sources, and replace custom Rules with JUnit 5 Extensions using `@ExtendWith`.
+  - Migrate in priority order: the most failure-prone test classes first (where better diagnostics have the highest ROI), and the least-coupled modules first (where changes are safest).
+  - Run both engines in CI — the build must pass the entire suite at every step.
+  - Remove the vintage engine dependency only when zero JUnit 4 imports remain in the source code.
 
-A: Add the `junit-vintage-engine` dependency, which allows JUnit 4 tests to run under the JUnit 5 platform without any code changes. All 2000 existing tests continue passing on the same build. Then migrate incrementally: replace `@Rule TemporaryFolder` with `@TempDir` (built-in JUnit 5, no additional library), replace `ExpectedException` rule with `assertThrows()`, replace `@RunWith(Parameterized.class)` with `@ParameterizedTest` and its data sources, and replace custom Rules with JUnit 5 Extensions using `@ExtendWith`. Migrate in priority order: the most failure-prone test classes first (where better diagnostics have the highest ROI), and the least-coupled modules first (where changes are safest). Run both engines in CI — the build must pass the entire suite at every step. Remove the vintage engine dependency only when zero JUnit 4 imports remain in the source code.
+- **Q: A team has flaky tests that fail 1 in 20 runs. The failures are inconsistent — different tests fail on different runs. The team starts ignoring test failures. How do you systematically find and fix flaky tests?**
+  - Reproduce the flakiness by running the suspicious test 100 times with `@RepeatedTest(100)`, then analyze the root cause category.
+  - Shared mutable state between tests accounts for roughly 40% of flaky tests — fix with `@BeforeEach` reset and immutable fixtures.
+  - Time-dependent tests using `System.currentTimeMillis()` or `new Date()` account for 25% — fix by injecting a `Clock` that can be controlled in tests.
+  - Asynchronous operations without proper synchronization account for 20% — fix by using Awaitility instead of `Thread.sleep()`.
+  - Environment-dependent tests that assume specific OS, locale, or timezone account for 10% — fix with `@DisabledIfEnvironmentVariable` or `@TempDir`.
+  - Test ordering dependencies account for 5% — fix with `@TestMethodOrder(MethodName)` to make order deterministic.
+  - Track flaky tests in a dedicated CI job that runs each test 5 times and reports non-deterministic failures separately from deterministic ones.
 
-**Q: A team has flaky tests that fail 1 in 20 runs. The failures are inconsistent — different tests fail on different runs. The team starts ignoring test failures. How do you systematically find and fix flaky tests?**
+- **Q: A test suite has 2000 tests. Running them sequentially takes 45 minutes. Some tests share a database and cannot run concurrently. How do you parallelize safely?**
+  - Enable JUnit 5's parallel execution and use `@ResourceLock` to serialize tests that share the same external resource:
+    ```java
+    // Enable in junit-platform.properties:
+    junit.jupiter.execution.parallel.enabled=true
+    junit.jupiter.execution.parallel.config.strategy=fixed
+    junit.jupiter.execution.parallel.config.fixed.parallelism=4
 
-A: Reproduce the flakiness by running the suspicious test 100 times with `@RepeatedTest(100)`, then analyze the root cause category. Shared mutable state between tests accounts for roughly 40% of flaky tests — fix with `@BeforeEach` reset and immutable fixtures. Time-dependent tests using `System.currentTimeMillis()` or `new Date()` account for 25% — fix by injecting a `Clock` that can be controlled in tests. Asynchronous operations without proper synchronization account for 20% — fix by using Awaitility instead of `Thread.sleep()`. Environment-dependent tests that assume specific OS, locale, or timezone account for 10% — fix with `@DisabledIfEnvironmentVariable` or `@TempDir`. Test ordering dependencies account for 5% — fix with `@TestMethodOrder(MethodName)` to make order deterministic. Track flaky tests in a dedicated CI job that runs each test 5 times and reports non-deterministic failures separately from deterministic ones.
-
-**Q: A test suite has 2000 tests. Running them sequentially takes 45 minutes. Some tests share a database and cannot run concurrently. How do you parallelize safely?**
-
-A: Enable JUnit 5's parallel execution and use `@ResourceLock` to serialize tests that share the same external resource:
-
-> **Interview follow-up:** The candidate proposed using `@ResourceLock("database")` and `@ResourceLock("filesystem")` to isolate shared resources. A developer creates a new test class with 30 test methods that use the database, but forgets to add `@ResourceLock("database")`. During parallel execution, this class runs concurrently with other database tests, causing intermittent failures that are hard to reproduce. How would you enforce, through CI or static analysis, that every test class interacting with a shared resource is annotated with the correct `@ResourceLock`?
-```java
-// Enable in junit-platform.properties:
-junit.jupiter.execution.parallel.enabled=true
-junit.jupiter.execution.parallel.config.strategy=fixed
-junit.jupiter.execution.parallel.config.fixed.parallelism=4
-
-// Isolate tests that share resources:
-@ResourceLock("database")
-class DatabaseTest {
-    @Test void test1() { /* exclusive DB access */ }
-    @Test void test2() { /* exclusive DB access */ }
-}
-
-// Tests with different resource locks run in parallel:
-class UnitTest {
-    @Test void testA() { /* no lock — parallel with DB tests */ }
-    @Test void testB() { /* no lock — parallel with DB tests */ }
-}
-```
-Test classes without `@ResourceLock` run in full parallel. Tests with the same `@ResourceLock` value are serialized against each other but can run in parallel with tests that have different or no locks. The expected improvement is from 45 minutes to 15-20 minutes, with the serialized database tests being the bottleneck. For further improvement, use Testcontainers with separate database schemas per test class so concurrent tests each have their own isolated database.
-
-**Q: A developer writes `assertEquals(42, compute())` without a message. The test fails in CI and the developer can't tell which assertion failed or what the actual value was. How do you enforce descriptive assertion messages across the team?**
-
-A: Use AssertJ for fluent assertions that generate descriptive failure messages automatically without manual message strings. `assertThat(order.getTotal()).isEqualByComparingTo(BigDecimal.valueOf(100))` produces "Expected: BigDecimal<100> but was: BigDecimal<95>" without any developer-written message. For teams that prefer JUnit assertions, create custom assertion wrappers and use the lambda supplier form `assertTrue(condition, () -> "message built on failure")` so the message construction has zero cost for passing tests. Add a static analysis rule (ErrorProne or SpotBugs) that flags bare `assertEquals` and `assertTrue` calls without a message parameter, enforcing the team convention through automated code review.
-
-> **Interview follow-up:** The candidate suggested AssertJ for descriptive messages. The team adopts AssertJ but a junior developer writes `assertThat(actual).isEqualTo(expected).isEqualTo(expected2)` thinking both conditions will be checked. In reality, `isEqualTo(expected2)` is compared against the result of `isEqualTo(expected)`, which returns `AbstractAssert` — the test passes even though `expected2` is wrong. How would you prevent this misuse through code review guidelines or static analysis?
-
-**Q: A microservice depends on 4 external APIs (payment gateway, shipping, email, fraud detection). Unit tests mock these. Integration tests call real APIs. The integration tests are slow (30s per test) and flaky (network issues). How do you design a test strategy that balances speed, confidence, and reliability?**
-
-A: Use a three-layer test pyramid: unit tests (fastest, mock everything) on every commit, contract tests (medium, verify API contracts) on every PR, and integration tests (slowest, use Testcontainers) nightly or before deployment. Unit tests with `@ExtendWith(MockitoExtension.class)` and `@Mock` all external services — they run in milliseconds and catch logic errors. Contract tests use `@WebMvcTest` with `MockMvc` and WireMock to verify HTTP serialization, validation, and status codes without starting the full application. Integration tests use `@Testcontainers` with real PostgreSQL and an in-memory SMTP server (GreenMail) — they run nightly and catch problems that mocks cannot simulate, such as SQL dialect differences, encoding issues, and transaction boundary bugs.
-
-**Q: A large test class has 50 test methods that share complex setup via `@BeforeEach`. The setup takes 3 seconds. Developers start combining multiple assertions into single test methods to reduce setup overhead. The tests become harder to debug. How do you balance setup cost with test isolation?**
-
-A: Use `@TestInstance(Lifecycle.PER_CLASS)` to run the expensive setup once in `@BeforeAll`, and use `@BeforeEach` for a lightweight state reset from a template:
-```java
-@TestInstance(Lifecycle.PER_CLASS)
-class FileProcessingTest {
-    private Path tempDir;
-    private List<Record> testData;
-
-    @BeforeAll
-    void createExpensiveResources() throws IOException {
-        tempDir = Files.createTempDirectory("test-");
-        testData = generateTestData(1000); // done once
+    // Isolate tests that share resources:
+    @ResourceLock("database")
+    class DatabaseTest {
+        @Test void test1() { /* exclusive DB access */ }
+        @Test void test2() { /* exclusive DB access */ }
     }
 
-    @BeforeEach
-    void setUp() throws IOException {
-        // Copy clean state from template — faster than recreating
-        Files.copy(Path.of("template.db"), tempDir.resolve("test.db"), REPLACE_EXISTING);
+    // Tests with different resource locks run in parallel:
+    class UnitTest {
+        @Test void testA() { /* no lock — parallel with DB tests */ }
+        @Test void testB() { /* no lock — parallel with DB tests */ }
     }
+    ```
+  - Test classes without `@ResourceLock` run in full parallel. Tests with the same `@ResourceLock` value are serialized against each other but can run in parallel with tests that have different or no locks. The expected improvement is from 45 minutes to 15-20 minutes, with the serialized database tests being the bottleneck. For further improvement, use Testcontainers with separate database schemas per test class so concurrent tests each have their own isolated database.
+  - **Interview follow-up:** The candidate proposed using `@ResourceLock("database")` and `@ResourceLock("filesystem")` to isolate shared resources. A developer creates a new test class with 30 test methods that use the database, but forgets to add `@ResourceLock("database")`. During parallel execution, this class runs concurrently with other database tests, causing intermittent failures that are hard to reproduce. How would you enforce, through CI or static analysis, that every test class interacting with a shared resource is annotated with the correct `@ResourceLock`?
 
-    @AfterAll
-    void cleanup() {
-        FileUtils.deleteDirectory(tempDir.toFile());
+- **Q: A developer writes `assertEquals(42, compute())` without a message. The test fails in CI and the developer can't tell which assertion failed or what the actual value was. How do you enforce descriptive assertion messages across the team?**
+  - Use AssertJ for fluent assertions that generate descriptive failure messages automatically without manual message strings. `assertThat(order.getTotal()).isEqualByComparingTo(BigDecimal.valueOf(100))` produces "Expected: BigDecimal<100> but was: BigDecimal<95>" without any developer-written message.
+  - For teams that prefer JUnit assertions, create custom assertion wrappers and use the lambda supplier form `assertTrue(condition, () -> "message built on failure")` so the message construction has zero cost for passing tests.
+  - Add a static analysis rule (ErrorProne or SpotBugs) that flags bare `assertEquals` and `assertTrue` calls without a message parameter, enforcing the team convention through automated code review.
+  - **Interview follow-up:** The candidate suggested AssertJ for descriptive messages. The team adopts AssertJ but a junior developer writes `assertThat(actual).isEqualTo(expected).isEqualTo(expected2)` thinking both conditions will be checked. In reality, `isEqualTo(expected2)` is compared against the result of `isEqualTo(expected)`, which returns `AbstractAssert` — the test passes even though `expected2` is wrong. How would you prevent this misuse through code review guidelines or static analysis?
+
+- **Q: A microservice depends on 4 external APIs (payment gateway, shipping, email, fraud detection). Unit tests mock these. Integration tests call real APIs. The integration tests are slow (30s per test) and flaky (network issues). How do you design a test strategy that balances speed, confidence, and reliability?**
+  - Use a three-layer test pyramid: unit tests (fastest, mock everything) on every commit, contract tests (medium, verify API contracts) on every PR, and integration tests (slowest, use Testcontainers) nightly or before deployment.
+  - Unit tests with `@ExtendWith(MockitoExtension.class)` and `@Mock` all external services — they run in milliseconds and catch logic errors.
+  - Contract tests use `@WebMvcTest` with `MockMvc` and WireMock to verify HTTP serialization, validation, and status codes without starting the full application.
+  - Integration tests use `@Testcontainers` with real PostgreSQL and an in-memory SMTP server (GreenMail) — they run nightly and catch problems that mocks cannot simulate, such as SQL dialect differences, encoding issues, and transaction boundary bugs.
+
+- **Q: A large test class has 50 test methods that share complex setup via `@BeforeEach`. The setup takes 3 seconds. Developers start combining multiple assertions into single test methods to reduce setup overhead. The tests become harder to debug. How do you balance setup cost with test isolation?**
+  - Use `@TestInstance(Lifecycle.PER_CLASS)` to run the expensive setup once in `@BeforeAll`, and use `@BeforeEach` for a lightweight state reset from a template:
+    ```java
+    @TestInstance(Lifecycle.PER_CLASS)
+    class FileProcessingTest {
+        private Path tempDir;
+        private List<Record> testData;
+
+        @BeforeAll
+        void createExpensiveResources() throws IOException {
+            tempDir = Files.createTempDirectory("test-");
+            testData = generateTestData(1000); // done once
+        }
+
+        @BeforeEach
+        void setUp() throws IOException {
+            // Copy clean state from template — faster than recreating
+            Files.copy(Path.of("template.db"), tempDir.resolve("test.db"), REPLACE_EXISTING);
+        }
+
+        @AfterAll
+        void cleanup() {
+            FileUtils.deleteDirectory(tempDir.toFile());
+        }
+
+        // 50 tests here
     }
+    ```
+  - The expensive setup runs once, reducing total time from 3 seconds × 50 tests = 150 seconds to 3 seconds + 0.1 seconds × 50 = 8 seconds. The state reset in `@BeforeEach` (copying a template) is much cheaper than recreating the entire fixture.
+  - For shared mutable state, `PER_CLASS` with explicit reset is the right approach — the key is ensuring that `@BeforeEach` fully restores a clean state so tests remain independent.
 
-    // 50 tests here
-}
-```
-The expensive setup runs once, reducing total time from 3 seconds × 50 tests = 150 seconds to 3 seconds + 0.1 seconds × 50 = 8 seconds. The state reset in `@BeforeEach` (copying a template) is much cheaper than recreating the entire fixture. For shared mutable state, `PER_CLASS` with explicit reset is the right approach — the key is ensuring that `@BeforeEach` fully restores a clean state so tests remain independent.
+- **Q: A test verifies that an email is sent when an order is placed. The email service is mocked. The test passes. In production, the email template engine throws a NullPointerException because a template variable is missing. The mock didn't exercise the template rendering. How do you catch this class of bug?**
+  - The mock replaced the entire `EmailService`, including the template rendering engine that contains the bug.
+  - Add an integration test that uses the real `EmailService` with an in-memory SMTP server (GreenMail) to verify the actual template rendering:
+    ```java
+    @SpringBootTest
+    @Testcontainers
+    class EmailIntegrationTest {
+        @Autowired private EmailService emailService; // real, not mocked
+        @Autowired private JavaMailSender mailSender; // real SMTP via GreenMail
 
-**Q: A test verifies that an email is sent when an order is placed. The email service is mocked. The test passes. In production, the email template engine throws a NullPointerException because a template variable is missing. The mock didn't exercise the template rendering. How do you catch this class of bug?**
+        @Test
+        void shouldRenderConfirmationEmail() {
+            MimeMessage message = emailService.createConfirmationEmail(order);
+            assertNotNull(message.getContent()); // would throw if template fails
+            assertTrue(message.getContent().toString().contains(order.getCustomerName()));
+        }
+    }
+    ```
+  - The rule is: mock I/O boundaries (the SMTP server), not business logic (the template engine). The integration test uses the real `EmailService` with its template engine but substitutes an in-memory SMTP server for the real one. This catches template syntax errors, encoding issues, and missing template variables that unit tests with mocks miss entirely.
 
-A: The mock replaced the entire `EmailService`, including the template rendering engine that contains the bug. Add an integration test that uses the real `EmailService` with an in-memory SMTP server (GreenMail) to verify the actual template rendering:
-```java
-@SpringBootTest
-@Testcontainers
-class EmailIntegrationTest {
-    @Autowired private EmailService emailService; // real, not mocked
-    @Autowired private JavaMailSender mailSender; // real SMTP via GreenMail
+- **Q: You have 500 parameterized test cases in a `@MethodSource`. When one case fails, JUnit reports the failure but doesn't tell you which input data caused it. How do you make parameterized test failures self-diagnosing?**
+  - Use the `name` attribute of `@ParameterizedTest` to control how test names appear in reports, making failed inputs immediately identifiable:
+    ```java
+    @ParameterizedTest(name = "[{index}] email={0}, expected={1}")
+    @MethodSource("emailValidationData")
+    void testEmailValidation(String email, boolean expected) {
+        assertEquals(expected, validator.isValid(email));
+    }
+    ```
+  - The `name` attribute supports `{index}` (the invocation index), `{0}`, `{1}`, etc. (argument values). A failure in CI reports: `testEmailValidation[3] email=null-test, expected=false FAILED`.
+  - For additional context, use `Named.of("description", argument)` in the `@MethodSource` to attach human-readable descriptions to arguments. This eliminates the need to manually match failure stack traces to test inputs.
 
+- **Q: A service method calls `repository.save()` which returns the saved entity with a generated ID. The repository is mocked. Mockito's `when(repo.save(any())).thenReturn(order)` returns the input order which has a null ID because the test set it up that way. How do you test ID generation with mocks?**
+  - Use `thenAnswer()` to capture the input entity and simulate ID generation within the answer:
+    ```java
     @Test
-    void shouldRenderConfirmationEmail() {
-        MimeMessage message = emailService.createConfirmationEmail(order);
-        assertNotNull(message.getContent()); // would throw if template fails
-        assertTrue(message.getContent().toString().contains(order.getCustomerName()));
+    void shouldGenerateIdOnSave() {
+        Order inputOrder = new Order(null, "test@test.com", 100.00);
+
+        when(orderRepository.save(any())).thenAnswer(invocation -> {
+            Order order = invocation.getArgument(0);
+            order.setId(1L); // simulate DB-generated ID
+            return order;
+        });
+
+        Order result = orderService.createOrder(inputOrder);
+
+        assertNotNull(result.getId());
+        assertEquals(1L, result.getId());
     }
-}
-```
-The rule is: mock I/O boundaries (the SMTP server), not business logic (the template engine). The integration test uses the real `EmailService` with its template engine but substitutes an in-memory SMTP server for the real one. This catches template syntax errors, encoding issues, and missing template variables that unit tests with mocks miss entirely.
+    ```
+  - `thenAnswer()` captures the `Order` object that was passed to `save()` and sets an ID on it before returning, simulating what the database would do. This is more realistic than `thenReturn(order)` which returns the exact same object without any generated fields.
+  - For more complex scenarios, use `ArgumentCaptor` to capture and assert intermediate state before the return value is produced.
 
-**Q: You have 500 parameterized test cases in a `@MethodSource`. When one case fails, JUnit reports the failure but doesn't tell you which input data caused it. How do you make parameterized test failures self-diagnosing?**
-
-A: Use the `name` attribute of `@ParameterizedTest` to control how test names appear in reports, making failed inputs immediately identifiable:
-```java
-@ParameterizedTest(name = "[{index}] email={0}, expected={1}")
-@MethodSource("emailValidationData")
-void testEmailValidation(String email, boolean expected) {
-    assertEquals(expected, validator.isValid(email));
-}
-```
-The `name` attribute supports `{index}` (the invocation index), `{0}`, `{1}`, etc. (argument values). A failure in CI reports: `testEmailValidation[3] email=null-test, expected=false FAILED`. For additional context, use `Named.of("description", argument)` in the `@MethodSource` to attach human-readable descriptions to arguments. This eliminates the need to manually match failure stack traces to test inputs.
-
-**Q: A service method calls `repository.save()` which returns the saved entity with a generated ID. The repository is mocked. Mockito's `when(repo.save(any())).thenReturn(order)` returns the input order which has a null ID because the test set it up that way. How do you test ID generation with mocks?**
-
-A: Use `thenAnswer()` to capture the input entity and simulate ID generation within the answer:
-```java
-@Test
-void shouldGenerateIdOnSave() {
-    Order inputOrder = new Order(null, "test@test.com", 100.00);
-
-    when(orderRepository.save(any())).thenAnswer(invocation -> {
-        Order order = invocation.getArgument(0);
-        order.setId(1L); // simulate DB-generated ID
-        return order;
-    });
-
-    Order result = orderService.createOrder(inputOrder);
-
-    assertNotNull(result.getId());
-    assertEquals(1L, result.getId());
-}
-```
-`thenAnswer()` captures the `Order` object that was passed to `save()` and sets an ID on it before returning, simulating what the database would do. This is more realistic than `thenReturn(order)` which returns the exact same object without any generated fields. For more complex scenarios, use `ArgumentCaptor` to capture and assert intermediate state before the return value is produced.
-
-**Q: A test uses `@TempDir` for file-based tests. Occasionally, cleanup fails on Windows because files are locked by antivirus or search indexing. The `@AfterEach` cleanup throws an exception, masking the real test failure. How do you handle file cleanup robustly?**
-
-A: Use `@TempDir` which is managed by JUnit itself — it automatically deletes the temporary directory after all tests complete and retries on failure. JUnit 5.9+ supports `@TempDir(retry = true)` which retries cleanup if it fails. If cleanup still fails after retries, JUnit logs a warning but does not fail the test, ensuring that cleanup failures never mask genuine assertion failures. For manual file cleanup in tests, use `Files.deleteIfExists()` which does not throw an exception if the file is already deleted, and call `System.gc()` before cleanup on Windows to release any lingering file handles from the test process.
+- **Q: A test uses `@TempDir` for file-based tests. Occasionally, cleanup fails on Windows because files are locked by antivirus or search indexing. The `@AfterEach` cleanup throws an exception, masking the real test failure. How do you handle file cleanup robustly?**
+  - Use `@TempDir` which is managed by JUnit itself — it automatically deletes the temporary directory after all tests complete and retries on failure. JUnit 5.9+ supports `@TempDir(retry = true)` which retries cleanup if it fails.
+  - If cleanup still fails after retries, JUnit logs a warning but does not fail the test, ensuring that cleanup failures never mask genuine assertion failures.
+  - For manual file cleanup in tests, use `Files.deleteIfExists()` which does not throw an exception if the file is already deleted, and call `System.gc()` before cleanup on Windows to release any lingering file handles from the test process.
 
 ---
 
 ## Interview Questions
 
-**What is JUnit 5 and what are its three modules?** JUnit 5 is the latest Java testing framework consisting of JUnit Platform (launches tests on the JVM, integrates with IDEs and build tools), JUnit Jupiter (the programming model with annotations, assertions, and extensions), and JUnit Vintage (backward compatibility for running JUnit 4 tests). This modular design allows JUnit 4 and 5 tests to coexist in the same project.
+- **What is JUnit 5 and what are its three modules?**
+  - JUnit 5 is the latest Java testing framework consisting of JUnit Platform (launches tests on the JVM, integrates with IDEs and build tools), JUnit Jupiter (the programming model with annotations, assertions, and extensions), and JUnit Vintage (backward compatibility for running JUnit 4 tests).
+  - This modular design allows JUnit 4 and 5 tests to coexist in the same project.
 
-**What is the difference between `@BeforeEach` and `@BeforeAll`?** `@BeforeEach` runs before each test method and is used for per-test setup like creating fresh objects and resetting state. `@BeforeAll` runs once before all tests in the class and is used for expensive setup like database connections. `@BeforeAll` must be `static` unless `@TestInstance(Lifecycle.PER_CLASS)` is used. The lifecycle order: `@BeforeAll` → `@BeforeEach` → `@Test` → `@AfterEach` → repeat → `@AfterAll`.
+- **What is the difference between `@BeforeEach` and `@BeforeAll`?**
+  - `@BeforeEach` runs before each test method and is used for per-test setup like creating fresh objects and resetting state.
+  - `@BeforeAll` runs once before all tests in the class and is used for expensive setup like database connections.
+  - `@BeforeAll` must be `static` unless `@TestInstance(Lifecycle.PER_CLASS)` is used.
+  - The lifecycle order: `@BeforeAll` → `@BeforeEach` → `@Test` → `@AfterEach` → repeat → `@AfterAll`.
 
-**What is `assertAll` and why would you use it?** `assertAll` executes all supplied assertion lambdas and reports every failure at once, even if some assertions fail. Without it, the first assertion failure throws an exception and skips remaining checks. Use `assertAll` to group related assertions (like all fields of an object) so a single test run shows all broken fields, eliminating the fix-rerun loop.
+- **What is `assertAll` and why would you use it?**
+  - `assertAll` executes all supplied assertion lambdas and reports every failure at once, even if some assertions fail. Without it, the first assertion failure throws an exception and skips remaining checks.
+  - Use `assertAll` to group related assertions (like all fields of an object) so a single test run shows all broken fields, eliminating the fix-rerun loop.
 
-**What is the difference between `@ParameterizedTest` and `@RepeatedTest`?** `@ParameterizedTest` runs test logic with different inputs from data sources like `@ValueSource`, `@CsvSource`, `@MethodSource`, and `@EnumSource`. `@RepeatedTest` runs the same test N times with identical inputs for stress testing or flaky test reproduction. Parameterized tests are for data-driven testing; repeated tests are for reliability testing.
+- **What is the difference between `@ParameterizedTest` and `@RepeatedTest`?**
+  - `@ParameterizedTest` runs test logic with different inputs from data sources like `@ValueSource`, `@CsvSource`, `@MethodSource`, and `@EnumSource`.
+  - `@RepeatedTest` runs the same test N times with identical inputs for stress testing or flaky test reproduction.
+  - Parameterized tests are for data-driven testing; repeated tests are for reliability testing.
 
-**How do you handle test timeouts in JUnit 5?** Use `@Timeout` on test methods or at class level. `assertTimeout()` runs assertions in the calling thread and checks elapsed time after completion. `assertTimeoutPreemptively()` runs assertions in a separate thread and aborts on timeout. Use `@Timeout` for simple deadlines; use `assertTimeoutPreemptively()` for operations that may hang indefinitely.
+- **How do you handle test timeouts in JUnit 5?**
+  - Use `@Timeout` on test methods or at class level.
+  - `assertTimeout()` runs assertions in the calling thread and checks elapsed time after completion.
+  - `assertTimeoutPreemptively()` runs assertions in a separate thread and aborts on timeout.
+  - Use `@Timeout` for simple deadlines; use `assertTimeoutPreemptively()` for operations that may hang indefinitely.
 
-**What are `@Nested` test classes and when should you use them?** `@Nested` classes are non-static inner classes that group related test methods. Each nested class can have its own `@BeforeEach`/`@AfterEach` methods in addition to the outer class's lifecycle. Use `@Nested` to organize tests by feature (creation, retrieval, deletion), to share setup within a group, and to produce readable test reports that read like specifications.
+- **What are `@Nested` test classes and when should you use them?**
+  - `@Nested` classes are non-static inner classes that group related test methods.
+  - Each nested class can have its own `@BeforeEach`/`@AfterEach` methods in addition to the outer class's lifecycle.
+  - Use `@Nested` to organize tests by feature (creation, retrieval, deletion), to share setup within a group, and to produce readable test reports that read like specifications.
 
-**What is the difference between `@Tag` and `@Disabled`?** `@Tag("slow")` categorizes tests for selective execution — you can include or exclude tags in Maven Surefire or Gradle configuration. `@Disabled("reason")` permanently skips a test. Use `@Tag` to separate fast unit tests from slow integration tests. Use `@Disabled` only for temporarily broken tests that need fixing.
+- **What is the difference between `@Tag` and `@Disabled`?**
+  - `@Tag("slow")` categorizes tests for selective execution — you can include or exclude tags in Maven Surefire or Gradle configuration.
+  - `@Disabled("reason")` permanently skips a test.
+  - Use `@Tag` to separate fast unit tests from slow integration tests. Use `@Disabled` only for temporarily broken tests that need fixing.
 
-**How do you test exception scenarios in JUnit 5?** Use `assertThrows(ExpectedException.class, () -> codeThatThrows())` which returns the exception for further assertions on its message, cause, or state. Use `assertDoesNotThrow(() -> safeCode())` for the positive case. Always prefer `assertThrows` over try-catch with `fail()` — it is more concise and produces better failure messages.
+- **How do you test exception scenarios in JUnit 5?**
+  - Use `assertThrows(ExpectedException.class, () -> codeThatThrows())` which returns the exception for further assertions on its message, cause, or state.
+  - Use `assertDoesNotThrow(() -> safeCode())` for the positive case.
+  - Always prefer `assertThrows` over try-catch with `fail()` — it is more concise and produces better failure messages.
 
-**What is `@TestMethodOrder` and when would you use it?** `@TestMethodOrder(MethodName.class)` or `@TestMethodOrder(OrderAnnotation.class)` controls test execution order. Tests should ideally be order-independent, but ordered execution is useful for shared expensive setup, integration tests with sequential dependencies, and reproducing CI-specific order issues. The default in JUnit 5 is deterministic but unspecified.
+- **What is `@TestMethodOrder` and when would you use it?**
+  - `@TestMethodOrder(MethodName.class)` or `@TestMethodOrder(OrderAnnotation.class)` controls test execution order.
+  - Tests should ideally be order-independent, but ordered execution is useful for shared expensive setup, integration tests with sequential dependencies, and reproducing CI-specific order issues.
+  - The default in JUnit 5 is deterministic but unspecified.
 
-**How do you integrate JUnit 5 with Spring Boot?** Use `@SpringBootTest` for full application context, `@WebMvcTest` for web layer only, `@DataJpaTest` for JPA/repository tests, and `@ExtendWith(SpringExtension.class)` for non-Spring-Boot Spring tests. Use `@MockBean` and `@SpyBean` to replace beans with mocks. `@DynamicPropertySource` injects dynamic configuration (like Testcontainers connection details) into the Spring Environment.
+- **How do you integrate JUnit 5 with Spring Boot?**
+  - Use `@SpringBootTest` for full application context, `@WebMvcTest` for web layer only, `@DataJpaTest` for JPA/repository tests, and `@ExtendWith(SpringExtension.class)` for non-Spring-Boot Spring tests.
+  - Use `@MockBean` and `@SpyBean` to replace beans with mocks.
+  - `@DynamicPropertySource` injects dynamic configuration (like Testcontainers connection details) into the Spring Environment.
 
 ---
 

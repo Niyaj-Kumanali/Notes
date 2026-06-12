@@ -55,13 +55,20 @@ query.Where(x => x.Age > 5).OrderBy(x => x.Name); // Filters before sorting
 
 ## Common Mistakes
 
-- **Multiple enumeration** — A LINQ query is re-evaluated each time it's enumerated. `filtered.Count()` and `filtered.First()` enumerate twice. Fix: materialize with `.ToList()` once. This *looks correct* because `filtered` is assigned once and the subsequent calls compile without error, but each call triggers a fresh enumeration from the source, re-executing the full pipeline.
-- **Using `SingleOrDefault` when `FirstOrDefault` is intended** — `SingleOrDefault` throws if more than one match exists. Use `FirstOrDefault` unless the query is guaranteed to return at most one result. This *looks correct* because both methods return a default value when no match exists, but `SingleOrDefault` also validates uniqueness by checking for a second match, which throws if the data contains duplicates.
-- **Forgetting deferred execution** — LINQ queries are not evaluated until enumerated. Mutations to the source after query definition are reflected in results. Materialize early if the source may change. This *looks correct* because the query is defined once and appears static, but the enumerator holds a reference to the source collection and reads its current state only when `MoveNext` is called, not when the query is composed.
-- **Not understanding IQueryable vs IEnumerable boundary** — Calling `.AsEnumerable()` before a filter causes the filter to run client-side (pulling all data from database). Ensure filters are applied to `IQueryable` before materialization. This *looks correct* because the code compiles and runs, but the performance difference is catastrophic — a filter applied after `AsEnumerable()` downloads the entire table into memory instead of adding a `WHERE` clause.
-- **Modifying source in `Select`** — `items.Select(x => { x.Count++; return x; })` has side effects. `Select` should be pure. Use `foreach` for mutations. This *looks correct* because the lambda executes and returns the modified value, but `Select` is a streaming operator meant for projection, and side effects break the functional contract — the mutation runs once per enumeration, causing subtle bugs when the query is enumerated multiple times.
-- **Null collection** — `nullSource.Where(x => x > 5)` throws `NullReferenceException`. Use `source ?? Array.Empty<T>()`. This *looks correct* because `Where` is an extension method and the code compiles against the `IEnumerable<T>` interface, but the runtime tries to call `GetEnumerator` on a null reference, which throws at enumeration time rather than at query definition time.
-- **Exception inside iterator** — `source.Select(x => Parse(x))` doesn't throw until the result is enumerated. Wrap iteration in try/catch. This *looks correct* because the query definition line compiles and runs without error, but the exception is stored in the iterator's state machine and surfaces only when `MoveNext` is called, often far from the code that defined the query.
+- **Multiple enumeration** — A LINQ query is re-evaluated each time it's enumerated. `filtered.Count()` and `filtered.First()` enumerate twice. Fix: materialize with `.ToList()` once.
+  - **Why it looks correct:** `filtered` is assigned once and the subsequent calls compile without error, but each call triggers a fresh enumeration from the source, re-executing the full pipeline.
+- **Using `SingleOrDefault` when `FirstOrDefault` is intended** — `SingleOrDefault` throws if more than one match exists. Use `FirstOrDefault` unless the query is guaranteed to return at most one result.
+  - **Why it looks correct:** both methods return a default value when no match exists, but `SingleOrDefault` also validates uniqueness by checking for a second match, which throws if the data contains duplicates.
+- **Forgetting deferred execution** — LINQ queries are not evaluated until enumerated. Mutations to the source after query definition are reflected in results. Materialize early if the source may change.
+  - **Why it looks correct:** the query is defined once and appears static, but the enumerator holds a reference to the source collection and reads its current state only when `MoveNext` is called, not when the query is composed.
+- **Not understanding IQueryable vs IEnumerable boundary** — Calling `.AsEnumerable()` before a filter causes the filter to run client-side (pulling all data from database). Ensure filters are applied to `IQueryable` before materialization.
+  - **Why it looks correct:** the code compiles and runs, but the performance difference is catastrophic — a filter applied after `AsEnumerable()` downloads the entire table into memory instead of adding a `WHERE` clause.
+- **Modifying source in `Select`** — `items.Select(x => { x.Count++; return x; })` has side effects. `Select` should be pure. Use `foreach` for mutations.
+  - **Why it looks correct:** the lambda executes and returns the modified value, but `Select` is a streaming operator meant for projection, and side effects break the functional contract — the mutation runs once per enumeration, causing subtle bugs when the query is enumerated multiple times.
+- **Null collection** — `nullSource.Where(x => x > 5)` throws `NullReferenceException`. Use `source ?? Array.Empty<T>()`.
+  - **Why it looks correct:** `Where` is an extension method and the code compiles against the `IEnumerable<T>` interface, but the runtime tries to call `GetEnumerator` on a null reference, which throws at enumeration time rather than at query definition time.
+- **Exception inside iterator** — `source.Select(x => Parse(x))` doesn't throw until the result is enumerated. Wrap iteration in try/catch.
+  - **Why it looks correct:** the query definition line compiles and runs without error, but the exception is stored in the iterator's state machine and surfaces only when `MoveNext` is called, often far from the code that defined the query.
 
 ```csharp
 // Problem: multiple enumeration
@@ -222,7 +229,7 @@ public class OrgChartService
 ## Scenario-Based Questions
 
 1. **Q: You are building a product catalog API. The query supports 15 optional filters (price range, category, rating, brand, etc.) and returns paged results. How do you build the LINQ query without client-side evaluation?**
-   A: Start with `IQueryable<Product>` and conditionally append `.Where()` clauses based on which filters are provided. Each `.Where()` adds to the expression tree, and the final query is translated to a single SQL statement. Never call `.ToList()` or `.AsEnumerable()` before applying filters. Example:
+   - **A:** Start with `IQueryable<Product>` and conditionally append `.Where()` clauses based on which filters are provided. Each `.Where()` adds to the expression tree, and the final query is translated to a single SQL statement. Never call `.ToList()` or `.AsEnumerable()` before applying filters. Example:
 ```csharp
 IQueryable<Product> query = _context.Products.AsQueryable();
 if (minPrice.HasValue) query = query.Where(p => p.Price >= minPrice);
@@ -232,7 +239,7 @@ var results = await query.Skip(page * size).Take(size).ToListAsync();
 This generates a single SQL query with all filters in the WHERE clause. The order of `.Where()` calls doesn't affect SQL generation.
 
 2. **Q: You have a performance-critical report that joins 5 tables and aggregates millions of rows. The LINQ query generates a Cartesian product with multiple `Include` calls. How do you fix it?**
-   A: Replace `Include` with `Select` projections to pick only needed columns. Multiple `Include` calls on collection navigations generate JOINs that multiply rows (Cartesian explosion). Use `.AsSplitQuery()` to issue separate queries per collection, or use `Select` to project to anonymous types:
+   - **A:** Replace `Include` with `Select` projections to pick only needed columns. Multiple `Include` calls on collection navigations generate JOINs that multiply rows (Cartesian explosion). Use `.AsSplitQuery()` to issue separate queries per collection, or use `Select` to project to anonymous types:
 ```csharp
 var report = await _context.Orders
     .Where(o => o.Date > cutoff)
@@ -244,10 +251,10 @@ var report = await _context.Orders
     .ToListAsync();
 ```
 This generates efficient SQL with separate SELECT statements for related data.
-> **Interview follow-up:** If `Select` projections generate separate SELECT statements anyway, what advantage does `AsSplitQuery` have over `Select` projections, and when would you still need `Include`?
+   - **Interview follow-up:** If `Select` projections generate separate SELECT statements anyway, what advantage does `AsSplitQuery` have over `Select` projections, and when would you still need `Include`?
 
 3. **Q: You need to find duplicate records in a 10M-row dataset by a composite key. How do you write the LINQ query for maximum performance?**
-   A: Use `GroupBy` with a composite key (anonymous type) and filter groups with `Count() > 1`:
+   - **A:** Use `GroupBy` with a composite key (anonymous type) and filter groups with `Count() > 1`:
 ```csharp
 var duplicates = await _context.Records
     .GroupBy(r => new { r.SourceId, r.TargetId })
@@ -258,7 +265,7 @@ var duplicates = await _context.Records
 This translates to SQL `GROUP BY ... HAVING COUNT(*) > 1`, which is efficient (database does the grouping). For very large datasets, consider a raw SQL approach with window functions (`ROW_NUMBER() OVER (PARTITION BY ...)`) for potentially better performance.
 
 4. **Q: You have an `IEnumerable<T>` in memory and need to partition it into batches of 100 without materializing the entire sequence. How?**
-   A: Use a custom `Batch` extension method that lazily yields batches using `yield return`:
+   - **A:** Use a custom `Batch` extension method that lazily yields batches using `yield return`:
 ```csharp
 public static IEnumerable<IEnumerable<T>> Batch<T>(this IEnumerable<T> source, int size)
 {
@@ -277,10 +284,10 @@ private static IEnumerable<T> BatchInner<T>(IEnumerator<T> enumerator, int size)
 For `IAsyncEnumerable<T>`, `System.Linq.Async` NuGet provides `.Buffer(size)`. This pattern avoids materializing the whole sequence, processing in streaming fashion with O(batchSize) memory.
 
 5. **Q: You are debugging a LINQ query that works locally but times out in production. What profiling steps do you take?**
-   A: (1) Log the generated SQL: set `_context.Database.Log = sql => _logger.LogDebug(sql)` or use `_context.Products.ToQueryString()`. (2) Check for N+1: enable lazy loading logging or use a profiler. (3) Look for client evaluation: EF Core logs a warning when a query can't be translated. (4) Check for missing indexes by running the SQL in SSMS with `SET STATISTICS IO ON`. (5) Examine parameter sniffing: identical queries with different parameters may use different plans. (6) Use `AsSplitQuery()` if Cartesian explosion is suspected.
+   - **A:** (1) Log the generated SQL: set `_context.Database.Log = sql => _logger.LogDebug(sql)` or use `_context.Products.ToQueryString()`. (2) Check for N+1: enable lazy loading logging or use a profiler. (3) Look for client evaluation: EF Core logs a warning when a query can't be translated. (4) Check for missing indexes by running the SQL in SSMS with `SET STATISTICS IO ON`. (5) Examine parameter sniffing: identical queries with different parameters may use different plans. (6) Use `AsSplitQuery()` if Cartesian explosion is suspected.
 
 6. **Q: You need to implement a full-text search over a list of products in memory. The naive `Where(p => p.Name.Contains(query))` is too slow for 1M products. How do you optimize?**
-   A: Build an inverted index: tokenize product names into words, create a `Lookup<string, Product>`, and search by token:
+   - **A:** Build an inverted index: tokenize product names into words, create a `Lookup<string, Product>`, and search by token:
 ```csharp
 var index = products
     .SelectMany(p => p.Name.Split(' ').Distinct(), (p, word) => new { p, word })
@@ -292,7 +299,7 @@ var results = query.Split(' ')
 This reduces search from O(n) to O(m) where m is the number of products matching the rarest term. For prefix matching, use a trie data structure. For production, consider dedicated search (Elasticsearch, Azure Cognitive Search).
 
 7. **Q: You have a LINQ query that uses `Skip` and `Take` for paging, but performance degrades as page number increases. Why and how do you fix it?**
-   A: `Skip(10000).Take(20)` still reads and discards 10K rows — the database must scan and sort all rows to determine the correct offset. Fix: use keyset pagination (also called "seek method"):
+   - **A:** `Skip(10000).Take(20)` still reads and discards 10K rows — the database must scan and sort all rows to determine the correct offset. Fix: use keyset pagination (also called "seek method"):
 ```csharp
 var lastSeenId = 0; // Store from the last item of the previous page
 var page = await _context.Products
@@ -302,10 +309,10 @@ var page = await _context.Products
     .ToListAsync();
 ```
 This uses an index seek instead of a scan, O(log n) per page regardless of page number. Works best with a unique, sequential key. For non-sequential keys, use `ORDER BY` + `WHERE (col1, col2) > (@val1, @val2)`.
-> **Interview follow-up:** How do you implement keyset pagination when the sort order is not unique — for example, sorting by `Price` where many products share the same price?
+   - **Interview follow-up:** How do you implement keyset pagination when the sort order is not unique — for example, sorting by `Price` where many products share the same price?
 
 8. **Q: You are using `Count()` in a loop over subsets of data. The database is hit 1000 times. How do you reduce this to a single query?**
-   A: Use `GroupBy` with conditional aggregation:
+   - **A:** Use `GroupBy` with conditional aggregation:
 ```csharp
 var counts = await _context.Orders
     .GroupBy(o => 1)
@@ -321,11 +328,11 @@ var counts = await _context.Orders
 This generates a single SQL query with `COUNT(*)` and `COUNT(CASE WHEN ...)` expressions. For multiple different groupings, use multiple `GroupBy` key selectors in separate queries, or use raw SQL with `SELECT COUNT(*) FILTER (WHERE ...)`.
 
 9. **Q: You are mixing `IQueryable` and `IEnumerable` in an EF Core query and it's pulling all data into memory before filtering. How do you detect and fix client evaluation?**
-   A: EF Core logs a warning when a query can't be translated and falls back to client evaluation. In EF Core 6+, enable `throwOnClientEvaluation: true` in `DbContextOptionsBuilder`. Common causes: using a custom C# method in `Where`, calling `ToList`/`AsEnumerable` too early, or using `Sum` on a non-translatable expression. Fix: ensure all filter expressions are composed on `IQueryable` before materialization. Move custom logic to a `Select` that translates (or use `FromSqlRaw` for complex logic).
-> **Interview follow-up:** If you enable `throwOnClientEvaluation`, how do you handle legitimate cases where client evaluation is intentional — for example, calling `Finalize(x)` inside a `Select` where `Finalize` is a local C# method?
+   - **A:** EF Core logs a warning when a query can't be translated and falls back to client evaluation. In EF Core 6+, enable `throwOnClientEvaluation: true` in `DbContextOptionsBuilder`. Common causes: using a custom C# method in `Where`, calling `ToList`/`AsEnumerable` too early, or using `Sum` on a non-translatable expression. Fix: ensure all filter expressions are composed on `IQueryable` before materialization. Move custom logic to a `Select` that translates (or use `FromSqlRaw` for complex logic).
+   - **Interview follow-up:** If you enable `throwOnClientEvaluation`, how do you handle legitimate cases where client evaluation is intentional — for example, calling `Finalize(x)` inside a `Select` where `Finalize` is a local C# method?
 
 10. **Q: You need to stream 1M records from a database to a CSV file without loading all into memory. How do you use LINQ to achieve this?**
-    A: Use `AsAsyncEnumerable()` with streaming projection and write each row:
+    - **A:** Use `AsAsyncEnumerable()` with streaming projection and write each row:
 ```csharp
 await foreach (var record in _context.LargeTable
     .AsNoTracking()
@@ -345,42 +352,44 @@ This translates to a single SQL query with streaming (`CommandBehavior.Sequentia
 ## Interview Questions
 
 1. **What is LINQ?**
-   A: Language Integrated Query — a set of language and runtime features for writing declarative, composable queries over data sources using a fluent API built on extension methods. Supports objects, XML, databases, and more.
+   - **A:** Language Integrated Query — a set of language and runtime features for writing declarative, composable queries over data sources using a fluent API built on extension methods. Supports objects, XML, databases, and more.
 
 2. **What is the difference between `IEnumerable<T>` and `IQueryable<T>`?**
-   A: `IEnumerable<T>` works with delegates (compiled IL) — queries execute in memory. `IQueryable<T>` works with expression trees — queries are translated by a provider (e.g., EF Core to SQL) and executed on the server. `IQueryable<T>` extends `IEnumerable<T>` and adds a `Provider` and `Expression`.
+   - **A:** `IEnumerable<T>` works with delegates (compiled IL) — queries execute in memory. `IQueryable<T>` works with expression trees — queries are translated by a provider (e.g., EF Core to SQL) and executed on the server. `IQueryable<T>` extends `IEnumerable<T>` and adds a `Provider` and `Expression`.
 
 3. **What is deferred execution?**
-   A: Most LINQ operators don't execute until the query is enumerated. The query is built as a chain of iterators, and data flows through the pipeline only when `MoveNext()` is called (e.g., via `foreach`, `.ToList()`, `.Count()`). Multiple enumerations re-execute the query.
+   - **A:** Most LINQ operators don't execute until the query is enumerated. The query is built as a chain of iterators, and data flows through the pipeline only when `MoveNext()` is called (e.g., via `foreach`, `.ToList()`, `.Count()`). Multiple enumerations re-execute the query.
 
 4. **What is the difference between `Select` and `SelectMany`?**
-   A: `Select` projects each element to a single result: `IEnumerable<T> → IEnumerable<U>`. `SelectMany` projects each element to an `IEnumerable<U>` and flattens: `IEnumerable<T> → IEnumerable<U>`. Query syntax: `from c in customers from o in c.Orders` is `SelectMany`.
+   - **A:** `Select` projects each element to a single result: `IEnumerable<T> → IEnumerable<U>`. `SelectMany` projects each element to an `IEnumerable<U>` and flattens: `IEnumerable<T> → IEnumerable<U>`. Query syntax: `from c in customers from o in c.Orders` is `SelectMany`.
 
 5. **What is the difference between `First` and `Single`?**
-   A: `First` returns the first element (throws if empty). `Single` returns the only element (throws if empty OR more than one). Use `First` when the result may have multiple matches but you only need the first. Use `Single` when exactly one element is expected (acts as an assertion).
+   - **A:** `First` returns the first element (throws if empty). `Single` returns the only element (throws if empty OR more than one). Use `First` when the result may have multiple matches but you only need the first. Use `Single` when exactly one element is expected (acts as an assertion).
 
 6. **How does `GroupBy` work?**
-   A: It's a buffering operator that groups elements by a key selector. It creates a `Lookup<TKey, TElement>` internally, iterating the entire source and storing elements in hash buckets by key. It yields each `IGrouping<TKey, TElement>` (key + enumerable of elements). Memory is O(n).
+   - **A:** It's a buffering operator that groups elements by a key selector. It creates a `Lookup<TKey, TElement>` internally, iterating the entire source and storing elements in hash buckets by key. It yields each `IGrouping<TKey, TElement>` (key + enumerable of elements). Memory is O(n).
 
 7. **What's the difference between `Count()` and `Any()`?**
-   A: `Count()` enumerates the entire sequence (unless `ICollection<T>` optimization applies). `Any()` short-circuits on the first match. Use `Any()` to check if any elements exist — it's O(1) when the first match is early, while `Count() > 0` is always O(n).
+   - **A:** `Count()` enumerates the entire sequence (unless `ICollection<T>` optimization applies). `Any()` short-circuits on the first match. Use `Any()` to check if any elements exist — it's O(1) when the first match is early, while `Count() > 0` is always O(n).
 
 8. **Explain streaming vs buffering operators.**
-   A: Streaming operators (Where, Select, Take, Any) process one element at a time with O(1) memory. Buffering operators (OrderBy, GroupBy, Distinct) consume the entire sequence before yielding results, using O(n) or more memory. Chain streaming operators first, buffering operators last.
+   - **A:** Streaming operators (Where, Select, Take, Any) process one element at a time with O(1) memory. Buffering operators (OrderBy, GroupBy, Distinct) consume the entire sequence before yielding results, using O(n) or more memory. Chain streaming operators first, buffering operators last.
 
 9. **What is the `AsEnumerable()` method used for?**
-   A: It casts an `IQueryable<T>` to `IEnumerable<T>`, switching from server-side (LINQ-to-SQL) to client-side (LINQ-to-Objects) evaluation. All subsequent operators execute in memory. Use it to force client evaluation when the server can't translate a query, but beware of pulling too much data.
+   - **A:** It casts an `IQueryable<T>` to `IEnumerable<T>`, switching from server-side (LINQ-to-SQL) to client-side (LINQ-to-Objects) evaluation. All subsequent operators execute in memory. Use it to force client evaluation when the server can't translate a query, but beware of pulling too much data.
 
 10. **How does `Join` work internally in LINQ?**
-    A: `Enumerable.Join` uses a hash join algorithm: it buffers the inner sequence into a `Lookup<TKey, TInner>`, then iterates the outer sequence, looking up matching elements. O(n+m) time, O(m) memory. `Queryable.Join` translates to SQL `JOIN` and lets the database choose the join algorithm.
+    - **A:** `Enumerable.Join` uses a hash join algorithm: it buffers the inner sequence into a `Lookup<TKey, TInner>`, then iterates the outer sequence, looking up matching elements. O(n+m) time, O(m) memory. `Queryable.Join` translates to SQL `JOIN` and lets the database choose the join algorithm.
 
 ---
 
 ## Developer Recommendations
 
-- **Prefer `Any()` over `Count() > 0`** — `Any()` short-circuits on the first match, while `Count()` enumerates the entire sequence (unless `ICollection<T>` optimization applies). The difference is meaningful for large sequences or database queries where `COUNT(*)` is more expensive than checking for existence. A reporting dashboard once called `Count() > 0` on a 10M-row filtered query, causing a 30-second pause on every page load when `Any()` would have returned in under a millisecond.
+- **Prefer `Any()` over `Count() > 0`** — `Any()` short-circuits on the first match, while `Count()` enumerates the entire sequence (unless `ICollection<T>` optimization applies). The difference is meaningful for large sequences or database queries where `COUNT(*)` is more expensive than checking for existence.
+  - **Production story:** A reporting dashboard once called `Count() > 0` on a 10M-row filtered query, causing a 30-second pause on every page load when `Any()` would have returned in under a millisecond.
 
-- **Avoid multiple enumeration of LINQ queries** — Each `foreach`, `.ToList()`, `.Count()`, or `.First()` on an `IEnumerable<T>` re-executes the query. Materialize with `.ToList()` once if you need multiple operations. For database queries, each enumeration hits the database. Use `.AsEnumerable()` only when you intend client-side execution. A background job once processed the same `IQueryable` in a loop, triggering 10,000 separate database queries instead of one — the fix was a single `.ToList()` call that reduced the page load from 45 seconds to 200ms.
+- **Avoid multiple enumeration of LINQ queries** — Each `foreach`, `.ToList()`, `.Count()`, or `.First()` on an `IEnumerable<T>` re-executes the query. Materialize with `.ToList()` once if you need multiple operations. For database queries, each enumeration hits the database. Use `.AsEnumerable()` only when you intend client-side execution.
+  - **Production story:** A background job once processed the same `IQueryable` in a loop, triggering 10,000 separate database queries instead of one — the fix was a single `.ToList()` call that reduced the page load from 45 seconds to 200ms.
 
 - **Filter with `Where` before sorting with `OrderBy`** — `Where` is streaming (O(1) memory), `OrderBy` is buffering (O(n) memory). Applying `Where` first reduces the data that needs sorting, improving performance and memory usage. This also applies to database queries — filters before sorts produce more efficient SQL.
 

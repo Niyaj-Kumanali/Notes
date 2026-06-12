@@ -171,16 +171,26 @@ Write skew is subtle because neither transaction reads or writes the same rows a
 
 ## Common Mistakes
 
-- **Using default isolation without understanding database defaults** — PostgreSQL defaults to READ COMMITTED, MySQL to REPEATABLE READ. Know your database's default behavior. This *looks correct* because the application works on the developer's local database, and isolation anomalies only appear under concurrent load that most development environments never simulate.
-- **Assuming REPEATABLE READ prevents all anomalies** — It prevents non-repeatable reads but not phantoms or write skew. Only SERIALIZABLE prevents the full set. This *looks correct* because the name "REPEATABLE READ" sounds like it covers all consistency issues, and developers rarely encounter write skew until they run concurrent transactions on overlapping predicates.
-- **Not handling serialization failures** — SERIALIZABLE requires retry logic. Without it, users see random "could not serialize access" errors. This *looks correct* because the error looks like a transient database glitch rather than an expected concurrency control mechanism; developers assume a misconfiguration rather than a design requirement.
-- **Using SERIALIZABLE everywhere** — Massive performance impact due to conflict detection and aborts. Use only where absolute correctness is required. This *looks correct* because "stronger isolation = better data safety" is intuitive; the throughput collapse under contention only becomes measurable under realistic load testing.
-- **Assuming READ UNCOMMITTED provides dirty reads in PostgreSQL** — PostgreSQL treats READ UNCOMMITTED as READ COMMITTED because MVCC makes dirty reads impossible. This *looks correct* because the SQL standard defines READ UNCOMMITTED as the lowest level with dirty reads, and developers expect the database to honor the standard rather than silently promoting to a higher isolation level.
-- **Forgetting that READ COMMITTED allows non-repeatable reads** — The same query in the same transaction can return different results at READ COMMITTED. This *looks correct* because developers naturally assume that repeating a query within a single transaction returns consistent data; the statement-level snapshot behavior is not obvious from the transaction API.
-- **Not testing for concurrency issues** — Isolation bugs only appear under realistic load. Write integration tests simulating concurrent access. This *looks correct* because unit tests pass, integration tests pass sequentially, and the application seems rock-solid until production traffic with concurrent transactions reveals the anomalies.
-- **Confusing database isolation with application-level locking** — Isolation is a per-transaction property; application locking is orthogonal. This *looks correct* because both mechanisms prevent concurrent data access issues, and the boundary between database isolation guarantees and application-level synchronization is not immediately clear to developers new to transaction semantics.
-- **Not understanding MVCC interaction with isolation** — MVCC provides snapshot isolation, which is not true serializable. PostgreSQL's SERIALIZABLE uses SSI on top of MVCC. This *looks correct* because MVCC-based REPEATABLE READ prevents most visible anomalies, so developers assume it provides full serializability without understanding write skew.
-- **Setting isolation at database level but overriding with different session/transaction settings** — Application-level settings override database defaults. Verify the effective isolation level in each context. This *looks correct* because the DBA sets the database-level default and assumes all connections inherit it; the application's explicit `SET TRANSACTION ISOLATION LEVEL` silently overrides the DBA's setting without any warning.
+- **Using default isolation without understanding database defaults** — PostgreSQL defaults to READ COMMITTED, MySQL to REPEATABLE READ. Know your database's default behavior.
+  - **Why it looks correct:** The application works on the developer's local database, and isolation anomalies only appear under concurrent load that most development environments never simulate.
+- **Assuming REPEATABLE READ prevents all anomalies** — It prevents non-repeatable reads but not phantoms or write skew. Only SERIALIZABLE prevents the full set.
+  - **Why it looks correct:** The name "REPEATABLE READ" sounds like it covers all consistency issues, and developers rarely encounter write skew until they run concurrent transactions on overlapping predicates.
+- **Not handling serialization failures** — SERIALIZABLE requires retry logic. Without it, users see random "could not serialize access" errors.
+  - **Why it looks correct:** The error looks like a transient database glitch rather than an expected concurrency control mechanism; developers assume a misconfiguration rather than a design requirement.
+- **Using SERIALIZABLE everywhere** — Massive performance impact due to conflict detection and aborts. Use only where absolute correctness is required.
+  - **Why it looks correct:** "Stronger isolation = better data safety" is intuitive; the throughput collapse under contention only becomes measurable under realistic load testing.
+- **Assuming READ UNCOMMITTED provides dirty reads in PostgreSQL** — PostgreSQL treats READ UNCOMMITTED as READ COMMITTED because MVCC makes dirty reads impossible.
+  - **Why it looks correct:** The SQL standard defines READ UNCOMMITTED as the lowest level with dirty reads, and developers expect the database to honor the standard rather than silently promoting to a higher isolation level.
+- **Forgetting that READ COMMITTED allows non-repeatable reads** — The same query in the same transaction can return different results at READ COMMITTED.
+  - **Why it looks correct:** Developers naturally assume that repeating a query within a single transaction returns consistent data; the statement-level snapshot behavior is not obvious from the transaction API.
+- **Not testing for concurrency issues** — Isolation bugs only appear under realistic load. Write integration tests simulating concurrent access.
+  - **Why it looks correct:** Unit tests pass, integration tests pass sequentially, and the application seems rock-solid until production traffic with concurrent transactions reveals the anomalies.
+- **Confusing database isolation with application-level locking** — Isolation is a per-transaction property; application locking is orthogonal.
+  - **Why it looks correct:** Both mechanisms prevent concurrent data access issues, and the boundary between database isolation guarantees and application-level synchronization is not immediately clear to developers new to transaction semantics.
+- **Not understanding MVCC interaction with isolation** — MVCC provides snapshot isolation, which is not true serializable. PostgreSQL's SERIALIZABLE uses SSI on top of MVCC.
+  - **Why it looks correct:** MVCC-based REPEATABLE READ prevents most visible anomalies, so developers assume it provides full serializability without understanding write skew.
+- **Setting isolation at database level but overriding with different session/transaction settings** — Application-level settings override database defaults. Verify the effective isolation level in each context.
+  - **Why it looks correct:** The DBA sets the database-level default and assumes all connections inherit it; the application's explicit `SET TRANSACTION ISOLATION LEVEL` silently overrides the DBA's setting without any warning.
 
 ---
 
@@ -234,35 +244,52 @@ Fix with `SELECT ... FOR UPDATE` or SERIALIZABLE isolation.
 
 ## Scenario-Based Questions
 
-- **Q: Your booking system uses READ COMMITTED. Two users simultaneously book the last seat. Both see "available" and both book successfully — overselling by 1. How do you prevent this?** A: Use pessimistic locking: `SELECT ... FOR UPDATE` locks the row until the transaction commits, forcing the second user to wait. Or use SERIALIZABLE isolation with retry logic. With optimistic locking (`@Version`), the second commit fails with `OptimisticLockException`, but under high contention retries may degrade throughput.
-
-> **Interview follow-up:** With `SELECT ... FOR UPDATE`, the second user waits for the first to complete. If the first user abandons the booking without committing, how long does the second user wait, and how do you prevent indefinite blocking?
-- **Q: A reporting job at REPEATABLE READ produces inconsistent counts between users and orders tables. The report shows order counts that don't match the users table. What's happening?** A: REPEATABLE READ prevents non-repeatable reads within a single table but doesn't prevent phantoms across tables. If new orders are inserted between querying users and orders, counts become inconsistent. Use SERIALIZABLE or take a snapshot timestamp and filter by `created_at <= snapshot_time`.
-
-> **Interview follow-up:** Using a snapshot timestamp with `created_at <= snapshot_time` misses orders that were created before the snapshot but committed after you read the users table. How do you handle orders in-flight at snapshot time?
-- **Q: Your app uses `@Transactional(isolation = Isolation.SERIALIZABLE)`. Under high load, 30% of transactions fail with "could not serialize access". How do you fix this?** A: Add retry logic with exponential backoff using `@Retryable`. If contention is intrinsic, consider relaxing to REPEATABLE READ with explicit locking on critical paths. Redesign transactions to be shorter — read in SERIALIZABLE, compute, retry on conflict.
-
-> **Interview follow-up:** You add retry with exponential backoff, but under peak load, retries also fail because the conflicting transaction is still running. Now the p99 latency exceeds the API gateway timeout. How do you break this cycle?
-- **Q: Two transactions both read the same set of rows, then make decisions based on what they read. Neither updates the same rows, yet the final state is inconsistent. What anomaly is this?** A: Write skew — each transaction reads an overlapping data set and makes writes that are individually correct but collectively inconsistent. Example: two doctors going off call. Only SERIALIZABLE or `SELECT ... FOR UPDATE` on the overlapping predicate prevents this.
-- **Q: Your PostgreSQL app uses READ UNCOMMITTED expecting dirty reads, but they don't occur. Why?** A: PostgreSQL does not support dirty reads because MVCC makes them impossible — readers always see a consistent snapshot from the statement start. READ UNCOMMITTED behaves identically to READ COMMITTED in PostgreSQL.
-- **Q: A heavy analytics query at READ COMMITTED blocks OLTP writes for several seconds. You cannot change the query. How do you fix this?** A: The analytics query may acquire shared locks. Use a read-only replica. Without replicas, set `SET TRANSACTION READ ONLY` and `SET TRANSACTION ISOLATION LEVEL SERIALIZABLE` in PostgreSQL — SSI doesn't block writes. Alternatively, lower `lock_timeout` so the analytics query fails fast.
-- **Q: You need to choose an isolation level for a financial trading system where every trade must be accurate, but SERIALIZABLE causes too many conflicts. What do you do?** A: Use REPEATABLE READ for reads. For critical writes (order placement, balance updates), use `SELECT ... FOR UPDATE`. For balance updates, use atomic SQL: `UPDATE accounts SET balance = balance + ? WHERE id = ? AND balance + ? >= 0`.
-- **Q: An app at REPEATABLE READ has a long-running transaction (5 minutes) that blocks VACUUM from cleaning dead tuples. What happens?** A: MVCC retains old row versions visible to the long-running transaction, causing table bloat. Autovacuum cannot remove dead tuples visible to any active transaction. Keep transactions short, or set `old_snapshot_threshold` in PostgreSQL to forcibly terminate long snapshots.
-- **Q: Your PostgreSQL at READ COMMITTED has a transaction that reads a row, processes for 2 seconds, then writes. Under high concurrency, writes fail with "could not serialize access" even though you're not using SERIALIZABLE. Why?** A: A trigger or function may use SERIALIZABLE internally, or a deferred constraint check causes the failure. Check for serializable functions in the call stack. In rare cases, pgBouncer transaction mode can cause unexpected serialization errors.
-- **Q: Your MySQL REPEATABLE READ transaction sometimes gets duplicate key errors on INSERT from concurrent transactions. How is this possible at REPEATABLE READ?** A: MySQL's REPEATABLE READ uses MVCC where INSERTs don't see each other's uncommitted data due to gap locks, but the unique constraint is checked at commit time. The second committer fails. Use SERIALIZABLE to prevent it entirely, or handle unique violation errors in application code.
+- **Q:** Your booking system uses READ COMMITTED. Two users simultaneously book the last seat. Both see "available" and both book successfully — overselling by 1. How do you prevent this?
+  - **A:** Use pessimistic locking: `SELECT ... FOR UPDATE` locks the row until the transaction commits, forcing the second user to wait. Or use SERIALIZABLE isolation with retry logic. With optimistic locking (`@Version`), the second commit fails with `OptimisticLockException`, but under high contention retries may degrade throughput.
+  - **Interview follow-up:** With `SELECT ... FOR UPDATE`, the second user waits for the first to complete. If the first user abandons the booking without committing, how long does the second user wait, and how do you prevent indefinite blocking?
+- **Q:** A reporting job at REPEATABLE READ produces inconsistent counts between users and orders tables. The report shows order counts that don't match the users table. What's happening?
+  - **A:** REPEATABLE READ prevents non-repeatable reads within a single table but doesn't prevent phantoms across tables. If new orders are inserted between querying users and orders, counts become inconsistent. Use SERIALIZABLE or take a snapshot timestamp and filter by `created_at <= snapshot_time`.
+  - **Interview follow-up:** Using a snapshot timestamp with `created_at <= snapshot_time` misses orders that were created before the snapshot but committed after you read the users table. How do you handle orders in-flight at snapshot time?
+- **Q:** Your app uses `@Transactional(isolation = Isolation.SERIALIZABLE)`. Under high load, 30% of transactions fail with "could not serialize access". How do you fix this?
+  - **A:** Add retry logic with exponential backoff using `@Retryable`. If contention is intrinsic, consider relaxing to REPEATABLE READ with explicit locking on critical paths. Redesign transactions to be shorter — read in SERIALIZABLE, compute, retry on conflict.
+  - **Interview follow-up:** You add retry with exponential backoff, but under peak load, retries also fail because the conflicting transaction is still running. Now the p99 latency exceeds the API gateway timeout. How do you break this cycle?
+- **Q:** Two transactions both read the same set of rows, then make decisions based on what they read. Neither updates the same rows, yet the final state is inconsistent. What anomaly is this?
+  - **A:** Write skew — each transaction reads an overlapping data set and makes writes that are individually correct but collectively inconsistent. Example: two doctors going off call. Only SERIALIZABLE or `SELECT ... FOR UPDATE` on the overlapping predicate prevents this.
+- **Q:** Your PostgreSQL app uses READ UNCOMMITTED expecting dirty reads, but they don't occur. Why?
+  - **A:** PostgreSQL does not support dirty reads because MVCC makes them impossible — readers always see a consistent snapshot from the statement start. READ UNCOMMITTED behaves identically to READ COMMITTED in PostgreSQL.
+- **Q:** A heavy analytics query at READ COMMITTED blocks OLTP writes for several seconds. You cannot change the query. How do you fix this?
+  - **A:** The analytics query may acquire shared locks. Use a read-only replica. Without replicas, set `SET TRANSACTION READ ONLY` and `SET TRANSACTION ISOLATION LEVEL SERIALIZABLE` in PostgreSQL — SSI doesn't block writes. Alternatively, lower `lock_timeout` so the analytics query fails fast.
+- **Q:** You need to choose an isolation level for a financial trading system where every trade must be accurate, but SERIALIZABLE causes too many conflicts. What do you do?
+  - **A:** Use REPEATABLE READ for reads. For critical writes (order placement, balance updates), use `SELECT ... FOR UPDATE`. For balance updates, use atomic SQL: `UPDATE accounts SET balance = balance + ? WHERE id = ? AND balance + ? >= 0`.
+- **Q:** An app at REPEATABLE READ has a long-running transaction (5 minutes) that blocks VACUUM from cleaning dead tuples. What happens?
+  - **A:** MVCC retains old row versions visible to the long-running transaction, causing table bloat. Autovacuum cannot remove dead tuples visible to any active transaction. Keep transactions short, or set `old_snapshot_threshold` in PostgreSQL to forcibly terminate long snapshots.
+- **Q:** Your PostgreSQL at READ COMMITTED has a transaction that reads a row, processes for 2 seconds, then writes. Under high concurrency, writes fail with "could not serialize access" even though you're not using SERIALIZABLE. Why?
+  - **A:** A trigger or function may use SERIALIZABLE internally, or a deferred constraint check causes the failure. Check for serializable functions in the call stack. In rare cases, pgBouncer transaction mode can cause unexpected serialization errors.
+- **Q:** Your MySQL REPEATABLE READ transaction sometimes gets duplicate key errors on INSERT from concurrent transactions. How is this possible at REPEATABLE READ?
+  - **A:** MySQL's REPEATABLE READ uses MVCC where INSERTs don't see each other's uncommitted data due to gap locks, but the unique constraint is checked at commit time. The second committer fails. Use SERIALIZABLE to prevent it entirely, or handle unique violation errors in application code.
 
 ## Interview Questions
 
-- **What are the four SQL standard isolation levels?** A: READ UNCOMMITTED, READ COMMITTED, REPEATABLE READ, and SERIALIZABLE. Higher levels prevent more anomalies but reduce concurrency.
-- **What is a dirty read?** A: Reading uncommitted changes from another transaction. If that transaction rolls back, you have read data that never existed. Prevented by READ COMMITTED and above.
-- **What is the difference between non-repeatable read and phantom read?** A: Non-repeatable read: same row read twice gives different values (row updated). Phantom read: same query returns different rows (rows inserted). REPEATABLE READ prevents non-repeatable but allows phantoms.
-- **What is snapshot isolation?** A: Each transaction gets a consistent snapshot at start time, implemented via MVCC. Prevents dirty reads, non-repeatable reads, and phantoms, but not write skew.
-- **What is write skew?** A: Two transactions read overlapping data and make individually correct but collectively inconsistent writes. Example: two doctors go off call leaving no coverage. Only SERIALIZABLE prevents write skew.
-- **How does MVCC implement REPEATABLE READ?** A: Each transaction gets a snapshot at its first read. Queries see row versions committed before the snapshot time. Later writes by other transactions are invisible.
-- **Does READ COMMITTED prevent lost updates?** A: No. Lost updates can occur at any isolation level unless explicitly prevented with `SELECT FOR UPDATE`, `@Version`, or atomic update statements.
-- **What is SSI (Serializable Snapshot Isolation)?** A: PostgreSQL's SERIALIZABLE implementation that uses predicate locks to detect read-write conflicts producing non-serializable behavior, including write skew. One conflicting transaction is aborted.
-- **Why would you avoid SERIALIZABLE everywhere?** A: Highest overhead — more conflicts, more aborts, requires retry logic. Use where absolute correctness is needed (financial) and READ COMMITTED or REPEATABLE READ for everything else.
-- **What is the default isolation level in PostgreSQL vs MySQL?** A: PostgreSQL defaults to READ COMMITTED. MySQL (InnoDB) defaults to REPEATABLE READ. Know your database's default.
+- **What are the four SQL standard isolation levels?**
+  - **A:** READ UNCOMMITTED, READ COMMITTED, REPEATABLE READ, and SERIALIZABLE. Higher levels prevent more anomalies but reduce concurrency.
+- **What is a dirty read?**
+  - **A:** Reading uncommitted changes from another transaction. If that transaction rolls back, you have read data that never existed. Prevented by READ COMMITTED and above.
+- **What is the difference between non-repeatable read and phantom read?**
+  - **A:** Non-repeatable read: same row read twice gives different values (row updated). Phantom read: same query returns different rows (rows inserted). REPEATABLE READ prevents non-repeatable but allows phantoms.
+- **What is snapshot isolation?**
+  - **A:** Each transaction gets a consistent snapshot at start time, implemented via MVCC. Prevents dirty reads, non-repeatable reads, and phantoms, but not write skew.
+- **What is write skew?**
+  - **A:** Two transactions read overlapping data and make individually correct but collectively inconsistent writes. Example: two doctors go off call leaving no coverage. Only SERIALIZABLE prevents write skew.
+- **How does MVCC implement REPEATABLE READ?**
+  - **A:** Each transaction gets a snapshot at its first read. Queries see row versions committed before the snapshot time. Later writes by other transactions are invisible.
+- **Does READ COMMITTED prevent lost updates?**
+  - **A:** No. Lost updates can occur at any isolation level unless explicitly prevented with `SELECT FOR UPDATE`, `@Version`, or atomic update statements.
+- **What is SSI (Serializable Snapshot Isolation)?**
+  - **A:** PostgreSQL's SERIALIZABLE implementation that uses predicate locks to detect read-write conflicts producing non-serializable behavior, including write skew. One conflicting transaction is aborted.
+- **Why would you avoid SERIALIZABLE everywhere?**
+  - **A:** Highest overhead — more conflicts, more aborts, requires retry logic. Use where absolute correctness is needed (financial) and READ COMMITTED or REPEATABLE READ for everything else.
+- **What is the default isolation level in PostgreSQL vs MySQL?**
+  - **A:** PostgreSQL defaults to READ COMMITTED. MySQL (InnoDB) defaults to REPEATABLE READ. Know your database's default.
 
 ## Developer Recommendations
 

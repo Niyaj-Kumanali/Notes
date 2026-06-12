@@ -192,14 +192,22 @@ public class OrderStatusClient {
 
 ## Common Mistakes
 
-- **No dead letter configuration** — failed messages remain and block the queue. This *looks correct* because the message stays in the queue and the consumer keeps trying — "persistence means we'll process it eventually" — but each failed attempt blocks subsequent messages.
-- **Forgetting manual ACK** — auto-ACK loses messages on consumer crash. This *looks correct* because during normal operation auto-ACK works perfectly — the message is acknowledged immediately and processing happens without error. The loss only surfaces when the consumer crashes between auto-ACK and actual processing.
-- **Unlimited queue growth** — set max length and TTL to prevent unbounded growth. This *looks correct* because queues are designed to hold messages — unbounded growth only becomes a problem under sustained consumer lag, at which point RabbitMQ hits the memory watermark and blocks all publishers.
-- **Synchronous publishing** — blocks producer thread; use async confirms. This *looks correct* because `waitForConfirmsOrDie` returns quickly during low traffic — the blocking cost only appears when broker write latency increases under load, serializing all producer threads.
-- **Not handling poison messages** — consistently failing messages need DLQ routing. This *looks correct* because a single failure looks transient — "retry and it'll pass" — but poison messages loop forever, consuming consumer resources and stalling the queue.
-- **Incorrect exchange type** — using direct when topic or fanout is more appropriate. This *looks correct* because direct exchange works for the initial use case — the design only becomes limiting when new consumers need selective message filtering, requiring a migration.
-- **Binding mismatches** — routing keys must match between publisher and consumer bindings. This *looks correct* because the code compiles and runs without errors — messages simply disappear into the exchange with no consumer receiving them, a silent failure that looks like "the queue is empty."
-- **No monitoring** — queue depth, consumer lag, and message rates must be tracked. This *looks correct* because the system works in isolation — the first indication of a problem is a pager alert about cascading failures from an overflowing queue.
+- **No dead letter configuration** — failed messages remain and block the queue.
+  - **Why it looks correct:** The message stays in the queue and the consumer keeps trying — "persistence means we'll process it eventually" — but each failed attempt blocks subsequent messages.
+- **Forgetting manual ACK** — auto-ACK loses messages on consumer crash.
+  - **Why it looks correct:** During normal operation auto-ACK works perfectly — the message is acknowledged immediately and processing happens without error. The loss only surfaces when the consumer crashes between auto-ACK and actual processing.
+- **Unlimited queue growth** — set max length and TTL to prevent unbounded growth.
+  - **Why it looks correct:** Queues are designed to hold messages — unbounded growth only becomes a problem under sustained consumer lag, at which point RabbitMQ hits the memory watermark and blocks all publishers.
+- **Synchronous publishing** — blocks producer thread; use async confirms.
+  - **Why it looks correct:** `waitForConfirmsOrDie` returns quickly during low traffic — the blocking cost only appears when broker write latency increases under load, serializing all producer threads.
+- **Not handling poison messages** — consistently failing messages need DLQ routing.
+  - **Why it looks correct:** A single failure looks transient — "retry and it'll pass" — but poison messages loop forever, consuming consumer resources and stalling the queue.
+- **Incorrect exchange type** — using direct when topic or fanout is more appropriate.
+  - **Why it looks correct:** Direct exchange works for the initial use case — the design only becomes limiting when new consumers need selective message filtering, requiring a migration.
+- **Binding mismatches** — routing keys must match between publisher and consumer bindings.
+  - **Why it looks correct:** The code compiles and runs without errors — messages simply disappear into the exchange with no consumer receiving them, a silent failure that looks like "the queue is empty."
+- **No monitoring** — queue depth, consumer lag, and message rates must be tracked.
+  - **Why it looks correct:** The system works in isolation — the first indication of a problem is a pager alert about cascading failures from an overflowing queue.
 
 ---
 
@@ -289,14 +297,14 @@ public Queue notificationQueue() {
 
 1. **Q: Design an e-commerce order processing system with RabbitMQ. Requirements: Inventory, Payment, Notification, and Analytics each need to process every order independently. Inventory and Payment must process before shipping. How do you route messages?**
     - A: (1) Use a topic exchange with routing key `order.created`. (2) Inventory and Payment bind with routing key `order.created`. (3) When Inventory and Payment both complete, they publish to a different exchange with routing key `order.ready`. (4) Shipping binds to `order.ready`. (5) Notification and Analytics bind to `order.#` to get all order events. (6) Each service has its own queue with manual ACK and DLQ. (7) Use a saga coordinator or correlation ID to track completion of Inventory + Payment before triggering Shipping.
-    > **Interview follow-up:** If Inventory succeeds but Payment fails, the saga must compensate — but what happens if the compensation message (CancelInventory) is published but never reaches the inventory consumer? How do you ensure the compensation runs?
+    - **Interview follow-up:** If Inventory succeeds but Payment fails, the saga must compensate — but what happens if the compensation message (CancelInventory) is published but never reaches the inventory consumer? How do you ensure the compensation runs?
 
 2. **Q: How do you implement exactly-once delivery with RabbitMQ between services?**
    - A: (1) Publisher confirms: enable `publisherConfirms(true)` on the channel, wait for confirms, retry on nack. (2) Mandatory flag: `basicPublish` with `mandatory=true` — the broker returns unroutable messages. (3) Consumer manual ACK: process the message, then `basicAck`. Never auto-ACK. (4) Idempotent consumer: deduplicate using a message ID or business key stored in the database (`INSERT ... ON CONFLICT DO NOTHING`). (5) Quorum queues for broker-side reliability. RabbitMQ cannot guarantee exactly-once across network boundaries — at-least-once with idempotent sinks is the practical standard.
 
 3. **Q: Your RabbitMQ cluster uses classic mirrored queues. During a network partition, the cluster splits, and some messages are lost when the partition heals. How do quorum queues prevent this?**
     - A: Quorum queues use the Raft consensus algorithm: a majority of nodes must agree on every operation. During a network partition, only the partition with a majority (e.g., 2 out of 3 nodes) can accept messages. The minority partition stops accepting writes. When the partition heals, the minority's data is discarded (Raft's safety guarantee). Classic mirrored queues use async master-slave replication — during a split-brain, both sides can accept writes, leading to data loss on merge. Quorum queues also have a delivery limit (default 3) — messages that fail repeatedly are automatically dead-lettered, preventing poison message cycling.
-    > **Interview follow-up:** Quorum queues require a majority for every operation — what happens to availability when you lose 2 out of 3 nodes? The queue becomes unavailable until a majority is restored. How do you plan for this in a multi-AZ deployment?
+    - **Interview follow-up:** Quorum queues require a majority for every operation — what happens to availability when you lose 2 out of 3 nodes? The queue becomes unavailable until a majority is restored. How do you plan for this in a multi-AZ deployment?
 
 4. **Q: Your payment processing service needs to retry failed messages with exponential backoff (1s, 2s, 4s, 8s). How do you implement this without custom code?**
    - A: (1) Create 4 retry queues, each with different TTL: `retry-1s` (TTL=1000ms), `retry-2s` (TTL=2000ms), `retry-4s` (TTL=4000ms), `retry-8s` (TTL=8000ms). (2) Each retry queue is bound to a retry exchange. When TTL expires, the message is dead-lettered back to the original exchange (which routes to the original queue). (3) Use the `x-delayed-message` exchange plugin: set `x-delay` header on each message (in ms). The exchange holds the message until the delay expires, then routes normally. This requires only one retry queue. (4) Track retry count in message headers — after 3 retries, route to DLQ instead of retry.
@@ -318,7 +326,7 @@ public Queue notificationQueue() {
 
 10. **Q: Your application publishes 100MB image files as messages directly to RabbitMQ. The broker's memory usage spikes and performance degrades. How do you handle large payloads?**
     - A: (1) Best practice: store the image in external storage (S3, HDFS, local filesystem) and send only the file reference (URL + metadata) in the RabbitMQ message. (2) If external storage is not an option: set `max_message_size` on the broker (e.g., 200MB) and use lazy queues (`x-queue-mode=lazy`) — messages are written to disk immediately, not held in RAM. (3) Set `vm_memory_high_watermark` to a lower value (e.g., 0.3) to leave headroom for message processing. (4) Compress payloads with gzip before publishing. (5) Implement client-side chunking: split the file into 1MB chunks, send as separate messages with a sequence number, and reassemble on the consumer.
-    > **Interview follow-up:** With client-side chunking, one chunk fails and is requeued while others succeed — how do you prevent partial reassembly and ensure the entire file is either delivered or discarded atomically?
+    - **Interview follow-up:** With client-side chunking, one chunk fails and is requeued while others succeed — how do you prevent partial reassembly and ensure the entire file is either delivered or discarded atomically?
 
 ---
 
@@ -358,7 +366,8 @@ public Queue notificationQueue() {
 
 ## Developer Recommendations
 
-- **Always configure dead letter queues** — Without DLQ, a single malformed message blocks the entire queue indefinitely (reject → requeue → reject → requeue cycle). Every production queue should have a DLX/DLQ configured. Set `x-dead-letter-exchange` and `x-dead-letter-routing-key` on every queue. Monitor DLQ size — a growing DLQ indicates systematic processing failures that need attention, not individual poison messages. During Black Friday one year, a pricing service deployed a schema change that produced messages with a missing `currency` field — the downstream consumer rejected every one. The queue froze for 37 minutes before someone manually purged it. A DLQ would have isolated the bad messages in seconds.
+- **Always configure dead letter queues** — Without DLQ, a single malformed message blocks the entire queue indefinitely (reject → requeue → reject → requeue cycle). Every production queue should have a DLX/DLQ configured. Set `x-dead-letter-exchange` and `x-dead-letter-routing-key` on every queue. Monitor DLQ size — a growing DLQ indicates systematic processing failures that need attention, not individual poison messages.
+  - **Production story:** During Black Friday one year, a pricing service deployed a schema change that produced messages with a missing `currency` field — the downstream consumer rejected every one. The queue froze for 37 minutes before someone manually purged it. A DLQ would have isolated the bad messages in seconds.
 
 - **Use manual ACK, never auto ACK** — Auto ACK acknowledges messages as soon as they are delivered to the consumer. If the consumer crashes before processing, the message is lost forever. Manual ACK (`basicAck` after successful processing, `basicNack` after failure) provides at-least-once delivery. The trade-off: manual ACK requires more code and can lead to duplicate processing if the ACK is lost. Use idempotent processing to handle duplicates safely.
 
