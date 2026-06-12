@@ -198,16 +198,16 @@ public class RoutingDataSource extends AbstractRoutingDataSource {
 
 ## Common Mistakes
 
-- **Premature optimization without measurement** — Always profile before optimizing; guessing the bottleneck wastes effort and often makes things worse.
-- **Ignoring database statistics** — Missing or stale ANALYZE leads to bad execution plans based on incorrect cardinality estimates.
-- **Using functions on indexed columns in WHERE** — Wrapping indexed columns in functions like `YEAR(date)` prevents index usage entirely.
-- **Assuming join order in query matches execution order** — The optimizer freely reorders joins for performance; the query's FROM clause order is not the execution order.
-- **Over-indexing** — Every additional index slows down INSERT, UPDATE, and DELETE operations on the table.
-- **Not using EXPLAIN ANALYZE** — Guessing instead of measuring leads to wasted optimization effort on the wrong problems.
-- **Fetching too much data** — Not using LIMIT and selecting unnecessary columns increases I/O, network transfer, and memory usage.
-- **N+1 queries from ORM** — The most common Hibernate performance issue, caused by lazy loading in loops instead of using JOIN FETCH.
-- **Not tuning connection pool** — Too small causes contention; too large causes resource exhaustion and database overload.
-- **Relying on nested loop joins for large datasets** — A hash join or merge join is usually far more efficient for large result sets.
+- **Premature optimization without measurement** — Always profile before optimizing; guessing the bottleneck wastes effort and often makes things worse. This *looks correct* because the slow query is obvious from application logs, but the root cause (missing index, bad plan, lock contention) is invisible without `EXPLAIN ANALYZE`.
+- **Ignoring database statistics** — Missing or stale ANALYZE leads to bad execution plans based on incorrect cardinality estimates. This *looks correct* because the query runs and returns results; the optimizer's wrong plan choice is invisible without comparing estimated versus actual rows in the execution plan.
+- **Using functions on indexed columns in WHERE** — Wrapping indexed columns in functions like `YEAR(date)` prevents index usage entirely. This *looks correct* because the query returns the right results and the index exists on the column; the implicit function-based transformation that blocks index usage is a database internals detail.
+- **Assuming join order in query matches execution order** — The optimizer freely reorders joins for performance; the query's FROM clause order is not the execution order. This *looks correct* because the SQL query reads top-to-bottom, and developers naturally assume the database processes it in the same left-to-right, top-to-bottom order as application code.
+- **Over-indexing** — Every additional index slows down INSERT, UPDATE, and DELETE operations on the table. This *looks correct* because indexes improve read performance, and the write amplification is invisible until batch INSERT operations start timing out.
+- **Not using EXPLAIN ANALYZE** — Guessing instead of measuring leads to wasted optimization effort on the wrong problems. This *looks correct* because the symptom (slow query) points to an obvious cause (missing index), but the real bottleneck is often something entirely different like a disk spill or lock contention.
+- **Fetching too much data** — Not using LIMIT and selecting unnecessary columns increases I/O, network transfer, and memory usage. This *looks correct* because the query works and the extra data doesn't cause problems on small datasets; the cost only becomes visible when the result set grows large enough to cause network saturation or OOM.
+- **N+1 queries from ORM** — The most common Hibernate performance issue, caused by lazy loading in loops instead of using JOIN FETCH. This *looks correct* because each individual query is fast (1-2ms), and the cumulative cost of N queries is invisible without enabling Hibernate statistics or looking at database-level query counts.
+- **Not tuning connection pool** — Too small causes contention; too large causes resource exhaustion and database overload. This *looks correct* because the default pool size (HikariCP defaults to 10) works fine in development where there's only one application instance; the contention or exhaustion only appears under production load with multiple instances.
+- **Relying on nested loop joins for large datasets** — A hash join or merge join is usually far more efficient for large result sets. This *looks correct* because nested loops work well on small datasets during development; the O(n×m) explosion only becomes apparent when both tables grow into the millions of rows.
 
 ---
 
@@ -260,7 +260,11 @@ int bulkMarkProcessed();
 ## Scenario-Based Questions
 
 - **Q: You are debugging a Spring Boot endpoint that loads 50 articles. Each article has an author and comments. The endpoint makes 102 SQL queries. How do you identify and fix the N+1 queries?** A: Enable `hibernate.generate_statistics=true` and check logs. Fix with `JOIN FETCH` for immediate relationships and `@EntityGraph` for nested graphs: `@EntityGraph(attributePaths = {"author", "comments"})`. For deeply nested graphs, use `@BatchSize`.
+
+> **Interview follow-up:** After adding `JOIN FETCH` for author and comments, the query returns a Cartesian product — 50 articles × 1 author × 20 comments = 1000 rows where you expected 50. How do you deduplicate this correctly?
 - **Q: A query filtering by `WHERE YEAR(created_at) = 2024` is slow despite an index on `created_at`. The table has 50M rows. How do you fix it without changing application code?** A: Create a functional index: `CREATE INDEX idx_orders_year ON orders((EXTRACT(YEAR FROM created_at)))`. However, rewriting to `WHERE created_at >= '2024-01-01' AND created_at < '2025-01-01'` is better — sargable predicates allow range scans on the existing index.
+
+> **Interview follow-up:** The query is generated by a legacy ORM that you cannot modify. The ORM always generates `WHERE YEAR(created_at) = ?`. The functional index helps, but now every query scans the full year's index entries. How do you make the index more selective?
 - **Q: A paginated query with `ORDER BY created_at DESC LIMIT 20 OFFSET 100000` on a 10M row table takes 5 seconds. Each page gets slower. You cannot change the UI. How do you fix this?** A: Switch to keyset pagination internally while keeping the same API. Map `page=100` to `WHERE created_at < :cursor`. Return `created_at` as the cursor in the response. If arbitrary page jumps are required, use a covering index on `(created_at) INCLUDE (needed_columns)`.
 - **Q: EXPLAIN ANALYZE shows `actual rows: 50000, plan rows: 1000` for an index scan. The query jumped from 50ms to 5s after a deployment. What caused this?** A: Stale statistics — a bulk data load changed distribution without ANALYZE. The optimizer underestimated rows and chose a plan optimized for 1000 rows. Run `ANALYZE` and increase autoanalyze frequency for tables with rapid changes.
 - **Q: A JOIN between orders (10M rows) and customers (5M rows) uses a nested loop with 10M iterations. CPU is at 100% and the query takes 30 seconds. How do you make it use a hash join?** A: Run ANALYZE on both tables first. If the optimizer still chooses nested loop, `work_mem` may be too low for the hash table. Increase it, or temporarily force with `enable_nestloop = off` to confirm hash join is faster.

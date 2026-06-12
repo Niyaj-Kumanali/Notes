@@ -31,11 +31,11 @@ try {
 
 ## Common Mistakes
 
-- **Logging Exceptions Without Context** — Always include identifiers (order ID, user ID) in error logs.
-- **Synchronous Logging in Hot Path** — Blocking file I/O under high load destroys throughput.
-- **Logging Too Much (Info is the new Debug)** — Noisy logs hide real issues.
-- **No Correlation IDs** — Without trace IDs, reconstructing a request's flow across services is impossible.
-- **Logging Sensitive Data** — Never log passwords, tokens, PII, or credit card numbers.
+- **Logging Exceptions Without Context** — Always include identifiers (order ID, user ID) in error logs. This *looks correct* because the stack trace shows the error and the line number — the developer assumes they can find the failing request by grepping timestamps, not realizing they need a searchable identifier.
+- **Synchronous Logging in Hot Path** — Blocking file I/O under high load destroys throughput. This *looks correct* because a single `log.info` takes microseconds — the hidden cost is that every request thread blocks on disk I/O, and under load the cumulative delay grows linearly with concurrency.
+- **Logging Too Much (Info is the new Debug)** — Noisy logs hide real issues. This *looks correct* because more data seems better for debugging — the signal-to-noise ratio degrades slowly, with no single log line announcing itself as noise.
+- **No Correlation IDs** — Without trace IDs, reconstructing a request's flow across services is impossible. This *looks correct* because each service's logs are independently coherent — the gap only appears when you need to trace a single user's journey across 5 services.
+- **Logging Sensitive Data** — Never log passwords, tokens, PII, or credit card numbers. This *looks correct* because the data is in the log for legitimate debugging — the compliance violation is invisible until an audit or breach reveals the exposed PII.
 
 ---
 
@@ -102,13 +102,15 @@ public class LoggingFilter implements Filter {
 ## Scenario-Based Questions
 
 1. **Q: A production outage just occurred. The checkout service is returning 500 errors. Your logs are plain text files on each server. How do you find the root cause?**
-   - A: You can't efficiently — this is why structured logging with centralized aggregation is essential. To fix the immediate problem, you'd grep all servers for recent ERROR logs, manually correlate with timestamps, and hope to find a pattern. For the future: implement structured JSON logging with `trace_id`, `service`, `user_id`, and `error_category`. Ship to Elasticsearch. Create a dashboard showing error rates by service and trace ID. Next outage: search `level:ERROR AND service:checkout` and trace the failing request across services.
+    - A: You can't efficiently — this is why structured logging with centralized aggregation is essential. To fix the immediate problem, you'd grep all servers for recent ERROR logs, manually correlate with timestamps, and hope to find a pattern. For the future: implement structured JSON logging with `trace_id`, `service`, `user_id`, and `error_category`. Ship to Elasticsearch. Create a dashboard showing error rates by service and trace ID. Next outage: search `level:ERROR AND service:checkout` and trace the failing request across services.
+    > **Interview follow-up:** You implement structured logging, but the `user_id` field is sometimes missing because a developer forgot to populate it in a specific code path. How do you detect and alert on missing mandatory fields in structured logs without adding runtime overhead?
 
 2. **Q: Your application logs 100GB/day. Searching logs for a specific user's actions takes 30+ seconds. Developers complain that logging is useless for debugging. How do you improve this?**
    - A: Implement structured logging with indexed fields. In Elasticsearch, index `trace_id`, `user_id`, `order_id`, and `error_code` as keyword fields (not full-text). When a developer reports an issue, get the user's trace ID from their support ticket, then search `trace_id:abc123` — results in <1 second. Also: add index lifecycle management (hot 7d → warm 30d → cold → delete) and use data streams for efficient storage.
 
 3. **Q: During a traffic spike, your synchronous logging adds 500ms to every request because the disk is saturated. The application becomes unresponsive. How do you decouple logging from request processing?**
-   - A: Switch to async logging with Logback's `AsyncAppender`. The appender enqueues log events in a bounded queue (default 256). The request thread returns immediately. A background thread drains the queue. Configure `neverBlock=true` — if the queue is full, log events are dropped (better to lose logs than block requests). For critical ERROR logs that must not be dropped, use a separate higher-priority queue or direct synchronous write.
+    - A: Switch to async logging with Logback's `AsyncAppender`. The appender enqueues log events in a bounded queue (default 256). The request thread returns immediately. A background thread drains the queue. Configure `neverBlock=true` — if the queue is full, log events are dropped (better to lose logs than block requests). For critical ERROR logs that must not be dropped, use a separate higher-priority queue or direct synchronous write.
+    > **Interview follow-up:** With `neverBlock=true`, critical ERROR logs are dropped when the queue fills up — the very logs you need during an outage. If you switch to a separate non-blocking queue for ERROR logs, what prevents that queue from filling up too? How do you guarantee ERROR delivery without blocking the application?
 
 4. **Q: A developer accidentally logs all request bodies including credit card numbers. PII is now in your log aggregation system. How do you handle this breach and prevent recurrence?**
    - A: Immediately: rotate the log index/stream to prevent further access. Use Logback's message converter to mask sensitive fields. Create a custom converter that detects common patterns (credit card regex, `password` field, `token` field) and replaces them with `[REDACTED]`. Implement automated scanning of log entries for PII patterns. Add a code review checklist item: "No credentials, PII, or sensitive data in logs."
@@ -120,7 +122,8 @@ public class LoggingFilter implements Filter {
    - A: Use appropriate log levels: ERROR (failures requiring immediate action), WARN (unexpected but handled), INFO (significant business events only — 1-10 per request), DEBUG (details for debugging — enable per package via Actuator). In production, INFO level should be clean enough to read. Use Spring Boot Actuator to dynamically enable DEBUG for specific packages when investigating issues: `POST /actuator/loggers/com.example.paymentservice` with `"configuredLevel": "DEBUG"`. Disable when done.
 
 7. **Q: You need to audit all access to sensitive customer data for compliance (GDPR/SOX). Each read of a user's personal data must be logged with who, what, when, and why. How do you implement this without impacting performance?**
-   - A: Use AOP with `@Auditable` annotation on data access methods. Log audit events asynchronously to a separate audit log index (not mixed with application logs). Include: `user_id` (who accessed), `resource_type` and `resource_id` (what), `timestamp` (when), `reason` (why — e.g., `CUSTOMER_SUPPORT`, `ORDER_PROCESSING`). The audit log has its own retention policy (typically 1-7 years). Async logging ensures audit doesn't impact request latency.
+    - A: Use AOP with `@Auditable` annotation on data access methods. Log audit events asynchronously to a separate audit log index (not mixed with application logs). Include: `user_id` (who accessed), `resource_type` and `resource_id` (what), `timestamp` (when), `reason` (why — e.g., `CUSTOMER_SUPPORT`, `ORDER_PROCESSING`). The audit log has its own retention policy (typically 1-7 years). Async logging ensures audit doesn't impact request latency.
+    > **Interview follow-up:** The `@Auditable` annotation relies on AOP, which doesn't capture reads performed directly via JPA repository methods or native queries. How do you ensure that every data access path — including batch jobs and admin scripts — goes through the same audit mechanism?
 
 8. **Q: Your logs are shipped to Elasticsearch, but Filebeat can't keep up during peak traffic. Logs are lost because the queue overflows. How do you ensure reliable log delivery?**
    - A: Use a buffering layer between the application and Elasticsearch. Configure Logback to write to local files (rolling files with retention). Filebeat reads from these files — if Elasticsearch is down, Filebeat tracks its position and resumes when ES is back. For higher reliability, use Kafka as the transport layer: Logback → local file → Filebeat → Kafka → Logstash → Elasticsearch. Kafka provides durable storage, replay, and backpressure.
@@ -169,7 +172,7 @@ public class LoggingFilter implements Filter {
 
 ## Developer Recommendations
 
-- **Always use structured logging (JSON) in production** — Plain text logs are impossible to parse reliably at scale. Structured JSON logs with consistent field names (`@timestamp`, `level`, `service`, `trace_id`, `message`) enable automated analysis, alerting, and debugging. Configure Logback with `LogstashEncoder` for JSON output. In development, use a human-readable console appender for readability.
+- **Always use structured logging (JSON) in production** — Plain text logs are impossible to parse reliably at scale. Structured JSON logs with consistent field names (`@timestamp`, `level`, `service`, `trace_id`, `message`) enable automated analysis, alerting, and debugging. Configure Logback with `LogstashEncoder` for JSON output. In development, use a human-readable console appender for readability. One team spent 8 hours debugging a production incident because their plain-text logs had no consistent delimiter — they couldn't reliably extract timestamps or error codes across 15 services.
 
 - **Use MDC to automatically include trace_id, user_id, and service in every log entry** — Without MDC, every log method call needs to pass context manually, which developers forget. Configure a servlet filter that puts `trace_id` (from request header), `user_id` (from authentication), and `service` (from configuration) into MDC. These fields are automatically included in every log line via the encoder configuration. Zero additional code per log statement.
 

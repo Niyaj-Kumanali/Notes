@@ -240,16 +240,16 @@ GROUP BY store_region, product_category;
 
 ## Common Mistakes
 
-- **Premature denormalization** — Optimizing before measuring the actual bottleneck adds complexity without proven benefit.
-- **Denormalizing without documentation** — Future engineers won't know why data is duplicated and may try to normalize it back.
-- **Inconsistent copies** — Missing trigger or application logic to keep copies in sync leads to data corruption.
-- **Too many denormalized columns** — Creating wide tables with 200+ columns causes row-width performance issues.
-- **Copying large objects** — Storing TEXT or JSON blobs in multiple places wastes storage and slows writes.
-- **Over-aggregation** — Pre-computing aggregates that could be computed in sub-millisecond queries is wasteful complexity.
-- **Ignoring write performance** — Denormalizing without measuring write throughput impact can cripple write-heavy workloads.
-- **No reconciliation process** — Failing to detect and fix inconsistencies allows data corruption to compound over time.
-- **Using triggers for heavy consistency** — Row-level triggers add latency to every write and don't scale well for bulk operations.
-- **Not considering materialized views** — Reinventing what the database already provides leads to fragile custom synchronization code.
+- **Premature denormalization** — Optimizing before measuring the actual bottleneck adds complexity without proven benefit. This *looks correct* because optimizing early feels proactive and "performance-conscious"; the cost of maintaining redundant data only surfaces when the source data changes and the copies drift.
+- **Denormalizing without documentation** — Future engineers won't know why data is duplicated and may try to normalize it back. This *looks correct* because the denormalization decision makes perfect sense to the engineer who made it; future team members lack that context and see only redundant data that violates normal form principles.
+- **Inconsistent copies** — Missing trigger or application logic to keep copies in sync leads to data corruption. This *looks correct* because the denormalized data is correct at the time of insertion; the inconsistency only appears later when the source data changes and the copy remains stale.
+- **Too many denormalized columns** — Creating wide tables with 200+ columns causes row-width performance issues. This *looks correct* because adding more columns to an existing table seems simpler than creating new tables; the row-width impact on I/O and caching is invisible in the schema definition.
+- **Copying large objects** — Storing TEXT or JSON blobs in multiple places wastes storage and slows writes. This *looks correct* because denormalization is "duplicate data for performance," and copying large objects follows the same logic; the write amplification only becomes measurable when the object exceeds a few KB.
+- **Over-aggregation** — Pre-computing aggregates that could be computed in sub-millisecond queries is wasteful complexity. This *looks correct* because pre-computing seems like a safe optimization; the complexity cost is invisible until the aggregation logic needs to change and every stale copy must be rebuilt.
+- **Ignoring write performance** — Denormalizing without measuring write throughput impact can cripple write-heavy workloads. This *looks correct* because the read improvement is immediate and measurable, while the write degradation only appears when write traffic grows and each INSERT now touches multiple tables.
+- **No reconciliation process** — Failing to detect and fix inconsistencies allows data corruption to compound over time. This *looks correct* because the data appears consistent day-to-day; without a reconciliation job checking for drift, discrepancies silently accumulate until they become unrecoverable.
+- **Using triggers for heavy consistency** — Row-level triggers add latency to every write and don't scale well for bulk operations. This *looks correct* because triggers seem like the "safe" database-enforced way to maintain consistency; the row-by-row overhead is invisible until a bulk INSERT takes 100x longer than expected.
+- **Not considering materialized views** — Reinventing what the database already provides leads to fragile custom synchronization code. This *looks correct* because custom sync code gives full control and is written in the team's familiar language; the database's built-in materialized view support is an overlooked alternative that already handles edge cases.
 
 ---
 
@@ -319,8 +319,14 @@ public class FeedItem {
 ## Scenario-Based Questions
 
 - **Q: You are building a product listing page that shows product name, category name, and review count. The normalized query joins 4 tables and takes 200ms at 1000 QPS. How do you decide which columns to denormalize?** A: Measure the actual bottleneck first. If the JOIN is fast (<5ms), caching (Redis) may be cheaper than denormalization. Denormalize the most-read, least-changed columns: category name (changes rarely, trigger-synced) and review count (updated frequently but read far more, event-driven update).
+
+> **Interview follow-up:** You denormalize `category_name` and use a trigger to sync it. During a Black Friday promotion, the marketing team renames 20 categories. The trigger updates 500K product rows and blocks all writes for 30 seconds. How do you handle this?
 - **Q: You denormalized `user_name` and `user_email` onto `orders`. A user changes their email and the reconciliation script finds 5000 orders with the old email. What's the fix?** A: The sync mechanism failed. Fix: add a trigger on `users` updating all related orders on email change. For the inconsistency, run one-time: `UPDATE orders SET user_email = u.email FROM users u WHERE orders.user_id = u.id AND orders.user_email != u.email`. Implement proper sync via trigger (real-time) or event-driven job (eventual consistency).
+
+> **Interview follow-up:** The orders table has 500M rows and the fix UPDATE blocks all queries for 10 minutes. How do you correct the 5000 inconsistent rows without locking the entire table?
 - **Q: A materialized view aggregating 50M sales records takes 10 minutes to refresh. Queries time out during refresh. How do you fix this?** A: Switch to `REFRESH MATERIALIZED VIEW CONCURRENTLY` which creates a new version and swaps atomically — readers never block. This requires a UNIQUE index on the MV. For faster refresh, incrementally update via summary tables with triggers applying deltas.
+
+> **Interview follow-up:** After switching to `CONCURRENTLY`, the refresh now takes 15 minutes instead of 10. The MV has a UNIQUE index but the extra index maintenance is slowing the refresh. How do you reduce refresh time while keeping non-blocking behavior?
 - **Q: Your team wants to denormalize customer addresses into every order "for convenience". Orders are read-heavy (1M reads/day) but customers change addresses rarely. What do you recommend?** A: This is reasonable if the order must show the address at time of order (point-in-time snapshot). Store the address at order creation. This is historical accuracy, not just denormalization. Document that orders show shipping address at time of order, not current address.
 - **Q: A trigger on `categories` updates `category_name` on 50,000 products. The trigger on rename takes 30 seconds and blocks the UI. How do you decouple this?** A: Remove the synchronous trigger. Publish a `CategoryRenamed` event. A background processor updates products in batches of 1000 with `pg_sleep(0.05)` between batches. Category edits become instant while propagation happens async. Accept eventual consistency (seconds).
 - **Q: Your analytics team wants a star schema with a 500GB fact table containing 30 dimension attributes. Queries over the last 7 days are fast, but full-year queries are slow. What's the next optimization?** A: Partition the fact table by month. Each monthly partition is ~40GB. Full-year queries scan only relevant partitions via partition pruning. Consider columnar storage (Parquet, ClickHouse) for analytical workloads, reading only needed columns.
@@ -344,10 +350,10 @@ public class FeedItem {
 
 ## Developer Recommendations
 
-- **Denormalize only after measuring the actual bottleneck** — Premature denormalization adds complexity. Profile with `EXPLAIN ANALYZE`, measure P99 latency, and identify whether JOINs or data volume is the actual problem.
+- **Denormalize only after measuring the actual bottleneck** — Premature denormalization adds complexity. Profile with `EXPLAIN ANALYZE`, measure P99 latency, and identify whether JOINs or data volume is the actual problem. A team denormalized `product_name` into `order_items` without measuring first. The JOIN was actually 2ms. Their denormalization triggered a 3-month project adding sync triggers and reconciliation jobs, all for a 2ms gain that could have been solved with a simple index.
 - **Use materialized views as managed denormalization** — Database-managed, reducing inconsistency risk. Support concurrent refresh without blocking reads. Prefer MVs over triggers for reporting and analytics.
 - **Document every denormalized column with rationale** — Add inline comments explaining why each denormalized column exists, what trade-off it makes, and how consistency is maintained.
-- **Keep denormalized data consistent with triggers for critical paths** — For data that must always be consistent (invoice totals), use triggers. For non-critical data (trending counts), accept eventual consistency.
+- **Keep denormalized data consistent with triggers for critical paths** — For data that must always be consistent (invoice totals), use triggers. For non-critical data (trending counts), accept eventual consistency. An invoicing system used application-level eventual consistency for `invoice_total`. A bug in the sync code caused 200 invoices to show incorrect totals. Customers disputed charges, and the finance team spent 2 weeks reconciling. Switching to a trigger-based approach eliminated the class of bugs entirely.
 - **Limit the number of denormalized columns per table** — A table with 200+ columns causes wide-row performance issues. Denormalize only columns actually needed for query performance.
 - **Use CQRS as a formal denormalization pattern** — Write to normalized tables (command model) and project to denormalized tables (query model). Provides clear separation of concerns.
 - **Run periodic reconciliation checks** — Schedule a job validating denormalized data against the source of truth. Alert on discrepancies to identify systemic issues before they compound.

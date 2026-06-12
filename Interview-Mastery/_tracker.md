@@ -75,14 +75,14 @@
 
 | File | Status |
 |------|--------|
-| Backend-Concepts/Architecture/Microservices.md | ⬜ |
-| Backend-Concepts/Architecture/Event-Driven-Architecture.md | ⬜ |
-| Backend-Concepts/Architecture/Domain-Driven-Design.md | ⬜ |
-| Backend-Concepts/Architecture/Design-Patterns.md | ⬜ |
-| Backend-Concepts/Architecture/SOLID.md | ⬜ |
-| Backend-Concepts/Architecture/SAGA.md | ⬜ |
-| Backend-Concepts/Architecture/CQRS.md | ⬜ |
-| Backend-Concepts/Architecture/Circuit-Breaker.md | ⬜ |
+| Backend-Concepts/Architecture/Microservices.md | ✅ |
+| Backend-Concepts/Architecture/Event-Driven-Architecture.md | ✅ |
+| Backend-Concepts/Architecture/Domain-Driven-Design.md | ✅ |
+| Backend-Concepts/Architecture/Design-Patterns.md | ✅ |
+| Backend-Concepts/Architecture/SOLID.md | ✅ |
+| Backend-Concepts/Architecture/SAGA.md | ✅ |
+| Backend-Concepts/Architecture/CQRS.md | ✅ |
+| Backend-Concepts/Architecture/Circuit-Breaker.md | ✅ |
 
 ### API
 
@@ -91,53 +91,53 @@
 | Backend-Concepts/API/REST-API.md | ✅ |
 | Backend-Concepts/API/GraphQL.md | ✅ |
 | Backend-Concepts/API/gRPC.md | ✅ |
-| Backend-Concepts/API/API-Versioning.md | ⬜ |
-| Backend-Concepts/API/API-Security.md | ⬜ |
+| Backend-Concepts/API/API-Versioning.md | ✅ |
+| Backend-Concepts/API/API-Security.md | ✅ |
 
 ### Caching
 
 | File | Status |
 |------|--------|
-| Backend-Concepts/Caching/Caching-Strategies.md | ⬜ |
-| Backend-Concepts/Caching/Redis.md | ⬜ |
-| Backend-Concepts/Caching/Content-Delivery-Networks.md | ⬜ |
+| Backend-Concepts/Caching/Caching-Strategies.md | ✅ |
+| Backend-Concepts/Caching/Redis.md | ✅ |
+| Backend-Concepts/Caching/Content-Delivery-Networks.md | ✅ |
 
 ### Communication
 
 | File | Status |
 |------|--------|
-| Backend-Concepts/Communication/Message-Queues.md | ⬜ |
-| Backend-Concepts/Communication/Kafka.md | ⬜ |
-| Backend-Concepts/Communication/RabbitMQ.md | ⬜ |
-| Backend-Concepts/Communication/WebSockets.md | ⬜ |
+| Backend-Concepts/Communication/Message-Queues.md | ✅ |
+| Backend-Concepts/Communication/Kafka.md | ✅ |
+| Backend-Concepts/Communication/RabbitMQ.md | ✅ |
+| Backend-Concepts/Communication/WebSockets.md | ✅ |
 
 ### Security
 
 | File | Status |
 |------|--------|
-| Backend-Concepts/Security/JWT.md | ⬜ |
-| Backend-Concepts/Security/OAuth2.md | ⬜ |
+| Backend-Concepts/Security/JWT.md | ✅ |
+| Backend-Concepts/Security/OAuth2.md | ✅ |
 
 ### Observability
 
 | File | Status |
 |------|--------|
-| Backend-Concepts/Observability/Logging.md | ⬜ |
-| Backend-Concepts/Observability/Metrics-Monitoring.md | ⬜ |
-| Backend-Concepts/Observability/Distributed-Tracing.md | ⬜ |
+| Backend-Concepts/Observability/Logging.md | ✅ |
+| Backend-Concepts/Observability/Metrics-Monitoring.md | ✅ |
+| Backend-Concepts/Observability/Distributed-Tracing.md | ✅ |
 
 ### Performance
 
 | File | Status |
 |------|--------|
-| Backend-Concepts/Performance/Latency-vs-Throughput.md | ⬜ |
-| Backend-Concepts/Performance/Bottlenecks.md | ⬜ |
+| Backend-Concepts/Performance/Latency-vs-Throughput.md | ✅ |
+| Backend-Concepts/Performance/Bottlenecks.md | ✅ |
 
 ### Integration
 
 | File | Status |
 |------|--------|
-| Backend-Concepts/Integration/REST-vs-Messaging.md | ⬜ |
+| Backend-Concepts/Integration/REST-vs-Messaging.md | ✅ |
 
 ---
 

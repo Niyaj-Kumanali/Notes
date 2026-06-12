@@ -36,13 +36,13 @@ sample.stop(Timer.builder("http.server.requests")
 
 ## Common Mistakes
 
-- **Optimizing for Average Latency Only** — Ignoring tail latency (P99, P999) leads to unpredictable user experience.
-- **Confusing High Throughput with Low Latency** — Batch processing has high throughput but high latency.
-- **Infinite Queueing** — Unbounded queues grow latency non-linearly under load.
-- **Thread Pool Over-Subscription** — Too many threads increase context switching, reducing throughput and increasing latency.
-- **Ignoring the Coordination Penalty** — Adding servers doesn't linearly increase throughput (coordination overhead).
-- **Measuring Throughput Without Concurrency** — Testing throughput with a single client misses queueing effects. Always test under realistic concurrency levels that match production traffic patterns.
-- **Using Averages Instead of Percentiles** — Average latency hides problems: 99 requests at 10ms and 1 at 10s averages to 109ms. P99 correctly shows the 10-second experience. Always use percentiles for latency measurement.
+- **Optimizing for Average Latency Only** — Ignoring tail latency (P99, P999) leads to unpredictable user experience. This *looks correct* because the average looks great on the dashboard — the 1-in-1000 request that takes 10 seconds is invisible in the mean.
+- **Confusing High Throughput with Low Latency** — Batch processing has high throughput but high latency. This *looks correct* because the system processes millions of events per second — the developer equates "fast in aggregate" with "fast for each item."
+- **Infinite Queueing** — Unbounded queues grow latency non-linearly under load. This *looks correct* because the queue works fine under low load — the latency explosion only appears when the arrival rate exceeds the processing rate for sustained periods.
+- **Thread Pool Over-Subscription** — Too many threads increase context switching, reducing throughput and increasing latency. This *looks correct* because more threads means more concurrency — the context switching overhead is invisible at the thread level, only appearing as a system-wide throughput regression.
+- **Ignoring the Coordination Penalty** — Adding servers doesn't linearly increase throughput (coordination overhead). This *looks correct* because each server independently processes requests — the cost of distributed coordination (locking, cache coherency, consensus) only emerges at scale.
+- **Measuring Throughput Without Concurrency** — Testing throughput with a single client misses queueing effects. Always test under realistic concurrency levels that match production traffic patterns. This *looks correct* because the single-threaded test shows high throughput — the developer doesn't realize the same throughput collapses under real concurrency due to lock contention and queueing.
+- **Using Averages Instead of Percentiles** — Average latency hides problems: 99 requests at 10ms and 1 at 10s averages to 109ms. P99 correctly shows the 10-second experience. Always use percentiles for latency measurement. This *looks correct* because the average is a single number that "summarizes" performance — the lying flat is intentional and the developer trusts the single number over the distribution.
 
 ---
 
@@ -96,7 +96,8 @@ public ProducerFactory<String, Event> producerFactory() {
 ## Scenario-Based Questions
 
 1. **Q: Your checkout process makes 3 sequential downstream API calls (inventory, payment, shipping), each taking 200ms. Total latency is 600ms. The business needs <300ms. How do you reduce latency without reducing throughput?**
-   - A: Parallelize independent calls. Inventory and shipping are independent — call them simultaneously. Payment depends on inventory (need stock to charge). New flow: (Inventory + Shipping in parallel, 200ms) → (Payment, 200ms) = 400ms. Still >300ms. Next: add caching for inventory (reduces to 20ms). New flow: (Inventory cache 20ms + Shipping 200ms in parallel) → Payment 200ms = 420ms. Then parallelize all three with cached inventory: max(20, 200, 200) = 200ms. Success.
+    - A: Parallelize independent calls. Inventory and shipping are independent — call them simultaneously. Payment depends on inventory (need stock to charge). New flow: (Inventory + Shipping in parallel, 200ms) → (Payment, 200ms) = 400ms. Still >300ms. Next: add caching for inventory (reduces to 20ms). New flow: (Inventory cache 20ms + Shipping 200ms in parallel) → Payment 200ms = 420ms. Then parallelize all three with cached inventory: max(20, 200, 200) = 200ms. Success.
+    > **Interview follow-up:** Parallelizing inventory and shipping assumes they are truly independent — but what if shipping needs the inventory reservation ID to create the shipment? How does this dependency change the parallelism strategy?
 
 2. **Q: Your batch processing system needs to process 1M records in <1 hour. Each record takes 100ms to process. A single server processes 10 records/second = 36K records/hour = 28 hours. How do you meet the 1-hour target?**
    - A: Use Little's Law: Throughput = Concurrency / Latency. Target throughput = 1M / 3600s = 278 records/sec. With 100ms latency per record, concurrency needed = 278 × 0.1 = 28 threads. Run 10 servers with 3 threads each. Or use a queue with 30 consumers. The key insight: throughput = concurrency / latency. For batch processing, latency per record is fixed — increase concurrency to increase throughput.
@@ -105,7 +106,8 @@ public ProducerFactory<String, Event> producerFactory() {
    - A: The 30-second P999 indicates a few requests are getting stuck — likely from queueing or blocking. Common causes: (1) GC pauses (stop-the-world GC suspends all threads). Fix: switch to G1GC/ZGC. (2) Thread pool queue buildup — a few requests wait minutes. Fix: add load shedding. (3) A downstream service occasionally hangs without timeout. Fix: add timeouts and circuit breakers. (4) Lock contention. Fix: reduce critical sections, use lock-free structures.
 
 4. **Q: Your API has a caching layer. Cache hit latency is 5ms, cache miss latency is 200ms. At 90% hit ratio, average latency is 5ms × 0.9 + 200ms × 0.1 = 24.5ms. The business requires <20ms average. What options do you have?**
-   - A: (1) Increase cache hit ratio: more cache capacity, longer TTL, better eviction policy. Target 95%: 5 × 0.95 + 200 × 0.05 = 14.75ms. (2) Reduce cache miss latency: faster database queries (indexes, read replicas), or use a faster read-through cache. (3) Add a second cache tier (L1 Caffeine for absolute fastest access). (4) Pre-warm cache during deployments.
+    - A: (1) Increase cache hit ratio: more cache capacity, longer TTL, better eviction policy. Target 95%: 5 × 0.95 + 200 × 0.05 = 14.75ms. (2) Reduce cache miss latency: faster database queries (indexes, read replicas), or use a faster read-through cache. (3) Add a second cache tier (L1 Caffeine for absolute fastest access). (4) Pre-warm cache during deployments.
+    > **Interview follow-up:** You increase TTL to boost cache hit ratio, but now stale data serves for longer — your users see outdated inventory counts. How do you balance cache freshness with the latency SLO? When is staleness acceptable and when must you always go to the source of truth?
 
 5. **Q: Your system handles 1000 req/s with 50 active threads. Response time is 50ms. Traffic doubles to 2000 req/s. Response time becomes 500ms (10x increase). Why so much worse than expected?**
    - A: Queueing. Little's Law: L = λ × W. Before: 50 = 1000 × 0.05 (matches). After doubling traffic: if threads remain at 50, W = L/λ = 50/2000 = 25ms — but that's service time only. Reality: threads saturate at 2000 × 0.05 / 50 = 100% utilization. Queueing theory says response time = service time / (1 - utilization) = 50ms / (1 - 1.0) = infinity. At 90% utilization: 50ms / 0.1 = 500ms. Fix: increase threads, add servers, or reduce service time.
@@ -163,7 +165,7 @@ public ProducerFactory<String, Event> producerFactory() {
 
 ## Developer Recommendations
 
-- **Always measure tail latency (P99/P999), not just averages** — Average latency hides severe issues. A 100ms average could mean 99% of requests complete in 10ms and 1% takes 9 seconds. Users experience the 9-second worst case, not the average. Use histograms with percentile reporting (P50, P95, P99, P999) for all latency measurements. Monitor trends — a rising P99 often precedes an outage.
+- **Always measure tail latency (P99/P999), not just averages** — Average latency hides severe issues. A 100ms average could mean 99% of requests complete in 10ms and 1% takes 9 seconds. Users experience the 9-second worst case, not the average. Use histograms with percentile reporting (P50, P95, P99, P999) for all latency measurements. Monitor trends — a rising P99 often precedes an outage. One team's dashboard showed a healthy 120ms average latency while their P99 silently climbed from 200ms to 8 seconds over two weeks — they only noticed after a customer churn spike.
 
 - **Use Little's Law for capacity planning** — `Concurrency = Throughput × Latency`. If you need 10,000 req/s throughput and latency is 200ms, you need `10,000 × 0.2 = 2,000` concurrent requests in flight. This translates to thread pool sizing, database connection pool sizing, and server count planning. The law holds regardless of technology — it's fundamental to queuing theory.
 

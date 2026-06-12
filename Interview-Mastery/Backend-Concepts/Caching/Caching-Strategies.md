@@ -38,13 +38,13 @@ public Product getProduct(String productId) {
 
 ## Common Mistakes
 
-- **Using Cache as Source of Truth** — DB must be authoritative; cache is an optimization.
-- **Cache Stampede (Thundering Herd)** — Multiple concurrent requests hit DB on expiry. Fix with distributed locks or stale-while-revalidate.
-- **Infinite TTL** — Stale data lives forever. Always set TTL unless data is immutable.
-- **Caching Everything** — Cache only frequently-read, infrequently-written data.
+- **Using Cache as Source of Truth** — DB must be authoritative; cache is an optimization. This *looks correct* because: the cache returns correct data during normal operation, so it feels like the cache can serve as the primary source — the divergence between cache and DB only surfaces when a cache node fails or an entry is evicted, causing silent data loss.
+- **Cache Stampede (Thundering Herd)** — Multiple concurrent requests hit DB on expiry. Fix with distributed locks or stale-while-revalidate. This *looks correct* because: setting a fixed TTL and letting each request fetch independently seems like the simplest approach — the stampede only becomes visible when a popular cache key's simultaneous expiry causes a 10x database CPU spike.
+- **Infinite TTL** — Stale data lives forever. Always set TTL unless data is immutable. This *looks correct* because: the data rarely changes, so no expiry avoids the overhead of repopulating the cache — stale data accumulates silently until a user reports seeing outdated information that was changed days ago.
+- **Caching Everything** — Cache only frequently-read, infrequently-written data. This *looks correct* because: caching can only improve performance, so more caching seems strictly better — the memory and invalidation complexity of caching rarely-accessed data only becomes apparent in the Redis EC2 bill for data that is never read again.
 - **No Cache Key Namespacing** — Without prefixes like `product:v2:` or `user:{tenantId}:`, cache keys collide across environments or tenants. Use consistent key naming with version and tenant prefixes.
-- **Ignoring Serialization Overhead** — Storing complex objects in cache requires serialization/deserialization. Java serialization is slow; use JSON, Protocol Buffers, or Kryo for faster serialization. Measure the serialization cost as part of cache miss latency.
-- **Cache Warming on Every Deployment** — After a deployment, all L1 caches are cold, causing a thundering herd on Redis. Warm caches before accepting traffic using startup probes and pre-load scripts.
+- **Ignoring Serialization Overhead** — Storing complex objects in cache requires serialization/deserialization. Java serialization is slow; use JSON, Protocol Buffers, or Kryo for faster serialization. Measure the serialization cost as part of cache miss latency. This *looks correct* because: the cache stores and retrieves objects correctly regardless of serialization method, so the mechanism seems like an implementation detail — the CPU cost of Java serialization only becomes visible when profiling shows 40% of cache miss time is spent in ObjectInputStream.
+- **Cache Warming on Every Deployment** — After a deployment, all L1 caches are cold, causing a thundering herd on Redis. Warm caches before accepting traffic using startup probes and pre-load scripts. This *looks correct* because: application restarts are normal operations and caches should warm up naturally through regular traffic — the thundering herd of cold starts only becomes a problem when Kubernetes rolling restarts all pods simultaneously during a deployment.
 
 ---
 
@@ -123,6 +123,8 @@ public class ProductCacheService {
 1. **Q: You're building a product catalog with 10M SKUs. The database is struggling with read traffic during peak hours. How do you design a caching strategy that handles both hot products and long-tail items?**
    - A: Multi-tier caching. L1 (in-app Caffeine, 10K entries, 5 min TTL) for hot products — identified via access frequency tracking. L2 (Redis Cluster, 1 hour TTL) for all products. Cache-aside pattern. Use a Bloom filter for SKU existence checks to prevent cache penetration (queries for non-existent SKUs hitting the DB). Cache warm-up on deployment: pre-load top 10K SKUs from DB to Redis using pipelining. Monitor hit ratio per tier — target >95% combined.
 
+> **Interview follow-up:** Your Bloom filter for product SKU existence has a 1% false positive rate — 1% of phantom queries still reach the database. How do you handle the 1% false positive case without caching every SKU?
+
 2. **Q: Your cache for user sessions expires, and 50K users simultaneously hit the login service. The database can't handle 50K concurrent reads. How do you prevent this cache stampede?**
    - A: Distributed lock on cache miss. When a cache miss occurs, the first request acquires a Redis lock (`SET session:lock:{userId} NX EX 5`). Only this request loads from DB and repopulates the cache. Other requests either wait briefly (spin with 10ms sleep) or get the stale session data (stale-while-revalidate). Add TTL jitter (±20% of the configured TTL) so sessions don't expire simultaneously.
 
@@ -131,6 +133,8 @@ public class ProductCacheService {
 
 4. **Q: Your application uses cache-aside, but a deployment restarts all instances, clearing the L1 cache. The L2 Redis cache is fine, but traffic to Redis spikes 10x. How do you handle this?**
    - A: Cache warm-up on startup. Use a `CommandLineRunner` that loads the top 1,000 entries from Redis to the local Caffeine cache. Use Redis pipelining for efficient bulk loading. For stateless deployments, use a pre-warm script that loads cache before the instance accepts traffic. During warm-up, serve requests at slightly higher latency (Redis-only, no L1) until the L1 cache stabilizes.
+
+> **Interview follow-up:** Cache warm-up on startup loads the top 1,000 entries from Redis to L1, but the hot set changes over time — how do you detect when the warm-up set no longer matches current traffic patterns and refresh it?
 
 5. **Q: You're caching API responses in Redis with a 5-minute TTL. The data changes every 30 seconds. Users see stale data. How do you balance consistency with caching?**
    - A: Reduce TTL to 15-30 seconds. Use write-through invalidation: on data update, publish a cache invalidation event via Redis pub/sub or Kafka. All instances subscribe and invalidate the relevant key. For critical data, skip caching entirely or use a very short TTL (5s). For user-facing dashboards, consider WebSocket push for real-time updates alongside a stale cache for initial load.
@@ -142,7 +146,9 @@ public class ProductCacheService {
    - A: Bloom filter. Maintain a Bloom filter containing all valid product IDs. Before checking Redis, check the Bloom filter. If the ID doesn't exist in the filter, return 404 immediately without hitting Redis or the DB. For IDs that pass the Bloom filter but don't exist in the DB (false positives), cache the "not found" result with a short TTL (60 seconds) to prevent repeated DB hits.
 
 8. **Q: Your multi-region application has a cache in us-east-1 and eu-west-1. A product price change in us-east-1 creates stale cache in eu-west-1 for up to 1 hour. How do you handle cross-region cache invalidation?**
-   - A: Use a global invalidation bus. Publish cache invalidation events to a cross-region Kafka topic. Each region subscribes and invalidates the affected keys. For latency-critical invalidation, use Redis' pub/sub across regions (less reliable but faster). Accept a small invalidation delay (1-5 seconds) for cross-region propagation. For very strong consistency, use a global Redis cluster with active-active replication (Redis Enterprise or similar).
+   - A: Use a global invalidation bus. Publish cache invalidation events to a cross-region Kafka topic. Each region subscribes and invalidates the affected keys. For latency-critical invalidation, use Redis' pub/sub across regions (less reliable but faster). Accept a small invalidation delay (1-5 seconds) for cross-region propagation.
+
+> **Interview follow-up:** Your cross-region invalidation bus uses Kafka with 2-second replication latency between regions — during a flash sale, a price update in us-east-1 takes 2+ seconds to reach eu-west-1, and users in Europe buy at the old price. How do you handle the accounting reconciliation for these cross-region pricing inconsistencies? For very strong consistency, use a global Redis cluster with active-active replication (Redis Enterprise or similar).
 
 9. **Q: Your product catalog cache returns data including price. A flash sale changes thousands of prices simultaneously. How do you invalidate all affected cache entries without a stampede?**
    - A: Tag-based invalidation. Store cache entries with a tag (e.g., `category:electronics`, `sale:flash`). On price update, publish invalidation events with the tag. All entries with that tag are invalidated. To avoid stampede during re-caching, use a gradual re-cache strategy: invalidate 10% of entries per second rather than all at once. Combined with stale-while-revalidate, clients see stale prices for at most a few seconds.
@@ -188,7 +194,7 @@ public class ProductCacheService {
 
 ## Developer Recommendations
 
-- **Use multi-tier caching (L1 + L2) for high-traffic systems** — A single Redis cache adds network latency (1-5ms) per request. Adding a local Caffeine cache (nanosecond access) reduces Redis load by 80% for hot keys. Configure L1 with shorter TTL than L2 and invalidate L1 entries via Redis pub/sub. Monitor both tiers' hit ratios separately — L1 target >50%, L2 target >95%.
+- **Use multi-tier caching (L1 + L2) for high-traffic systems** — A single Redis cache adds network latency (1-5ms) per request. Adding a local Caffeine cache (nanosecond access) reduces Redis load by 80% for hot keys. Configure L1 with shorter TTL than L2 and invalidate L1 entries via Redis pub/sub. Monitor both tiers' hit ratios separately — L1 target >50%, L2 target >95%. A gaming platform used a single Redis cache without L1 and saw 5ms average latency — after adding Caffeine L1, hot key latency dropped to 0.1ms and Redis CPU dropped from 70% to 20%.
 
 - **Always set TTL on cached entries** — Without TTL, cached data lives forever, causing stale data and memory leaks. The only exception is truly immutable data (country codes, historical reference data). For mutable data, TTL should be based on how stale data is acceptable — user profiles (5 min), product prices (30s), session data (TTL = session expiry).
 
@@ -196,7 +202,7 @@ public class ProductCacheService {
 
 - **Handle cache stampede with distributed locks or stale-while-revalidate** — A stampede can take down your database when a popular cache key expires. Stale-while-revalidate is the simplest: serve the stale entry while asynchronously refreshing. For stronger consistency, use a distributed lock — only one request regenerates the cache; others wait or get stale data.
 
-- **Monitor cache hit ratio as a critical SLO** — Cache hit ratio tells you if your caching strategy is working. Alert if the ratio drops below 90% (or your target). A sudden drop indicates a configuration issue, a deployment cleared the cache, or a code change altered the cache key pattern. Track per-cache-region ratios to identify specific problem areas.
+- **Monitor cache hit ratio as a critical SLO** — Cache hit ratio tells you if your caching strategy is working. Alert if the ratio drops below 90% (or your target). A sudden drop indicates a configuration issue, a deployment cleared the cache, or a code change altered the cache key pattern. Track per-cache-region ratios to identify specific problem areas. A news site's cache hit ratio dropped from 97% to 60% overnight — it took 3 days to discover that a new deployment had changed the cache key prefix from `article:v1:` to `article:v2:` without migrating the old cached entries, effectively creating a cold cache for all article traffic.
 
 - **Use consistent cache key naming with version prefixes** — A cache key like `product:v2:{sku}` allows safe invalidation of all v2 keys when the data format changes. Include relevant dimensions in the key: tenant ID for multi-tenant systems, locale for internationalized content. Avoid excessively long keys (waste memory) — use hashed keys for long composite keys.
 - **Cache negative results to prevent cache penetration** — When a query returns no data (e.g., non-existent product ID), cache the "not found" result with a short TTL (30-60 seconds). This prevents repeated database lookups for the same invalid key. Without negative caching, an attack cycling through random IDs would bypass your cache entirely and overload the database.

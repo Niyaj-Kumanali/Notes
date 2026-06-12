@@ -129,14 +129,14 @@ public class RetryMessageConsumer {
 
 ## Common Mistakes
 
-- **Not handling poison messages** — messages that consistently fail block the queue
-- **Forgetting idempotency** — duplicate messages are inevitable; consumers must be idempotent
-- **Tight coupling** — using RPC-style request-reply instead of async messaging
-- **Ignoring message size limits** — large messages consume memory and network
-- **No monitoring** — not tracking queue depth, consumer lag, or processing times
-- **Blocking consumer threads** — never block in message listeners
-- **Swallowing exceptions** — always ACK or NACK; don't silently eat errors
-- **No dead letter queue** — failed messages accumulate forever
+- **Not handling poison messages** — messages that consistently fail block the queue. This *looks correct* because the message is still in the queue — "we'll get to it eventually" — but each retry wastes processing time and delays every message behind it.
+- **Forgetting idempotency** — duplicate messages are inevitable; consumers must be idempotent. This *looks correct* because during development, messages are never duplicated — the broker delivers them once. Duplicate-only-at-scale patterns are invisible in test environments.
+- **Tight coupling** — using RPC-style request-reply instead of async messaging. This *looks correct* because the code is straightforward and the reply arrives immediately — the coupling cost only appears when the downstream service slows and all upstream threads block.
+- **Ignoring message size limits** — large messages consume memory and network. This *looks correct* because the first few large messages work fine — consumption of heap and bandwidth accumulates silently as message volume grows.
+- **No monitoring** — not tracking queue depth, consumer lag, or processing times. This *looks correct* because everything works in development — the first sign of trouble is a production incident where the queue backs up and nobody notices.
+- **Blocking consumer threads** — never block in message listeners. This *looks correct* because blocking for one request is harmless — it only becomes a problem when 50 threads are blocked simultaneously, halting all consumption.
+- **Swallowing exceptions** — always ACK or NACK; don't silently eat errors. This *looks correct* because the try-catch prevents crashes and the application continues running — the developer never sees the unprocessed message hiding in the logs.
+- **No dead letter queue** — failed messages accumulate forever. This *looks correct* because the broker requeues them and processing continues — the repeated failures just look like transient hiccups until the queue fills up entirely.
 
 ---
 
@@ -223,7 +223,8 @@ public class OrderProcessingConsumer {
 ## Scenario-Based Questions
 
 1. **Q: You're building an order processing system that must handle 100x traffic spikes during flash sales. Orders must not be lost. How do you design the messaging infrastructure?**
-   - A: Use a message queue with persistent messages and at-least-once delivery. The queue buffers traffic spikes — producers publish freely, consumers process at their own pace. Set queue depth alerts at 80% capacity. Pre-scale consumers during known sale events. Use dead letter queues for failed messages. For the database, batch writes from the consumer to handle the burst. The queue acts as a shock absorber.
+    - A: Use a message queue with persistent messages and at-least-once delivery. The queue buffers traffic spikes — producers publish freely, consumers process at their own pace. Set queue depth alerts at 80% capacity. Pre-scale consumers during known sale events. Use dead letter queues for failed messages. For the database, batch writes from the consumer to handle the burst. The queue acts as a shock absorber.
+    > **Interview follow-up:** If the database batch write fails halfway through, some rows are committed and others aren't — how do you ensure the consumer can safely retry without double-writing?
 
 2. **Q: During a deployment, a bug causes your consumer to crash-loop on every message. Messages are constantly requeued and reprocessed, blocking the queue. The downstream system is never updated. How do you fix this?**
    - A: Implement a poison message handler. After N failed attempts (e.g., 3), move the message to a DLQ instead of requeuing. Use a retry count header or broker-specific dead letter feature. The consumer continues processing other messages. Analyze DLQ messages to identify the bug, deploy the fix, and replay affected messages. Without DLQ, one bad message can block all processing.
@@ -235,7 +236,8 @@ public class OrderProcessingConsumer {
    - A: Use competing consumers with appropriate prefetch settings. Set prefetch to 1 (or a low number) so each consumer picks one message, processes it, ACKs it, then picks another. This ensures faster consumers process more messages than slower ones. Avoid setting prefetch too high (100+), which lets fast consumers grab all messages and starve slower ones.
 
 5. **Q: You need to process high-priority orders (premium customers) before standard orders. Your queue is FIFO. How do you implement priority processing?**
-   - A: Multiple approaches: (1) Use message priority headers (JMS priority 0-9) — higher priority messages are delivered first. (2) Use separate queues per priority tier (`order.high`, `order.normal`, `order.low`) with dedicated consumers. (3) Use a weighted round-robin consumer that polls high-priority queue 3x more often than normal. For strict priority, separate queues with dedicated consumers is the most reliable.
+    - A: Multiple approaches: (1) Use message priority headers (JMS priority 0-9) — higher priority messages are delivered first. (2) Use separate queues per priority tier (`order.high`, `order.normal`, `order.low`) with dedicated consumers. (3) Use a weighted round-robin consumer that polls high-priority queue 3x more often than normal. For strict priority, separate queues with dedicated consumers is the most reliable.
+    > **Interview follow-up:** If you use separate queues, a flood of high-priority messages can starve normal-priority messages indefinitely — how do you enforce a minimum service level for lower tiers?
 
 6. **Q: Your message broker goes down for 10 minutes. When it comes back, messages published during the outage are lost. Producers didn't get errors because they used fire-and-forget. How do you prevent this?**
    - A: Use publisher confirms (ack from broker) instead of fire-and-forget. Configure synchronous sends or async confirms with a callback. On failure, retry with exponential backoff. For critical messages, use the transactional outbox pattern — write the message to a database first, then have a relay publish it. The database survives the broker outage.
@@ -244,7 +246,8 @@ public class OrderProcessingConsumer {
    - A: Dual-publish strategy: (1) Configure the application to publish to both ActiveMQ and RabbitMQ simultaneously. (2) Gradually migrate consumers from ActiveMQ to RabbitMQ. (3) Monitor both queues to ensure no message loss. (4) Once all consumers are migrated, stop publishing to ActiveMQ. (5) Use a bridge for any messages still in the old queue. This allows rollback at any step.
 
 8. **Q: Your consumer processes messages from a queue, but when it calls an external API that's slow, all consumer threads block, and no messages are processed. How do you implement backpressure?**
-   - A: Use prefetch limits — set prefetch to 1-3 so the consumer holds only a few unacknowledged messages. If downstream is slow, the consumer doesn't prefetch more. Monitor queue depth growth as a signal of downstream issues. Implement a circuit breaker on the external API call — if the API is slow, fail fast and NACK the message (sending to DLQ or retry queue). Use separate thread pools for external calls to avoid blocking consumer threads.
+    - A: Use prefetch limits — set prefetch to 1-3 so the consumer holds only a few unacknowledged messages. If downstream is slow, the consumer doesn't prefetch more. Monitor queue depth growth as a signal of downstream issues. Implement a circuit breaker on the external API call — if the API is slow, fail fast and NACK the message (sending to DLQ or retry queue). Use separate thread pools for external calls to avoid blocking consumer threads.
+    > **Interview follow-up:** With prefetch=1, a single slow consumer behind the rest of the group — how does this affect overall throughput, and would you adjust prefetch dynamically?
 
 9. **Q: Your queue has messages with different processing times: some take 10ms, some take 10 seconds. The slow messages block the fast ones because the queue is FIFO. How do you design around this?**
    - A: Use separate queues for fast and slow operations. Process fast operations in one queue with high concurrency and slow operations in another with fewer, longer-running consumers. Alternatively, use message grouping with a TTL — if a slow message exists, other messages in the same group wait, but messages in different groups proceed independently. For truly independent messages, the slow ones shouldn't block fast ones.
@@ -290,7 +293,7 @@ public class OrderProcessingConsumer {
 
 ## Developer Recommendations
 
-- **Always configure a dead letter queue** — Without a DLQ, a single poison message can block your entire queue. The message is requeued repeatedly, consuming resources and preventing other messages from being processed. Configure DLQ with TTL and max delivery count. Monitor DLQ depth and alert on growth — a growing DLQ indicates bugs or configuration issues that need attention.
+- **Always configure a dead letter queue** — Without a DLQ, a single poison message can block your entire queue. The message is requeued repeatedly, consuming resources and preventing other messages from being processed. Configure DLQ with TTL and max delivery count. Monitor DLQ depth and alert on growth — a growing DLQ indicates bugs or configuration issues that need attention. In one production incident, a malformed JSON payload caused every consumer to throw a parse exception — without a DLQ, the queue grew to 2M messages before the team noticed, and clearing the backlog took 14 hours of replay.
 
 - **Make consumers idempotent even with at-most-once delivery** — "At-most-once" sounds like you don't need idempotency, but network retries, consumer crashes, and broker failovers can still cause duplicates. The safest approach is to always make your consumer processing idempotent. Use upsert operations, check-then-act patterns within database transactions, and store deduplication keys.
 
@@ -298,6 +301,6 @@ public class OrderProcessingConsumer {
 
 - **Never use sync sends in hot paths** — Synchronous message publishing blocks the producer thread until the broker acknowledges. For high-throughput applications, this kills performance. Use async sends with callbacks (correlation IDs) or batch sends. The only exception is critical messages where you need immediate confirmation that the broker accepted the message.
 
-- **Implement backpressure to prevent consumer overload** — A consumer that reads messages faster than it can process creates an ever-growing backlog in the consumer's memory. Use prefetch limits, monitor queue depth, and implement dynamic concurrency adjustment. If the downstream system is saturated, the consumer should stop pulling messages, not buffer them indefinitely.
+- **Implement backpressure to prevent consumer overload** — A consumer that reads messages faster than it can process creates an ever-growing backlog in the consumer's memory. Use prefetch limits, monitor queue depth, and implement dynamic concurrency adjustment. If the downstream system is saturated, the consumer should stop pulling messages, not buffer them indefinitely. A team once configured prefetch=500 on a notification consumer — when a campaign sent 50K messages in a minute, the consumer loaded them all into heap and crashed with OOM, losing every message.
 
 - **Monitor queue depth, consumer lag, and processing time** — Queue depth tells you if producers are outpacing consumers. Consumer lag (time since the last message was published to the oldest unprocessed message) is your operational health metric. Processing time (P50/P95/P99) per message helps identify slow operations. Set up dashboards and alerts for all three.

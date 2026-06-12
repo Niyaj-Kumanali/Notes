@@ -153,17 +153,23 @@ public List<Product> dbFallback(String category, Throwable t) {
 4. **Q: A third-party API charges per call. How do you balance circuit breaker protection with cost when they have occasional blips?**
    A: Use a higher `minimumNumberOfCalls` (e.g., 50) and a longer sliding window before opening. This prevents brief blips from triggering protection and eating into your API budget. Set `failureRateThreshold` to 60-70% to tolerate minor issues. Consider a separate cost-aware fallback that degrades to cached responses for non-critical calls.
 
+> **Interview follow-up:** Your higher `minimumNumberOfCalls` of 50 means the circuit breaker won't open until 50 calls have been made — during a brief outage that affects only 10 requests, the circuit stays closed and all 10 fail. How do you balance protecting against costly API calls with providing fast failure detection?
+
 5. **Q: You have multiple downstream services. How do you prevent one service's circuit breaker from starving another?**
    A: Use the Bulkhead pattern alongside circuit breakers. Each downstream service gets its own thread pool with a fixed max (e.g., 10 threads for payment, 20 for recommendations, 50 for product catalog). This ensures one service's circuit breaker doesn't consume all available threads in the shared pool. Monitor each bulkhead's queue depth to adjust sizing.
 
 6. **Q: How do you handle authentication failures in a circuit breaker — should 401 responses open the circuit?**
    A: No. Authentication failures (4xx) indicate client issues, not downstream health. Configure the circuit breaker to record only 5xx errors, network timeouts, and connection refused exceptions. Use `recordExceptions` to specify exactly which exceptions count as failures: `ConnectException`, `TimeoutException`, `HttpServerErrorException`. Ignore `HttpClientErrorException`.
 
+> **Interview follow-up:** A downstream service changes its API contract and starts returning 400 Bad Request for all requests — the circuit breaker ignores 4xx and stays CLOSED, so every call still goes through and fails. How do you detect contract drift that manifests as a non-recorded exception type?
+
 7. **Q: Your service calls a gRPC endpoint that streams results. How does circuit breaking work with streaming?**
    A: Circuit breakers wrap the initial gRPC call establishment, not individual stream messages. If the stream setup fails or the initial connection times out, the circuit counts a failure. Once the stream is established, message-level failures are handled by the stream's own error handling. Use separate per-method circuit breakers for different RPCs on the same channel.
 
 8. **Q: You deploy a new version of a downstream service that has a bug causing intermittent null pointer exceptions. How do your circuit breakers respond?**
    A: If the NPEs propagate as 500 responses, they'll be recorded as failures. The circuit opens when the failure threshold is exceeded. To speed up detection, reduce `minimumNumberOfCalls` from 10 to 5 and `failureRateThreshold` from 50 to 40 for newly deployed services. Once the bug is fixed and the circuit closes, restore normal thresholds.
+
+> **Interview follow-up:** You tightened thresholds for the new deployment, but the old healthy version is still running alongside it in a canary — the circuit breaker is shared across all instances of the downstream service, so the healthy instances are now penalized for the buggy ones. How do you isolate circuit breaker state per instance or per deployment version?
 
 9. **Q: How do you test that your circuit breakers actually work in production without causing real outages?**
    A: Use chaos engineering: inject faults into specific service instances (e.g., using Chaos Monkey or Toxiproxy). Introduce 2-second delays on 50% of requests to a single instance. Verify that circuit breakers open, fallbacks execute, and the system degrades gracefully. Run these tests in staging first, then in production during low traffic with proper monitoring.
@@ -215,9 +221,9 @@ public List<Product> dbFallback(String category, Throwable t) {
 
 - **Use recordExceptions/ignoreExceptions explicitly** — The default records all exceptions as failures, including 4xx client errors. Explicitly configure `recordExceptions` to include only `ConnectException`, `TimeoutException`, `HttpServerErrorException` and `ignoreExceptions` for `HttpClientErrorException`. This ensures the circuit opens only for genuine downstream health issues, not bad client requests. A fintech startup used the default exception recording and their circuit breaker opened every time a customer entered an invalid card number (400 Bad Request) — the circuit stayed open for 30 seconds, blocking all payment attempts despite the downstream service being perfectly healthy.
 
-- **Use slow-call detection alongside failure-rate detection** — Failures (exceptions) alone miss the case where a service responds but takes 10 seconds. Enable `slowCallDurationThreshold` and `slowCallRateThreshold` to catch degraded performance. Set the slow-call threshold based on your P99 latency — typically 2-3x the normal P99.
+- **Use slow-call detection alongside failure-rate detection** — Failures (exceptions) alone miss the case where a service responds but takes 10 seconds. Enable `slowCallDurationThreshold` and `slowCallRateThreshold` to catch degraded performance. Set the slow-call threshold based on your P99 latency — typically 2-3x the normal P99. A video streaming service set their slow-call threshold to 2x P99 but didn't account for a daily cache refresh that caused a 3-second P99 spike every morning — the circuit breaker opened daily at 9 AM, serving stale recommendations for 15 minutes before the team added a separate maintenance window exclusion.
 
-- **Set minimumNumberOfCalls to avoid premature opening** — With `minimumNumberOfCalls = 10`, the circuit breaker waits for at least 10 calls before calculating the failure rate. Without this, a single failure on a quiet system would open the circuit. For low-traffic services, reduce this to 3-5; for high-traffic, keep it at 20+.
+- **Set minimumNumberOfCalls to avoid premature opening** — With `minimumNumberOfCalls = 10`, the circuit breaker waits for at least 10 calls before calculating the failure rate. Without this, a single failure on a quiet system would open the circuit. For low-traffic services, reduce this to 3-5; for high-traffic, keep it at 20+. A background job that processed 2 orders per minute had `minimumNumberOfCalls = 10` — its circuit breaker never opened because it never collected 10 calls within the sliding window, silently allowing all failures to pass through until an alert on error rate finally caught the issue 6 hours later.
 
 - **Provide meaningful fallbacks for every circuit breaker** — A fallback that throws an exception defeats the purpose. Good fallbacks: return cached data (even if stale), return a default response, queue the request for later processing, or degrade non-critical features. The fallback should let the system continue operating at reduced capacity.
 

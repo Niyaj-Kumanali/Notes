@@ -39,10 +39,10 @@ try (Scope scope = span.makeCurrent()) {
 
 ## Common Mistakes
 
-- **No Sampling** — Capturing every trace creates massive data volume and cost. Use 1-10% sampling in production.
-- **Too Many Spans** — Every method call as a span creates noise. Focus on service boundaries and significant operations.
-- **No Context Propagation** — Tracing breaks when context isn't passed to async threads or message queues.
-- **Missing Error Attributes** — Errors without exception details in spans are impossible to diagnose.
+- **No Sampling** — Capturing every trace creates massive data volume and cost. Use 1-10% sampling in production. This *looks correct* because the tracing system works perfectly in dev with 100% sampling — the cost only becomes apparent in the first production billing cycle.
+- **Too Many Spans** — Every method call as a span creates noise. Focus on service boundaries and significant operations. This *looks correct* because each span seems useful for debugging — the noise and overhead compound as every inner method adds a span to every trace.
+- **No Context Propagation** — Tracing breaks when context isn't passed to async threads or message queues. This *looks correct* because the synchronous path traces perfectly — the broken trace links in async processing are invisible since the spans appear disconnected rather than missing.
+- **Missing Error Attributes** — Errors without exception details in spans are impossible to diagnose. This *looks correct* because the span shows an error status — the developer assumes they can find details in the logs, but without a trace ID in the log entry, correlation is manual.
 
 ---
 
@@ -107,7 +107,8 @@ public class CheckoutService {
 ## Scenario-Based Questions
 
 1. **Q: Users report that checkout takes 10 seconds intermittently. You suspect it's a specific downstream service, but traditional monitoring shows all services are healthy. How do you identify the root cause?**
-   - A: Implement distributed tracing with OpenTelemetry. Auto-instrument all services. Each checkout request creates a trace with spans for each service call. The trace shows the exact duration of each span. Look at the trace waterfall — the service with the longest span is the bottleneck. Drill into that span's attributes (database query, HTTP URL) to find the root cause. Use tail-based sampling to capture all error traces.
+    - A: Implement distributed tracing with OpenTelemetry. Auto-instrument all services. Each checkout request creates a trace with spans for each service call. The trace shows the exact duration of each span. Look at the trace waterfall — the service with the longest span is the bottleneck. Drill into that span's attributes (database query, HTTP URL) to find the root cause. Use tail-based sampling to capture all error traces.
+    > **Interview follow-up:** Tail-based sampling keeps all error traces, but what defines an "error"? A downstream service returning a 400 status might be correct business logic, not a system failure. How do you distinguish between "expected errors" that can be sampled and "real errors" that must be kept?
 
 2. **Q: You have 500 microservices. Tracing every request generates 10TB of data per day. Storage costs are exploding. How do you reduce data volume while keeping useful traces?**
    - A: Implement sampling. Head-based probabilistic sampling (e.g., 1% of all traces) for general monitoring. Tail-based sampling to keep 100% of error traces (regardless of rate) and 10% of slow traces (>P95 latency). Use rate-limiting sampling to cap at 100 traces/second for high-traffic endpoints. Configure different sampling rates per service — critical services (payments) get higher sampling than trivial ones (health checks).
@@ -134,7 +135,8 @@ public static <T> T trace(String name, Map<String, String> attributes, Supplier<
    - A: OpenTelemetry's Kafka instrumentation handles this. Trace context is serialized into the Kafka message headers by the producer. When the consumer deserializes the message, it extracts the context and creates a child span linked to the parent trace. The trace shows a gap (the queue time) between the producer span end and consumer span start. This gap is the time the message spent in Kafka, which is useful for monitoring consumer lag.
 
 6. **Q: Your tracing backend (Jaeger) is down. Do traces still propagate through services?**
-   - A: Yes. Tracing instrumentation is non-blocking and should never affect application performance or reliability. If the exporter can't reach the backend, spans are dropped (or buffered if configured with memory/disk buffer). Trace context propagation via HTTP headers continues regardless — services pass trace IDs downstream even if spans aren't exported. The application works normally; you just temporarily lose visibility.
+    - A: Yes. Tracing instrumentation is non-blocking and should never affect application performance or reliability. If the exporter can't reach the backend, spans are dropped (or buffered if configured with memory/disk buffer). Trace context propagation via HTTP headers continues regardless — services pass trace IDs downstream even if spans aren't exported. The application works normally; you just temporarily lose visibility.
+    > **Interview follow-up:** If the exporter drops spans because the backend is unreachable, the application is healthy but you have no visibility — exactly when you need tracing most. If you buffer spans in memory, what happens to the buffer during a sustained backend outage? Does it cause OOM?
 
 7. **Q: You deploy a new service that doesn't use any tracing library. Requests through this service appear as broken traces — no spans from this service. How do you fix this?**
    - A: Add the OpenTelemetry Java agent to the new service's JVM arguments. Auto-instrumentation covers HTTP, database, messaging, and many other libraries without code changes. If the service is in a different language (Node.js, Python, Go), use the appropriate OpenTelemetry SDK and auto-instrumentation package. The trace context is propagated via standard W3C headers, so it works across languages.
@@ -186,7 +188,7 @@ public static <T> T trace(String name, Map<String, String> attributes, Supplier<
 
 ## Developer Recommendations
 
-- **Use OpenTelemetry auto-instrumentation as the default, manual spans only for business logic** — Auto-instrumentation covers HTTP, gRPC, database calls, messaging, and caching without any code changes. Add manual spans only for business operations that the auto-instrumentation can't capture (e.g., "processOrder" or "applyDiscount"). This gives 90% of tracing value with 10% of the effort.
+- **Use OpenTelemetry auto-instrumentation as the default, manual spans only for business logic** — Auto-instrumentation covers HTTP, gRPC, database calls, messaging, and caching without any code changes. Add manual spans only for business operations that the auto-instrumentation can't capture (e.g., "processOrder" or "applyDiscount"). This gives 90% of tracing value with 10% of the effort. A team spent 3 weeks hand-instrumenting every service before discovering the OpenTelemetry Java agent would have covered 95% of it in one afternoon.
 
 - **Propagate trace context everywhere, including async and messaging** — The most common tracing failure is broken context propagation. OpenTelemetry handles this for standard patterns, but verify: HTTP headers (`traceparent`), Kafka/RabbitMQ message headers, gRPC metadata, and async thread pools (`ExecutorService` wrap). Without propagation, traces break at service boundaries, and you lose end-to-end visibility.
 

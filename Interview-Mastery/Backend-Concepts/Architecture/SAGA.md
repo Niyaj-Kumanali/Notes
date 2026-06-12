@@ -72,11 +72,11 @@ public class IdempotentCommandHandler {
 
 ## Common Mistakes
 
-- **Non-Idempotent Compensations** — running a compensation twice should be safe. Without idempotency, double-compensation causes data corruption.
-- **Compensations That Fail** — compensations can also fail. Implement retry logic with exponential backoff and manual intervention when retries are exhausted.
-- **Long-Running Sagas Without Timeout** — each step needs a timeout. Without timeouts, a saga can hang indefinitely waiting for a non-responsive service.
-- **Mixing Orchestration and Choreography** — choosing one pattern per saga prevents confusion about who owns the saga logic.
-- **Saga State Lost on Crash** — persist saga state to durable storage (database), not in-memory. Crashes should not lose saga progress.
+- **Non-Idempotent Compensations** — running a compensation twice should be safe. Without idempotency, double-compensation causes data corruption. This *looks correct* because: a refund is a refund, and issuing it twice seems unlikely in practice — the duplicate scenario only becomes plausible when a network timeout causes a retry that succeeds on the second attempt.
+- **Compensations That Fail** — compensations can also fail. Implement retry logic with exponential backoff and manual intervention when retries are exhausted. This *looks correct* because: compensations are simpler operations than forward transactions, so they "shouldn't" fail — the failure only becomes visible when a downstream service that was available during the forward step is down during compensation minutes later.
+- **Long-Running Sagas Without Timeout** — each step needs a timeout. Without timeouts, a saga can hang indefinitely waiting for a non-responsive service. This *looks correct* because: most saga steps complete within seconds, and adding timeouts seems like extra configuration for an edge case — the indefinite hang only becomes a problem when a downstream service crashes and the saga blocks inventory reservation for hours.
+- **Mixing Orchestration and Choreography** — choosing one pattern per saga prevents confusion about who owns the saga logic. This *looks correct* because: using events for some steps and a coordinator for others seems like a natural hybrid that gets the "best of both worlds" — the confusion only surfaces when a saga failure requires tracing through both event chains and coordinator state to determine who is responsible for compensation.
+- **Saga State Lost on Crash** — persist saga state to durable storage (database), not in-memory. Crashes should not lose saga progress. This *looks correct* because: in-memory state is fast and simple, and crashes seem rare enough that losing a few sagas seems acceptable — the real cost only becomes clear when a production restart loses 200 in-progress sagas, leaving the system with reserved-and-never-released inventory and partial payments with no automated recovery path.
 
 ---
 
@@ -148,8 +148,12 @@ public class OrderSagaOrchestrator {
 1. **Q: You are building an order system where placing an order involves reserving inventory, processing payment, and creating a shipment. Each step has its own service and database. The payment is charged first, but if shipment creation fails, the customer has already been charged. How do you design this?**
    - A: Use a saga. The order should be: Reserve Inventory → Process Payment → Create Shipment. If shipment fails, trigger compensating actions in reverse: refund payment, release inventory. This ensures eventual consistency. Consider whether the order of operations matters — processing payment before shipment adds risk. Better: reserve inventory first (no financial impact), then create shipment, then process payment last. If payment fails, inventory is already released and shipment is cancelled — no financial harm.
 
+> **Interview follow-up:** You reordered the steps so payment is last, but the customer's credit card is declined after inventory was already released — during those 5 seconds between release and notification, another customer saw the item as in-stock and placed an order. How do you prevent phantom inventory from affecting concurrent shoppers?
+
 2. **Q: Your orchestrated saga has 5 steps. After 3 successful steps, the 4th step fails, and the compensation for step 2 also fails. The system is now inconsistent. How do you recover?**
    - A: Implement a saga recovery process: (a) Retry the failed compensation with exponential backoff (3 attempts). (b) If retries exhausted, mark the saga as `COMPENSATION_FAILED` and alert operations. (c) Build an admin dashboard showing sagas in failed states with manual "retry compensation" and "force complete" buttons. (d) For critical cases, implement automated compensation retry with a background worker that retries every 5 minutes until success.
+
+> **Interview follow-up:** The "force complete" button lets an operator mark a saga as completed without actually executing compensations — what guardrails prevent this from being used as a lazy fix that leaves the system in a permanently inconsistent state?
 
 3. **Q: Your product manager says customers should be able to cancel an order within 30 minutes. The order has already triggered inventory reservation, payment, and shipping steps. How does the saga handle cancellation?**
    - A: The cancellation is itself a saga. Store the original saga's state. When the cancellation request arrives, check if the original saga is still within the cancel window. If so, execute the compensating saga: Release Inventory → Refund Payment → Cancel Shipment. Each compensation action must be idempotent. The cancellation saga has its own saga ID and state tracking, separate from the original order saga.
@@ -174,6 +178,8 @@ public class OrderSagaOrchestrator {
 
 10. **Q: A saga step modifies a resource, then the saga compensates. During the compensation window, another operation reads the modified resource. How do you prevent reads from seeing inconsistent intermediate states?**
     - A: Options: (a) Mark resources with `saga_id` and `saga_status` — reads filter out resources that are part of an in-progress saga. (b) Use a "pending" state for resources being modified — the UI shows a loading indicator instead of the inconsistent state. (c) In the read model, wait for the saga to complete before updating projections. (d) Accept the inconsistency for non-critical reads (eventual consistency).
+
+> **Interview follow-up:** An auditor runs a report during a saga compensation window and sees the intermediate state — a debit posted with no corresponding credit. The auditor flags this as a financial control failure. How do you reconcile eventual consistency with audit requirements that demand point-in-time accuracy?
 
 ---
 
@@ -215,10 +221,10 @@ public class OrderSagaOrchestrator {
 
 - **Prefer orchestration over choreography for complex workflows** — Orchestration with a central coordinator makes saga flows explicit, testable, and observable. You can see the entire saga state in one place, handle timeouts centrally, and implement recovery logic consistently. Choreography is more decoupled but makes the workflow implicit — you need to trace events across multiple services to understand the full flow. Rule of thumb: choreography for ≤3 simple steps; orchestration for 4+ steps or any steps with conditional branching.
 
-- **Make every saga command and compensation idempotent** — Network failures, consumer crashes, and timeout retries mean duplicate commands are inevitable. Every command handler must check a dedup store before executing. Compensations must be safe to call multiple times. The cost of idempotency (a dedup table lookup) is negligible compared to the cost of inconsistent data.
+- **Make every saga command and compensation idempotent** — Network failures, consumer crashes, and timeout retries mean duplicate commands are inevitable. Every command handler must check a dedup store before executing. Compensations must be safe to call multiple times. The cost of idempotency (a dedup table lookup) is negligible compared to the cost of inconsistent data. A ride-hailing company skipped idempotency on payment compensations — when a database blip caused a timeout retry during a surge, a $75 ride charge was refunded twice, and the bug went unnoticed until 300 duplicate refunds had already been processed over 4 days.
 
 - **Persist saga state in a database, not in memory** — In-memory saga state is lost on crash, leaving the system in an inconsistent state with no recovery path. Use a database (PostgreSQL, DynamoDB) with optimistic concurrency control. The saga state record should include: saga ID, current step, completed steps, saga status, and command payloads. Query non-terminal sagas on startup and resume or compensate them.
 
-- **Implement saga timeouts with monitoring and alerting** — A saga that hangs indefinitely holds resources (reserved inventory, pending payments). Set a total saga timeout (e.g., 5 minutes for orders, 24 hours for travel bookings). If the timeout expires, automatically compensate. Monitor sagas approaching their timeout and alert when steps are slow.
+- **Implement saga timeouts with monitoring and alerting** — A saga that hangs indefinitely holds resources (reserved inventory, pending payments). Set a total saga timeout (e.g., 5 minutes for orders, 24 hours for travel bookings). If the timeout expires, automatically compensate. Monitor sagas approaching their timeout and alert when steps are slow. A travel booking company had a 24-hour saga timeout for package bookings but no alerting on slow steps — a hotel API outage on step 2 went undetected for 18 hours (still within the timeout), blocking all flight and car reservations that depended on the hotel booking result, and only surfaced when customer complaints reached support.
 
 - **Test saga failure scenarios with chaos engineering** — Don't just test the happy path. Test: step failure (what happens when payment fails?), compensation failure (what if refund fails?), saga timeout (does compensation trigger?), crash recovery (after orchestrator restart, does the saga resume?), duplicate commands (are they idempotent?). Use fault injection in staging and run chaos experiments in production during low traffic.

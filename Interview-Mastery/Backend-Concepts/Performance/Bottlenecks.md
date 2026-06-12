@@ -32,13 +32,13 @@ Gauge.builder("threadpool.queue.size", executor, e -> e.getQueue().size())
 
 ## Common Mistakes
 
-- **Premature Optimization** — Optimizing before measuring. "Make it work, make it right, make it fast — in that order."
-- **Ignoring the Obvious** — Checking JVM GC settings before looking for missing indexes.
-- **Local-Only Testing** — Bottlenecks often only appear under production load (concurrency, data volume).
-- **Single Metric Focus** — High CPU doesn't mean CPU is the bottleneck; it could be I/O waiting.
-- **Assuming Linearity** — Doubling servers does not double throughput (Amdahl's Law, USL).
-- **Optimizing the Wrong Tier** — Adding application servers when the database is the bottleneck. Always measure end-to-end before scaling any specific tier.
-- **Not Measuring Baseline Performance** — Without baseline metrics, you can't tell if a change improved or degraded performance. Establish P50/P95/P99 latency baselines during normal load before making changes.
+- **Premature Optimization** — Optimizing before measuring. "Make it work, make it right, make it fast — in that order." This *looks correct* because the optimization target seems obvious ("this loop must be slow") — the wasted effort is invisible until profiling reveals the bottleneck was elsewhere.
+- **Ignoring the Obvious** — Checking JVM GC settings before looking for missing indexes. This *looks correct* because JVM tuning sounds like "real performance work" — the missing index that causes the actual 100x slowdown is found only after a day of GC tuning.
+- **Local-Only Testing** — Bottlenecks often only appear under production load (concurrency, data volume). This *looks correct* because the API responds in 10ms on the developer's machine with one concurrent user — the 100x slowdown under 500 concurrent users is invisible in local testing.
+- **Single Metric Focus** — High CPU doesn't mean CPU is the bottleneck; it could be I/O waiting. This *looks correct* because the CPU graph is high and red — the developer adds CPU capacity without checking that the real bottleneck is I/O wait masking as CPU usage.
+- **Assuming Linearity** — Doubling servers does not double throughput (Amdahl's Law, USL). This *looks correct* because each server independently processes its share — the coordination overhead of distributed locking, cache coherency, and shared database connections only appears after the servers are deployed.
+- **Optimizing the Wrong Tier** — Adding application servers when the database is the bottleneck. Always measure end-to-end before scaling any specific tier. This *looks correct* because the application servers are easy to scale — the database bottleneck becomes worse as more app servers compete for the same limited connection pool.
+- **Not Measuring Baseline Performance** — Without baseline metrics, you can't tell if a change improved or degraded performance. Establish P50/P95/P99 latency baselines during normal load before making changes. This *looks correct* because the fix "feels faster" in ad-hoc testing — without a baseline, a change that actually degrades P99 by 200ms goes unnoticed until production.
 
 ---
 
@@ -99,13 +99,15 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
    - A: Enable slow query logging and capture the actual queries. Most likely: N+1 problem where the main query fetches users, then a loop fetches each user's profile picture separately. Fix: use `JOIN FETCH` or batch fetching (`@BatchSize(size = 50)`) to load all profile pictures in one query. After fix: 200 queries → 2 queries, 8 seconds → 200ms. Profile again to find the next bottleneck.
 
 2. **Q: Your application suddenly becomes unresponsive under load. CPU is at 20%, memory at 40%, but all threads are blocked. The health check endpoint also times out. What's the bottleneck?**
-   - A: Thread pool exhaustion. CPU is low because threads aren't doing work — they're blocked waiting for something (database, external API, locks). Take a thread dump (`jstack`). Look for RUNNABLE threads that are actually BLOCKED or WAITING. Common causes: database connection pool exhaustion (all threads waiting for a connection), deadlock, or a downstream service that's not responding. Fix: add timeouts, increase pool sizes, or use async processing.
+    - A: Thread pool exhaustion. CPU is low because threads aren't doing work — they're blocked waiting for something (database, external API, locks). Take a thread dump (`jstack`). Look for RUNNABLE threads that are actually BLOCKED or WAITING. Common causes: database connection pool exhaustion (all threads waiting for a connection), deadlock, or a downstream service that's not responding. Fix: add timeouts, increase pool sizes, or use async processing.
+    > **Interview follow-up:** You increase the thread pool from 50 to 200 threads to fix the exhaustion, but now the database connection pool (20 connections) becomes the bottleneck — all 200 threads contend for 20 connections. How do you tune thread pool and connection pool sizes relative to each other?
 
 3. **Q: Your database CPU is at 95%, queries are slow, and adding more application servers doesn't improve throughput. The database is the bottleneck. What are your options?**
    - A: Options in order of impact: (1) Optimize slow queries (add indexes, rewrite queries, use materialized views). (2) Add read replicas for read-heavy workloads. (3) Add caching (Redis) for frequently accessed data. (4) Scale up the database (more CPU/RAM). (5) Shard the database by tenant or entity. (6) Move to CQRS with separate read and write databases. Don't add application servers until the database bottleneck is resolved.
 
 4. **Q: Your application processes messages from a queue. Each message takes 500ms to process. You add 10 more consumers, but throughput only increases by 20%. Why?**
-   - A: The bottleneck is downstream of the consumer — likely a shared resource like the database or an external API. Adding consumers only increases contention on that shared resource. Profile the processing pipeline to find the actual bottleneck. If it's the database, add read replicas or optimize queries. If it's an external API with rate limits, you can't scale past its limit.
+    - A: The bottleneck is downstream of the consumer — likely a shared resource like the database or an external API. Adding consumers only increases contention on that shared resource. Profile the processing pipeline to find the actual bottleneck. If it's the database, add read replicas or optimize queries. If it's an external API with rate limits, you can't scale past its limit.
+    > **Interview follow-up:** You identify the database as the downstream bottleneck and add read replicas — but the consumer workload is write-heavy (processing payments, updating inventory). Read replicas don't help. What alternatives do you have for scaling write-heavy consumers that compete for the same primary database?
 
 5. **Q: Your server has 16 CPU cores. You configure a thread pool with 100 threads for I/O-bound work. The application is slower than with 16 threads. What's happening?**
    - A: Too many threads cause context switching overhead. With 100 threads on 16 cores, the OS spends significant time switching between threads instead of doing work. The "sweet spot" formula: `threads = cores * (1 + wait_time / service_time)`. If wait time = 100ms and service time = 10ms: `16 * (1 + 100/10) = 176`. But 100 threads on a 16-core machine for I/O might be fine; the real issue could be contention in shared data structures or database connections. Measure context switching rate with `vmstat`.
@@ -163,7 +165,7 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 
 ## Developer Recommendations
 
-- **Measure before optimizing** — The #1 performance mistake is optimizing what you think is slow without measuring. Use profilers (async-profiler, JFR), metrics (Micrometer + Prometheus), and distributed tracing to identify the actual bottleneck. "Make it work, make it right, make it fast — in that order." Most "obvious" bottlenecks turn out not to be bottlenecks after measurement.
+- **Measure before optimizing** — The #1 performance mistake is optimizing what you think is slow without measuring. Use profilers (async-profiler, JFR), metrics (Micrometer + Prometheus), and distributed tracing to identify the actual bottleneck. "Make it work, make it right, make it fast — in that order." Most "obvious" bottlenecks turn out not to be bottlenecks after measurement. A team once spent a week rewriting their serialization layer to use Protobuf, convinced JSON parsing was the bottleneck — profiling later showed the real culprit was an N+1 query adding 3 seconds per request.
 
 - **Fix the N+1 query problem first** — N+1 is the most common and most impactful database bottleneck. It turns 2 queries into 1+N. Always check for it when an API endpoint is slow. Enable Hibernate SQL logging in development and look for repeated identical queries. Use `JOIN FETCH`, `@EntityGraph`, or `@BatchSize` to fix it. This single fix resolves 80% of "slow API" issues.
 
