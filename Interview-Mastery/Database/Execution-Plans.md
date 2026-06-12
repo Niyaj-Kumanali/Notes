@@ -179,16 +179,16 @@ WHERE wait_event IS NOT NULL;
 
 ## Common Mistakes
 
-- **Not using ANALYZE** — EXPLAIN without ANALYZE shows estimates, not reality. Always use ANALYZE for accurate diagnostics.
-- **Ignoring the loops column** — A nested loop with 100K loops is very expensive even if each individual loop is fast.
-- **Focusing only on total cost** — Actual time matters more than estimated cost for diagnosing performance problems.
-- **Not checking buffer stats** — High `shared_read` indicates insufficient caching; the working set doesn't fit in memory.
-- **Reading plans top-to-bottom** — Plans execute bottom-to-top (leaf to root). Start at the bottom to understand data access.
-- **Comparing costs across different databases** — Costs are optimizer-specific and not comparable between different database systems.
-- **Forgetting that ANALYZE actually executes the query** — Be careful running EXPLAIN ANALYZE on production write queries.
-- **Not using FORMAT JSON** — JSON format preserves more detail and is easier to parse programmatically for monitoring tools.
-- **Analyzing plans without realistic data** — Small datasets produce unrealistic plans that don't reflect production behavior.
-- **Trusting the all-in-one cost number** — Dig into individual node costs to find the true bottleneck in the plan.
+- **Not using ANALYZE** — EXPLAIN without ANALYZE shows estimates, not reality. Always use ANALYZE for accurate diagnostics. This *looks correct* because EXPLAIN shows cost numbers that look concrete and precise; developers don't realize these are optimizer estimates unless they see the actual rows column alongside them.
+- **Ignoring the loops column** — A nested loop with 100K loops is very expensive even if each individual loop is fast. This *looks correct* because each loop's cost appears small (0.05ms), and only the multiplication by 100K loops reveals the 5-second total cost.
+- **Focusing only on total cost** — Actual time matters more than estimated cost for diagnosing performance problems. This *looks correct* because the total cost number is prominently displayed at the top of the plan and is the optimizer's own metric; developers naturally trust the database's own measurement.
+- **Not checking buffer stats** — High `shared_read` indicates insufficient caching; the working set doesn't fit in memory. This *looks correct* because the plan shows execution time and rows, which seem sufficient; the buffer hit ratio is an additional column that many developers don't know to check.
+- **Reading plans top-to-bottom** — Plans execute bottom-to-top (leaf to root). Start at the bottom to understand data access. This *looks correct* because text is read top-to-bottom, and the indented tree structure visually suggests a top-down hierarchy, making the bottom-up execution order counterintuitive.
+- **Comparing costs across different databases** — Costs are optimizer-specific and not comparable between different database systems. This *looks correct* because "cost" sounds like an absolute, standardized measurement; the arbitrary unit and optimizer-specific calibration are not documented in basic plan output.
+- **Forgetting that ANALYZE actually executes the query** — Be careful running EXPLAIN ANALYZE on production write queries. This *looks correct* because EXPLAIN (without ANALYZE) is read-only, and the small spelling difference between EXPLAIN and EXPLAIN ANALYZE makes it easy to overlook that ANALYZE executes the query.
+- **Not using FORMAT JSON** — JSON format preserves more detail and is easier to parse programmatically for monitoring tools. This *looks correct* because the text format is human-readable and seems sufficient for manual analysis; the extra details in JSON format are invisible unless you know they exist.
+- **Analyzing plans without realistic data** — Small datasets produce unrealistic plans that don't reflect production behavior. This *looks correct* because the plan looks valid and the query runs fast on the development database; the plan that the optimizer chooses for 1000 rows can be completely different from the plan for 10M rows.
+- **Trusting the all-in-one cost number** — Dig into individual node costs to find the true bottleneck in the plan. This *looks correct* because the total cost is the optimizer's summary metric and appears authoritative; the individual node costs that reveal the actual bottleneck require expanding each plan node manually.
 
 ---
 
@@ -239,8 +239,14 @@ Fix: run ANALYZE to refresh statistics. Use pg_hint_plan to pin the hash join pl
 ## Scenario-Based Questions
 
 - **Q: You are debugging a query that became 10x slower after a data load. EXPLAIN ANALYZE shows `actual rows=1000000` but `plan rows=5000`. The query uses an index scan. How do you fix it?** A: A 200x cardinality mismatch indicates statistics are stale after the bulk load. Run `ANALYZE orders`. If the issue recurs, increase `default_statistics_target` from 100 to 500-1000. Create extended statistics (`CREATE STATISTICS`) for correlated columns where the optimizer assumes independence.
+
+> **Interview follow-up:** You run ANALYZE and the plan improves, but the improvement only lasts a few hours until the next bulk load. The bulk load runs hourly. How do you automate ANALYZE to run immediately after each load without manual intervention?
 - **Q: An EXPLAIN ANALYZE shows a nested loop with `loops=200000` on the inner index scan. Each loop returns 1 row in 0.05ms. Total time is 10 seconds. How do you optimize?** A: 200K index probes at 0.05ms each equals 10,000ms. The optimizer chose nested loop because per-loop cost is low, but the iteration count is high. Force a hash join by increasing `work_mem` or using `enable_nestloop = off`. A hash join does one build (O(n)) plus probe (O(m)).
+
+> **Interview follow-up:** You disable nested loops with `enable_nestloop = off`, and the query now uses a hash join but takes 15 seconds — slower than before. What did you miss, and how do you recover?
 - **Q: A plan shows `Sort Method: external merge Disk: 256MB`. The query runs hourly. Increasing work_mem globally could cause memory issues. How do you fix this specific query?** A: Use per-query work_mem: `SET work_mem = '256MB'` before the query, `RESET work_mem` after. In PostgreSQL 13+, use `pg_hint_plan` for per-query settings. Better: add an index on the sort columns to avoid the sort entirely.
+
+> **Interview follow-up:** You add an index on the sort columns, but the query still chooses a sort instead of the index because the optimizer estimates the index scan to be more expensive than the sequential scan plus sort. How do you force index usage without disabling sequential scans globally?
 - **Q: A parallel query plan shows `Workers Planned: 4` but `Workers Launched: 0`. The query runs on a 64-core server with plenty of I/O. Why aren't workers being used?** A: Check `max_parallel_workers_per_gather` (may be too low). The query may be too short for parallelism to be beneficial due to startup overhead. The query may involve non-parallelizable operations like writes or some aggregates. Check the table's `parallel_workers` storage parameter.
 - **Q: A plan shows `Seq Scan on orders (cost=0.00..450000.00 rows=10000000 width=200)` with `WHERE status = 'PENDING'`. The `status` column has a B-Tree index. Why does PostgreSQL choose a sequential scan?** A: If 30% or more of rows have `status='PENDING'`, the optimizer estimates random I/O from an index scan exceeds sequential scan cost. Check actual selectivity with `SELECT status, COUNT(*) FROM orders GROUP BY status`. If 'PENDING' is common, the optimizer is correct. If rare but statistics don't show it, run ANALYZE.
 - **Q: An index scan shows `Rows Removed by Filter: 90000` and `actual rows: 10`. The query returns 10 rows out of 90010 index entries. How do you make this more efficient?** A: The index is not selective enough. Create a composite index covering all filter columns. If WHERE has `status = 'ACTIVE' AND created_at > '2024-01-01'`, create `(status, created_at)` so both conditions are evaluated during the index scan, not as a post-filter.
@@ -264,9 +270,9 @@ Fix: run ANALYZE to refresh statistics. Use pg_hint_plan to pin the hash join pl
 
 ## Developer Recommendations
 
-- **Always use EXPLAIN ANALYZE (with BUFFERS) for real diagnosis** — Plain EXPLAIN shows estimates that can be wildly inaccurate. ANALYZE shows actual rows, times, and buffer usage. Never optimize based on estimates alone.
+- **Always use EXPLAIN ANALYZE (with BUFFERS) for real diagnosis** — Plain EXPLAIN shows estimates that can be wildly inaccurate. ANALYZE shows actual rows, times, and buffer usage. Never optimize based on estimates alone. A team spent a week adding indexes based on EXPLAIN output that showed a Seq Scan with estimated cost 5000. After running EXPLAIN ANALYZE, they discovered the query actually took 50ms and the Seq Scan was not the bottleneck — an N+1 loop in the application layer was causing the real 30-second response time.
 - **Read plans bottom-to-top, not top-to-bottom** — Data flows from leaf nodes (table/index access) to the root node (final result). Start at the bottom to understand data access, then work up.
-- **Pay attention to the loops column** — A nested loop with 100K loops is almost always the bottleneck, even if each loop is fast. Total cost equals loops multiplied by per-loop cost.
+- **Pay attention to the loops column** — A nested loop with 100K loops is almost always the bottleneck, even if each loop is fast. Total cost equals loops multiplied by per-loop cost. A daily batch query that processed 50K orders used a nested loop with 50K iterations, each taking 0.1ms. The 5-second execution was invisible in application logs until the orders table grew to 500K and the query started timing out at 60 seconds. Adding a hash index on the join column eliminated the loops entirely.
 - **Compare actual rows to plan rows for cardinality mismatches** — A mismatch greater than 10x means the optimizer works with bad estimates. This is the most common cause of bad plans.
 - **Monitor shared_hit versus shared_read for cache efficiency** — A low cache hit ratio indicates the working set doesn't fit in memory. Increase `shared_buffers` or optimize queries to access less data.
 - **Save EXPLAIN ANALYZE baselines for critical queries** — When a query runs well, save its plan. Compare when it degrades to identify plan regression. Automate with monitoring tools.

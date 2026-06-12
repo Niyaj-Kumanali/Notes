@@ -52,13 +52,13 @@ public void Enqueue(T item)
 
 ## Common Mistakes
 
-- **Modifying collection during enumeration** — `foreach` over a `List<T>` while calling `Remove` throws `InvalidOperationException`. Use `RemoveAll(predicate)` or iterate backwards.
-- **Ignoring default comparer for custom types** — `HashSet<Person>` uses reference equality unless `Equals`/`GetHashCode` are overridden or `IEqualityComparer<T>` is provided.
-- **Capacity fragmentation** — Growing `List<T>` from default 0 to 100,000 causes ~17 resizes. Pre-allocate with `new List<T>(capacity: 100_000)`.
-- **Returning internal array reference** — Exposing `_items` directly lets callers mutate internal state. Return `_items.ToArray()` (defensive copy) or `AsReadOnly()`.
-- **LINQ over LinkedList\<T\>** — `linkedList.Skip(count/2).First()` is O(n) traversal. Use `Find(node)` if you have a node reference.
-- **Concurrent write without synchronization** — Using `if (!dict.ContainsKey(key)) dict.Add(key, value)` has a race condition. Use `dict.GetOrAdd(key, _ => value)`.
-- **Dictionary hash-collision DoS** — Using culture-sensitive string comparers can make dictionaries vulnerable to hash-collision attacks. Use `StringComparer.Ordinal`.
+- **Modifying collection during enumeration** — `foreach` over a `List<T>` while calling `Remove` throws `InvalidOperationException`. Use `RemoveAll(predicate)` or iterate backwards. This *looks correct* because `Remove` succeeds and returns `true`, but the enumerator checks a `_version` field on every `MoveNext` and throws when it detects a mutation it did not initiate.
+- **Ignoring default comparer for custom types** — `HashSet<Person>` uses reference equality unless `Equals`/`GetHashCode` are overridden or `IEqualityComparer<T>` is provided. This *looks correct* because two `Person` objects with identical field values appear equal in the debugger, but `Object.Equals` defaults to reference comparison so the set treats them as distinct entries.
+- **Capacity fragmentation** — Growing `List<T>` from default 0 to 100,000 causes ~17 resizes. Pre-allocate with `new List<T>(capacity: 100_000)`. This *looks correct* because the doubling strategy is amortized O(1) per add, but each resize at large capacity copies hundreds of kilobytes and triggers a Gen 2 GC allocation, causing latency spikes under load.
+- **Returning internal array reference** — Exposing `_items` directly lets callers mutate internal state. Return `_items.ToArray()` (defensive copy) or `AsReadOnly()`. This *looks correct* because the caller appears to only read the returned array, but a `ReadOnlyCollection<T>` wrapper still exposes the underlying mutable list through the `IList<T>` interface, allowing silent mutation via casting.
+- **LINQ over LinkedList\<T\>** — `linkedList.Skip(count/2).First()` is O(n) traversal. Use `Find(node)` if you have a node reference. This *looks correct* because `Skip` and `First` compose naturally in LINQ, but they enumerate sequentially through every intermediate node without leveraging the doubly-linked structure for bidirectional traversal from both ends.
+- **Concurrent write without synchronization** — Using `if (!dict.ContainsKey(key)) dict.Add(key, value)` has a race condition. Use `dict.GetOrAdd(key, _ => value)`. This *looks correct* because `ContainsKey` and `Add` are individually thread-safe operations, but nothing prevents another thread from inserting the same key between the check and the add, throwing `ArgumentException` at runtime.
+- **Dictionary hash-collision DoS** — Using culture-sensitive string comparers can make dictionaries vulnerable to hash-collision attacks. Use `StringComparer.Ordinal`. This *looks correct* because culture-aware comparison handles international text correctly, but an attacker can craft many strings with colliding hash codes, degrading dictionary lookups from O(1) average to O(n) and causing a CPU-based denial of service.
 
 ```csharp
 // Safe: defensive copy for public API
@@ -212,6 +212,7 @@ public class RollingMetricsAggregator
 
 1. **Q: You are building an in-memory cache that stores 10M key-value pairs with automatic LRU eviction. How do you design it for O(1) operations?**
    A: Combine `Dictionary<TKey, LinkedListNode<(TKey Key, TValue Value)>>` for O(1) lookups with a `LinkedList<(TKey, TValue)>` for LRU ordering. On access, move the node to the head of the list (remove + add first). On eviction, remove the tail node and its dictionary entry. For thread safety, use `ConcurrentDictionary` + `lock` on the linked list operations, or implement a striped approach. Trade-off: memory overhead from LinkedListNode (3 pointers per entry) vs. predictable eviction behavior.
+   > **Interview follow-up:** How would the design change if 90 % of cache hits target only 1 % of the keys — does a single global lock on the linked list become the bottleneck, and what alternative eviction policy would you consider?
 
 2. **Q: You have a high-throughput telemetry processing pipeline that receives 1M events/sec. Each event must be routed to one of 100 subscribers based on a key. What collection do you use?**
    A: Use a `ConcurrentDictionary<TKey, Channel<TEvent>>` where each subscriber has a dedicated channel. For the routing table itself, use `FrozenDictionary<TKey, int>` (.NET 8+) — it uses minimal perfect hashing for O(1) lookups with zero allocation once built. For dynamic routing changes, maintain a `ConcurrentDictionary` for the active mapping and periodically rebuild the `FrozenDictionary`. Avoid `List<Channel>[]` as it requires complex resizing logic.
@@ -221,6 +222,7 @@ public class RollingMetricsAggregator
 
 4. **Q: You are processing a stream where you need to track the top 100 most frequent items seen so far (streaming Top-K). How do you implement this efficiently?**
    A: Use a `PriorityQueue<string, int>` (min-heap) to maintain the top K. Also maintain a `Dictionary<string, int>` for frequencies. For each item: increment its frequency, if it's in the heap, update (re-insert); if not and heap size < K, add it; if heap size == K and frequency > heap min frequency, dequeue min and enqueue the new item. Use `MinHeap` behavior (lower priority = higher priority). Memory is O(K + distinct items in the heap). This is the "lossy count" variation.
+   > **Interview follow-up:** How do you handle tie-breaking when multiple items have the same frequency and the heap is at capacity — does the order of eviction affect correctness?
 
 5. **Q: You are building a collection that needs to support undo/redo operations. What collection pattern do you use?**
    A: Use two `Stack<T>` (stacks) — one for undo, one for redo. Each stack stores a `Memento` (snapshot or command). On each mutation, push the previous state onto the undo stack and clear the redo stack. On undo, pop from undo and push current state onto redo. For memory efficiency, store commands (inverse operations) instead of full snapshots. Use `ImmutableStack<T>` for snapshot isolation. Trade-off: full snapshots are O(n) memory per undo but simpler; command-based is O(1) but complex.
@@ -230,6 +232,7 @@ public class RollingMetricsAggregator
 
 7. **Q: You are designing a configuration system where settings are read 1000x/sec and updated once/hour. What collection do you use?**
    A: Use `ImmutableDictionary<string, object>` for lock-free reads. On update, create a new `ImmutableDictionary` via `AddRange` and atomically swap the reference with `Interlocked.Exchange`. Readers always see a consistent snapshot without any blocking. Alternatively, use `FrozenDictionary` (.NET 8+) rebuilt on each update — it trades build cost for faster reads. Trade-off: immutable collections allocate on every write, but writes are rare so this is acceptable.
+   > **Interview follow-up:** During the window between `Interlocked.Exchange` and the old dictionary becoming eligible for GC, could a reader see a partial update or inconsistent state across multiple related configuration keys?
 
 8. **Q: You need to process items from a queue with priority — higher priority items should be processed first, but items of the same priority should be FIFO. What do you use?**
    A: Use `PriorityQueue<QueueItem, (int Priority, long Sequence)>` with a custom comparer that sorts by `Priority` descending, then `Sequence` ascending. Maintain a `long _sequenceCounter` (use `Interlocked.Increment`) to assign sequence numbers on enqueue. This naturally gives priority-based ordering with FIFO within the same priority level. For thread safety, wrap operations in a lock or use a channel-based approach with separate queues per priority level.
@@ -278,9 +281,9 @@ public class RollingMetricsAggregator
 
 ## Developer Recommendations
 
-- **Prefer `IReadOnlyList<T>` over `List<T>` for public APIs** — Exposing `List<T>` allows callers to modify the collection, breaking encapsulation. `IReadOnlyList<T>` signals intent and prevents mutation. Internally you can still use `List<T>` for performance. Use `AsReadOnly()` to create a wrapper without copying.
+- **Prefer `IReadOnlyList<T>` over `List<T>` for public APIs** — Exposing `List<T>` allows callers to modify the collection, breaking encapsulation. `IReadOnlyList<T>` signals intent and prevents mutation. Internally you can still use `List<T>` for performance. Use `AsReadOnly()` to create a wrapper without copying. In one incident, a team exposed a `List<Notification>` property that a rogue client cleared in a loop, silently suppressing all pending alerts for hours until the root cause was traced to the missing `AsReadOnly()` wrapper.
 
-- **Use `ConcurrentDictionary.GetOrAdd` instead of check-then-add pattern** — The naive `if (!dict.ContainsKey(key)) dict.Add(key, value)` has a race condition in multithreaded code. `GetOrAdd(key, _ => value)` atomically adds only if the key doesn't exist, returning the existing or newly added value.
+- **Use `ConcurrentDictionary.GetOrAdd` instead of check-then-add pattern** — The naive `if (!dict.ContainsKey(key)) dict.Add(key, value)` has a race condition in multithreaded code. `GetOrAdd(key, _ => value)` atomically adds only if the key doesn't exist, returning the existing or newly added value. A payment processing service once used the check-then-add pattern and intermittently double-charged customers under peak load; the race window was only ~50µs but that was enough to process duplicate entries at high throughput.
 
 - **Pre-size collections when capacity is known** — `new List<T>(100_000)` pre-allocates the internal array, avoiding ~17 resizes when growing from the default capacity of 4. Each resize copies all elements. Pre-allocating reduces GC pressure and improves throughput for large collections.
 

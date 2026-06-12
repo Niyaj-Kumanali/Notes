@@ -127,14 +127,14 @@ test('matches snapshot', () => {
 
 ## Common Mistakes
 
-- **Using `toBe` for objects** — `toBe` uses `Object.is`, fails for objects. Use `toEqual`.
-- **Not clearing mocks between tests** — Mock state leaks: call `jest.clearAllMocks()` in `beforeEach`.
-- **Not awaiting async assertions** — `expect(fn()).resolves.toBe('x')` without `await` exits before promise resolves.
-- **Missing `done` with callbacks** — Async callback test exits before callback runs.
-- **Not using `expect.assertions`** — Async test with try/catch can pass without reaching the assertion.
-- **Over-mocking** — Mocking everything (DB, cache, logger, queue) means you're testing mocks, not code.
-- **Testing implementation, not behavior** — Checking internal state instead of observable output.
-- **Shared mutable test data** — Tests become order-dependent and flaky.
+- **Using `toBe` for objects** — `toBe` uses `Object.is`, fails for objects. Use `toEqual`. This *looks correct* because `toBe` works perfectly for primitives and the distinction between reference and value equality is subtle — a test that passes locally with one object reference may fail in CI where module caching differs.
+- **Not clearing mocks between tests** — Mock state leaks: call `jest.clearAllMocks()` in `beforeEach`. This *looks correct* because each test appears to work in isolation during development, and mock state leakage only manifests as hard-to-reproduce failures in specific test orderings.
+- **Not awaiting async assertions** — `expect(fn()).resolves.toBe('x')` without `await` exits before promise resolves. This *looks correct* because the assertion does not throw synchronously — it returns a promise, and without `await` the test completes before the promise settles, producing a quiet false pass.
+- **Missing `done` with callbacks** — Async callback test exits before callback runs. This *looks correct* because the test function returns immediately and Jest reports it as passing — the assertion inside the callback either never runs or fires after the test already finished.
+- **Not using `expect.assertions`** — Async test with try/catch can pass without reaching the assertion. This *looks correct* because the test looks complete with a try/catch block, and the assertion inside the try seems guaranteed to execute unless you consciously consider the catch path silently swallowing failures.
+- **Over-mocking** — Mocking everything (DB, cache, logger, queue) means you're testing mocks, not code. This *looks correct* because mocked tests are fast, deterministic, and never fail due to infrastructure issues, creating the illusion of thorough coverage.
+- **Testing implementation, not behavior** — Checking internal state instead of observable output. This *looks correct* because internal state is easier to access and assert on than figuring out what observable output the behavior produces, and it feels like a more thorough verification.
+- **Shared mutable test data** — Tests become order-dependent and flaky. This *looks correct* because sharing setup reduces boilerplate and seems efficient, and the flakiness appears random rather than structural until a specific ordering consistently breaks the suite.
 
 ---
 
@@ -172,6 +172,8 @@ A legacy project uses Mocha + Chai + Sinon + Istanbul. The team wants Jest for b
 2. **Q: Your team has 1500 Jest snapshot tests for React components. Every time someone changes a shared component, 300 snapshots break, causing massive PR diffs. Developers start accepting snapshots without reviewing them. How do you fix this?**
    A: Snapshots on shared components create coupling. Fix: (1) Use `toMatchSnapshot({ prop: expect.any(String) })` to ignore non-deterministic fields. (2) For shared components, use inline snapshots or explicit assertions instead of file snapshots. (3) Better: use testing-library queries (`getByText`, `getByRole`) instead of snapshot testing — test behavior, not markup. (4) If you keep snapshot tests, run them in CI but don't make them blocking for shared component changes — trust code review.
 
+> **Interview follow-up:** If you switch to Testing Library queries over snapshots, how do you prevent the same brittleness from reappearing through over-specific `getByRole` or `getByTestId` assertions?
+
 3. **Q: You're using `jest.useFakeTimers()` to test a debounced search input. The test calls the debounced function, advances time, but the function never fires. What's wrong?**
    A: Common mistake: the debounce implementation uses `setTimeout`, but Jest's fake timers need to be configured correctly. Fix: ensure `jest.useFakeTimers()` is called before importing the debounced function (fake timers must be active when the module is loaded). Use `jest.advanceTimersByTime(debounceDelay)` not `jest.runAllTimers()` — `runAllTimers` may fire all pending timers including infinite loops. Also ensure the debounce function is the one using `setTimeout` (some libraries use `requestAnimationFrame` which fake timers don't support).
 
@@ -181,11 +183,15 @@ A legacy project uses Mocha + Chai + Sinon + Istanbul. The team wants Jest for b
 5. **Q: A React component test uses `fireEvent.change(input, { target: { value: 'new' } })` but the component's state doesn't update. The test fails but the feature works in the browser. What's happening?**
    A: Likely the component uses a controlled input and the test doesn't wrap the event in `act()`. Fix: wrap the event in `act()`: `await act(async () => { fireEvent.change(input, { target: { value: 'new' } }); })`. Better: use `@testing-library/user-event` instead of `fireEvent` — it automatically wraps in `act` and simulates more realistic interactions (keypress events, focus/blur). User-event also handles edge cases like clearing input before typing.
 
+> **Interview follow-up:** How would you write a test that verifies a controlled input correctly handles state updates triggered by asynchronous validation running in parallel with user keystrokes?
+
 6. **Q: Your test suite runs in 10 minutes. A colleague adds 1000 parameterized tests using `test.each`, increasing runtime to 30 minutes. How do you optimize?**
    A: Parameterized tests are useful but can explode test count. Fix: (1) Use `test.each` with `describe.each` to group related parameters. (2) Run parameterized tests in parallel within a file — Jest parallelizes at the file level, not the test level. (3) Split parameterized tests into separate files for better parallelization. (4) Use `--maxWorkers=50%` in CI to leverage all CPUs. (5) Profile with `jest --verbose --showSeed` to find slow test cases and reduce parameter count.
 
 7. **Q: You need to test a function that uses `crypto.randomUUID()` to generate IDs. Every test run has different IDs, making snapshot tests fail. How do you handle non-deterministic values?**
    A: Mock the non-deterministic function: `jest.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue('fixed-uuid-123')`. For snapshot tests, use property matchers: `expect(result).toMatchSnapshot({ id: expect.any(String) })`. Better: pass a test-specific ID generator via dependency injection — in tests, inject a deterministic generator (counter-based). This makes assertions explicit without snapshot coupling.
+
+> **Interview follow-up:** What happens to your deterministic ID strategy when the same test runs across multiple parallel workers — do you get ID collisions, and how do you prevent them?
 
 8. **Q: You're testing a Node.js server that uses `process.env` for configuration. Different tests need different environment variables, but they share the same process. Tests start failing when run together. How do you isolate env-dependent tests?**
    A: Never modify `process.env` directly — it leaks between tests. Fix: (1) Use `jest.resetModules()` in `beforeEach` to clear the module cache. (2) Set env vars before importing the module being tested: `beforeEach(() => { process.env.NODE_ENV = 'test'; delete require.cache[require.resolve('../src/config')]; })`. (3) Better: use a config module that reads from a dependency-injected source — in tests, inject a test config object. (4) Use `jest.spyOn` to mock specific config values.
@@ -234,13 +240,13 @@ A legacy project uses Mocha + Chai + Sinon + Istanbul. The team wants Jest for b
 
 ## Developer Recommendations
 
-- **Prefer `toEqual` over `toBe` for objects** — `toBe` uses reference equality; two objects with identical content will fail. `toEqual` deep-compares. The trade-off: `toEqual` is slower for large objects. Benefit: tests actually verify the data, not the memory reference.
+- **Prefer `toEqual` over `toBe` for objects** — `toBe` uses reference equality; two objects with identical content will fail. `toEqual` deep-compares. The trade-off: `toEqual` is slower for large objects. Benefit: tests actually verify the data, not the memory reference. In a production incident, a team compared two identical user objects with `toBe` — the test passed locally (same reference from module cache) but failed in CI (different references from fresh loads), wasting an entire day of debugging before someone noticed the matcher was wrong.
 
 - **Always clear mocks in `beforeEach`** — Mock state leaks between tests if not reset. Use `jest.clearAllMocks()` or `jest.resetAllMocks()` in `beforeEach`. Trade-off: one line of boilerplate per test file. Benefit: tests are truly isolated — no order-dependent failures.
 
 - **Never use `toBe` with floating-point numbers** — Floating-point arithmetic is imprecise (0.1 + 0.2 !== 0.3). Use `toBeCloseTo(expected, precision)`. Trade-off: you must specify precision. Benefit: tests pass even with tiny representation errors.
 
-- **Use `expect.assertions` for async tests** — An async test with try/catch can pass without running any assertion if the promise rejects unexpectedly. `expect.assertions(1)` ensures at least one assertion ran. Trade-off: you must count expected assertions. Benefit: false positives are eliminated.
+- **Use `expect.assertions` for async tests** — An async test with try/catch can pass without running any assertion if the promise rejects unexpectedly. `expect.assertions(1)` ensures at least one assertion ran. Trade-off: you must count expected assertions. Benefit: false positives are eliminated. A team had an async test with try/catch that silently passed for six months because the API endpoint returned an unexpected 500 error, the catch block logged nothing, and no assertion ever ran — the false sense of security delayed discovery of a critical regression by two release cycles.
 
 - **Use `jest --changedSince=main` in CI** — Running all tests on every commit is wasteful. `--changedSince` runs only tests related to changed files. Trade-off: may miss integration failures across unchanged files. Benefit: CI time drops from minutes to seconds for most commits.
 

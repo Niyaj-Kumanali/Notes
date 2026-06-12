@@ -55,13 +55,13 @@ query.Where(x => x.Age > 5).OrderBy(x => x.Name); // Filters before sorting
 
 ## Common Mistakes
 
-- **Multiple enumeration** — A LINQ query is re-evaluated each time it's enumerated. `filtered.Count()` and `filtered.First()` enumerate twice. Fix: materialize with `.ToList()` once.
-- **Using `SingleOrDefault` when `FirstOrDefault` is intended** — `SingleOrDefault` throws if more than one match exists. Use `FirstOrDefault` unless the query is guaranteed to return at most one result.
-- **Forgetting deferred execution** — LINQ queries are not evaluated until enumerated. Mutations to the source after query definition are reflected in results. Materialize early if the source may change.
-- **Not understanding IQueryable vs IEnumerable boundary** — Calling `.AsEnumerable()` before a filter causes the filter to run client-side (pulling all data from database). Ensure filters are applied to `IQueryable` before materialization.
-- **Modifying source in `Select`** — `items.Select(x => { x.Count++; return x; })` has side effects. `Select` should be pure. Use `foreach` for mutations.
-- **Null collection** — `nullSource.Where(x => x > 5)` throws `NullReferenceException`. Use `source ?? Array.Empty<T>()`.
-- **Exception inside iterator** — `source.Select(x => Parse(x))` doesn't throw until the result is enumerated. Wrap iteration in try/catch.
+- **Multiple enumeration** — A LINQ query is re-evaluated each time it's enumerated. `filtered.Count()` and `filtered.First()` enumerate twice. Fix: materialize with `.ToList()` once. This *looks correct* because `filtered` is assigned once and the subsequent calls compile without error, but each call triggers a fresh enumeration from the source, re-executing the full pipeline.
+- **Using `SingleOrDefault` when `FirstOrDefault` is intended** — `SingleOrDefault` throws if more than one match exists. Use `FirstOrDefault` unless the query is guaranteed to return at most one result. This *looks correct* because both methods return a default value when no match exists, but `SingleOrDefault` also validates uniqueness by checking for a second match, which throws if the data contains duplicates.
+- **Forgetting deferred execution** — LINQ queries are not evaluated until enumerated. Mutations to the source after query definition are reflected in results. Materialize early if the source may change. This *looks correct* because the query is defined once and appears static, but the enumerator holds a reference to the source collection and reads its current state only when `MoveNext` is called, not when the query is composed.
+- **Not understanding IQueryable vs IEnumerable boundary** — Calling `.AsEnumerable()` before a filter causes the filter to run client-side (pulling all data from database). Ensure filters are applied to `IQueryable` before materialization. This *looks correct* because the code compiles and runs, but the performance difference is catastrophic — a filter applied after `AsEnumerable()` downloads the entire table into memory instead of adding a `WHERE` clause.
+- **Modifying source in `Select`** — `items.Select(x => { x.Count++; return x; })` has side effects. `Select` should be pure. Use `foreach` for mutations. This *looks correct* because the lambda executes and returns the modified value, but `Select` is a streaming operator meant for projection, and side effects break the functional contract — the mutation runs once per enumeration, causing subtle bugs when the query is enumerated multiple times.
+- **Null collection** — `nullSource.Where(x => x > 5)` throws `NullReferenceException`. Use `source ?? Array.Empty<T>()`. This *looks correct* because `Where` is an extension method and the code compiles against the `IEnumerable<T>` interface, but the runtime tries to call `GetEnumerator` on a null reference, which throws at enumeration time rather than at query definition time.
+- **Exception inside iterator** — `source.Select(x => Parse(x))` doesn't throw until the result is enumerated. Wrap iteration in try/catch. This *looks correct* because the query definition line compiles and runs without error, but the exception is stored in the iterator's state machine and surfaces only when `MoveNext` is called, often far from the code that defined the query.
 
 ```csharp
 // Problem: multiple enumeration
@@ -244,6 +244,7 @@ var report = await _context.Orders
     .ToListAsync();
 ```
 This generates efficient SQL with separate SELECT statements for related data.
+> **Interview follow-up:** If `Select` projections generate separate SELECT statements anyway, what advantage does `AsSplitQuery` have over `Select` projections, and when would you still need `Include`?
 
 3. **Q: You need to find duplicate records in a 10M-row dataset by a composite key. How do you write the LINQ query for maximum performance?**
    A: Use `GroupBy` with a composite key (anonymous type) and filter groups with `Count() > 1`:
@@ -301,6 +302,7 @@ var page = await _context.Products
     .ToListAsync();
 ```
 This uses an index seek instead of a scan, O(log n) per page regardless of page number. Works best with a unique, sequential key. For non-sequential keys, use `ORDER BY` + `WHERE (col1, col2) > (@val1, @val2)`.
+> **Interview follow-up:** How do you implement keyset pagination when the sort order is not unique — for example, sorting by `Price` where many products share the same price?
 
 8. **Q: You are using `Count()` in a loop over subsets of data. The database is hit 1000 times. How do you reduce this to a single query?**
    A: Use `GroupBy` with conditional aggregation:
@@ -320,6 +322,7 @@ This generates a single SQL query with `COUNT(*)` and `COUNT(CASE WHEN ...)` exp
 
 9. **Q: You are mixing `IQueryable` and `IEnumerable` in an EF Core query and it's pulling all data into memory before filtering. How do you detect and fix client evaluation?**
    A: EF Core logs a warning when a query can't be translated and falls back to client evaluation. In EF Core 6+, enable `throwOnClientEvaluation: true` in `DbContextOptionsBuilder`. Common causes: using a custom C# method in `Where`, calling `ToList`/`AsEnumerable` too early, or using `Sum` on a non-translatable expression. Fix: ensure all filter expressions are composed on `IQueryable` before materialization. Move custom logic to a `Select` that translates (or use `FromSqlRaw` for complex logic).
+> **Interview follow-up:** If you enable `throwOnClientEvaluation`, how do you handle legitimate cases where client evaluation is intentional — for example, calling `Finalize(x)` inside a `Select` where `Finalize` is a local C# method?
 
 10. **Q: You need to stream 1M records from a database to a CSV file without loading all into memory. How do you use LINQ to achieve this?**
     A: Use `AsAsyncEnumerable()` with streaming projection and write each row:
@@ -375,9 +378,9 @@ This translates to a single SQL query with streaming (`CommandBehavior.Sequentia
 
 ## Developer Recommendations
 
-- **Prefer `Any()` over `Count() > 0`** — `Any()` short-circuits on the first match, while `Count()` enumerates the entire sequence (unless `ICollection<T>` optimization applies). The difference is meaningful for large sequences or database queries where `COUNT(*)` is more expensive than checking for existence.
+- **Prefer `Any()` over `Count() > 0`** — `Any()` short-circuits on the first match, while `Count()` enumerates the entire sequence (unless `ICollection<T>` optimization applies). The difference is meaningful for large sequences or database queries where `COUNT(*)` is more expensive than checking for existence. A reporting dashboard once called `Count() > 0` on a 10M-row filtered query, causing a 30-second pause on every page load when `Any()` would have returned in under a millisecond.
 
-- **Avoid multiple enumeration of LINQ queries** — Each `foreach`, `.ToList()`, `.Count()`, or `.First()` on an `IEnumerable<T>` re-executes the query. Materialize with `.ToList()` once if you need multiple operations. For database queries, each enumeration hits the database. Use `.AsEnumerable()` only when you intend client-side execution.
+- **Avoid multiple enumeration of LINQ queries** — Each `foreach`, `.ToList()`, `.Count()`, or `.First()` on an `IEnumerable<T>` re-executes the query. Materialize with `.ToList()` once if you need multiple operations. For database queries, each enumeration hits the database. Use `.AsEnumerable()` only when you intend client-side execution. A background job once processed the same `IQueryable` in a loop, triggering 10,000 separate database queries instead of one — the fix was a single `.ToList()` call that reduced the page load from 45 seconds to 200ms.
 
 - **Filter with `Where` before sorting with `OrderBy`** — `Where` is streaming (O(1) memory), `OrderBy` is buffering (O(n) memory). Applying `Where` first reduces the data that needs sorting, improving performance and memory usage. This also applies to database queries — filters before sorts produce more efficient SQL.
 

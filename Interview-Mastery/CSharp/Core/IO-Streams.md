@@ -45,13 +45,13 @@ await source.CopyToAsync(gzipStream);
 
 ## Common Mistakes
 
-- **Not disposing streams** — File handles leak if exceptions occur before `Dispose`. Always use `using` statements. Dispose order matters: inner streams are disposed first (outer wrapper flush → inner close).
-- **Forgetting `FileOptions.Asynchronous`** — Without this flag, async reads/writes block a thread pool thread, defeating the purpose of async I/O.
-- **Large synchronous reads on UI thread** — `File.ReadAllBytes(hugePath)` blocks the UI thread for seconds. Use async variants.
-- **Not handling partial reads** — `Stream.Read` may return fewer bytes than requested. Must loop until all bytes are read or end of stream.
-- **Writing to a closed stream** — Disposing a `StreamWriter` that wraps a `MemoryStream` flushes to the already-disposed inner stream. Nest disposals correctly.
-- **Encoding BOM issues** — `new StreamWriter(path)` writes UTF-8 BOM by default. Use `new UTF8Encoding(false)` for no BOM.
-- **FileShare violation** — Opening a file with `FileShare.None` while another process has it open throws `IOException`. Use appropriate `FileShare` flags.
+- **Not disposing streams** — File handles leak if exceptions occur before `Dispose`. Always use `using` statements. Dispose order matters: inner streams are disposed first (outer wrapper flush → inner close). This *looks correct* because the `Stream` variable goes out of scope and the finalizer eventually runs, but without explicit `using`, an exception before the manual `Close()` call leaks the OS handle, and finalization is non-deterministic — under load this exhausts the process handle quota.
+- **Forgetting `FileOptions.Asynchronous`** — Without this flag, async reads/writes block a thread pool thread, defeating the purpose of async I/O. This *looks correct* because `ReadAsync` compiles and returns a `Task` without error, but internally it queues the operation on a thread pool thread that blocks on the synchronous `ReadFile` call, achieving zero scalability benefit despite the async syntax.
+- **Large synchronous reads on UI thread** — `File.ReadAllBytes(hugePath)` blocks the UI thread for seconds. Use async variants. This *looks correct* because `ReadAllBytes` is a simple one-liner that returns a byte array, but it issues a synchronous OS read that blocks the calling thread entirely — on the UI thread this freezes the application and triggers the "not responding" state in Windows.
+- **Not handling partial reads** — `Stream.Read` may return fewer bytes than requested. Must loop until all bytes are read or end of stream. This *looks correct* because `Read` accepts a `count` parameter and most code assumes it fills the buffer, but the contract only guarantees 1 to `count` bytes — network streams especially return whatever is available in the buffer, not what was requested.
+- **Writing to a closed stream** — Disposing a `StreamWriter` that wraps a `MemoryStream` flushes to the already-disposed inner stream. Nest disposals correctly. This *looks correct* because the `StreamWriter` is disposed in a `using` block, but dispose order is outer-first — if the inner `MemoryStream` is disposed before the wrapper, the wrapper's `Flush` tries to write to a closed stream and throws `ObjectDisposedException`.
+- **Encoding BOM issues** — `new StreamWriter(path)` writes UTF-8 BOM by default. Use `new UTF8Encoding(false)` for no BOM. This *looks correct* because the file opens correctly in Notepad and most editors, but the UTF-8 BOM (`EF BB BF`) causes issues in Unix pipelines, JSON parsers, and HTTP response bodies where the preamble is misinterpreted as data.
+- **FileShare violation** — Opening a file with `FileShare.None` while another process has it open throws `IOException`. Use appropriate `FileShare` flags. This *looks correct* because `FileShare.None` appears to be the safest option (exclusive access), but it prevents any concurrent reader including antivirus scanners and log tailers, causing spurious `IOException` failures in production that are hard to reproduce in development.
 
 ```csharp
 // Handling partial reads
@@ -239,12 +239,14 @@ public class CsvMmFileProcessor
 
 3. **Q: You are designing a microservice that receives multipart form uploads and streams them directly to Azure Blob Storage without touching disk. How?**
    A: Use `HttpRequest.Body` as the source stream. In ASP.NET Core, the request body is a `FileBufferingReadStream` by default — disable buffering with `Request.EnableBuffering()` (actually, disable by not calling it). Use `BlobClient.UploadAsync(Stream, ...)` which accepts a `Stream` — it reads from the request stream directly. For progress reporting, wrap the request body in a `ProgressStream` decorator that updates a counter. For cancellation, pass `HttpContext.RequestAborted`. Challenge: without buffering, a slow client ties up the connection; set `KestrelLimits.KeepAliveTimeout` appropriately.
+   > **Interview follow-up:** If the upstream connection is slower than the downstream blob write, what backpressure mechanism prevents the request stream from being read faster than the client sends data?
 
 4. **Q: You are migrating from `BinaryFormatter` to `System.Text.Json` for serialization of a custom stream-based protocol. What stream patterns do you use?**
    A: For JSON serialization, use `Utf8JsonWriter` which writes directly to an `IBufferWriter<byte>` — zero-copy, low allocation. For deserialization, use `Utf8JsonReader` over a `ReadOnlySequence<byte>` from `PipeReader`. Use `Stream` adapters: `TextReader` → `StreamReader` (bytes to chars), `TextWriter` → `StreamWriter`. For length-prefixed messages, use `BinaryReader`/`BinaryWriter` on a `NetworkStream`. Prefer protocol buffers (`Protobuf`) over custom binary for cross-platform scenarios.
 
 5. **Q: You have a `NetworkStream` that sometimes reads partial messages. How do you handle message framing correctly?**
    A: Never assume a single `ReadAsync` returns a complete message. Use length-prefixed framing: read 4 bytes (message length as `int` via `BinaryReader` or manually), then loop-read until `totalRead == length`. For text protocols (HTTP, WebSocket), look for delimiters (`\r\n\r\n`). Use `StreamReader.ReadLineAsync` for line-based protocols. For high performance, use `PipeReader` — it handles incomplete reads natively via `TryRead` and `AdvanceTo`. Benchmark: `PipeReader` can be 3-5x faster than manual buffering for partial reads.
+   > **Interview follow-up:** How do you handle a malicious client that sends a length prefix indicating a 4GB message — does your framing code protect against memory exhaustion?
 
 6. **Q: You are building a compression service that needs to compress 100 files simultaneously without exhausting memory. How do you control resource usage?**
    A: Use `SemaphoreSlim` to limit concurrent compression operations (e.g., `new SemaphoreSlim(Environment.ProcessorCount)`). Each operation reads via `FileStream` and writes compressed output through `GZipStream` or `BrotliStream` (whichever offers better compression ratio for the data type). Use `ArrayPool<byte>` for copy buffers to avoid large allocations. For very large files, compress in chunks using `GZipStream` in a streaming fashion — never read the entire file into memory first. Set `CompressionLevel.Optimal` for archival, `Fastest` for real-time.
@@ -259,7 +261,8 @@ public class CsvMmFileProcessor
    A: Each `ReadAsync` allocates a `Task` and possibly a `SocketAsyncEventArgs`. The allocation adds GC pressure. Fix: use `PipeReader` which reuses buffers from a `MemoryPool<T>`, reducing allocations. Also check for the Nagle algorithm — disable via `Socket.NoDelay = true` for low-latency scenarios. Use `SocketAsyncEventArgs` directly (or `NetworkStream` with `Pipe`) for the fastest path. If using `NetworkStream`, increase the buffer size to reduce ReadAsync calls.
 
 10. **Q: You are implementing a file watcher that reads new lines appended to a growing log file. How do you handle this efficiently?**
-    A: Open the file with `FileShare.ReadWrite` to allow concurrent writes. Use `FileStream` with `FileOptions.Asynchronous` and `FileOptions.SequentialScan`. Track `_lastPosition` and poll `stream.Length` periodically. Use `StreamReader` to read from the last position. For low latency, use `ReadDirectoryChangesW` via `FileSystemWatcher` to detect changes, then read the new bytes. For the stream position, use `stream.Seek(0, SeekOrigin.End)` to skip to the current end on open. Edge case: log rotation — detect by comparing file handle's `FileAttributes` with the original.
+     A: Open the file with `FileShare.ReadWrite` to allow concurrent writes. Use `FileStream` with `FileOptions.Asynchronous` and `FileOptions.SequentialScan`. Track `_lastPosition` and poll `stream.Length` periodically. Use `StreamReader` to read from the last position. For low latency, use `ReadDirectoryChangesW` via `FileSystemWatcher` to detect changes, then read the new bytes. For the stream position, use `stream.Seek(0, SeekOrigin.End)` to skip to the current end on open. Edge case: log rotation — detect by comparing file handle's `FileAttributes` with the original.
+    > **Interview follow-up:** If the log file is truncated (not rotated) by a log shipper, how does your polling loop detect that `Length` has decreased and recover without crashing or reading stale data?
 
 ---
 
@@ -299,9 +302,9 @@ public class CsvMmFileProcessor
 
 ## Developer Recommendations
 
-- **Use `FileOptions.Asynchronous` for all file I/O in server applications** — Without it, async file operations block a thread pool thread, defeating the purpose of async I/O. Always combine with `FileOptions.SequentialScan` for large sequential reads to optimize OS caching.
+- **Use `FileOptions.Asynchronous` for all file I/O in server applications** — Without it, async file operations block a thread pool thread, defeating the purpose of async I/O. Always combine with `FileOptions.SequentialScan` for large sequential reads to optimize OS caching. A high-throughput file processing service once omitted this flag, causing thread pool starvation under load — every "async" file read blocked a thread for 100ms+, and with 200 concurrent requests the thread pool ran out of available threads and request latency spiked to 30 seconds.
 
-- **Prefer `System.IO.Pipelines` over `Stream` for high-throughput server scenarios** — `Pipelines` provides zero-copy buffer management with user-controlled allocation via `MemoryPool<T>`. The `AdvanceTo` API gives explicit backpressure. Throughput can be 3-5x higher than equivalent `Stream` code for network I/O.
+- **Prefer `System.IO.Pipelines` over `Stream` for high-throughput server scenarios** — `Pipelines` provides zero-copy buffer management with user-controlled allocation via `MemoryPool<T>`. The `AdvanceTo` API gives explicit backpressure. Throughput can be 3-5x higher than equivalent `Stream` code for network I/O. A telemetry ingestion gateway migrating from `NetworkStream` + manual buffering to `PipeReader`/`PipeWriter` reduced per-message allocation by 80 % and eliminated GC pauses that had been causing periodic p99 latency spikes from 50ms to 2s.
 
 - **Always use `ArrayPool<byte>.Shared.Rent()` instead of `new byte[n]` for temporary buffers** — The GC cost of allocating large byte arrays is significant. Pooled buffers are reused, reducing GC Gen 2 collections. Return the buffer in a `finally` block. For buffers holding sensitive data, pass `clearArray: true` to `Return`.
 

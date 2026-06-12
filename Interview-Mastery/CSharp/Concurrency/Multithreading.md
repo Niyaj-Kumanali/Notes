@@ -63,13 +63,13 @@ public class BatchProcessor
 
 ## Common Mistakes
 
-- **Locking on a public object or string** — Strings are interned (shared across the process), and public objects allow external code to participate in the lock, causing deadlocks. Always lock on a private `readonly object`.
-- **Nested locking causing deadlock** — Locking `a` then `b` in one thread and `b` then `a` in another guarantees deadlock. Fix by locking in a consistent order (by hash code or ID).
-- **Thread pool starvation from blocking tasks** — Calling `Thread.Sleep` or blocking on a thread pool thread prevents it from processing other work items. Use async `Task.Delay` instead.
-- **Not handling `AbandonedMutexException`** — A `Mutex` can be abandoned if the owner crashes, throwing this exception on the next waiter.
-- **`volatile` does NOT make operations atomic** — `counter++` is read-modify-write even on a `volatile` field. Use `Interlocked.Increment`.
-- **`async void` in non-UI contexts** — Exceptions crash the process. Use `async Task`.
-- **`Thread.Abort()` is dangerous and obsolete** — Use `CancellationToken` for cooperative cancellation.
+- **Locking on a public object or string** — Strings are interned (shared across the process), and public objects allow external code to participate in the lock, causing deadlocks. Always lock on a private `readonly object`. This *looks correct* because the lock compiles and runs without error in testing, but a string literal `"lockObj"` is interned globally — any other code in the process using the same literal shares the same monitor, turning unrelated critical sections into a deadlock source.
+- **Nested locking causing deadlock** — Locking `a` then `b` in one thread and `b` then `a` in another guarantees deadlock. Fix by locking in a consistent order (by hash code or ID). This *looks correct* because each individual transaction acquires locks as needed and the code compiles without warnings, but the circular wait condition is a classic deadlock that only manifests under concurrent load and may pass all unit tests.
+- **Thread pool starvation from blocking tasks** — Calling `Thread.Sleep` or blocking on a thread pool thread prevents it from processing other work items. Use async `Task.Delay` instead. This *looks correct* because `Thread.Sleep` is the familiar synchronous API and the code appears to pause execution as intended, but it occupies a thread pool thread that could otherwise serve hundreds of other queued work items, starving the pool under load.
+- **Not handling `AbandonedMutexException`** — A `Mutex` can be abandoned if the owner crashes, throwing this exception on the next waiter. This *looks correct* because a `Mutex` appears to be just a cross-process `lock`, but if the owning thread terminates without releasing it, the mutex is abandoned — subsequent waiters must catch `AbandonedMutexException` and determine whether the protected resource is in a consistent state.
+- **`volatile` does NOT make operations atomic** — `counter++` is read-modify-write even on a `volatile` field. Use `Interlocked.Increment`. This *looks correct* because `volatile` suggests the field is always up-to-date across threads, but it only prevents compiler reordering and ensures cache coherence on individual reads and writes — the read-modify-write of `counter++` can still interleave with another thread's increment, causing lost updates.
+- **`async void` in non-UI contexts** — Exceptions crash the process. Use `async Task`. This *looks correct* because `async void` compiles and runs like `async Task` in the happy path, but there is no `Task` to observe exceptions — an unhandled exception propagates to the `SynchronizationContext` and terminates the process, with no stack trace logged to the standard error handler.
+- **`Thread.Abort()` is dangerous and obsolete** — Use `CancellationToken` for cooperative cancellation. This *looks correct* because `Abort` immediately terminates the thread and appears to solve unresponsive code, but it throws `ThreadAbortException` at an arbitrary point, potentially leaving locks held, state corrupted, and `finally` blocks partially executed — making it impossible to recover gracefully.
 
 ```csharp
 // Deadlock example: inconsistent lock ordering
@@ -235,12 +235,14 @@ public class WorkStealingScheduler
 
 3. **Q: You are optimizing a high-frequency trading system where lock contention is the bottleneck. How do you reduce it?**
    A: Use lock-free data structures (`ConcurrentDictionary`, `Interlocked` operations, `SpinLock` for sub-microsecond sections). Partition data by symbol or instrument so that different threads rarely contend on the same lock (striped locking). Use `ReaderWriterLockSlim` for read-dominated data. Consider `MemoryBarrier`-based lock-free algorithms for simple state. Profile with `System.Threading.CountdownEvent` to measure contention via ETW events.
+   > **Interview follow-up:** If a lock-free CAS loop fails repeatedly under high contention, what metric tells you whether the backoff strategy is adequate versus whether the algorithm is fundamentally unscalable?
 
 4. **Q: You are debugging a production crash with `StackOverflowException` in a multithreaded service. What could cause it?**
    A: Recursive lock-free pattern bugs (e.g., CAS loop that never succeeds because of contention). Deep call chains in thread pool threads due to aggressive inlining + deep async state machines. Unbounded recursion in a parallel algorithm. Deadlock recovery logic that retries infinitely. Fix: dump analysis with `!clrstack` to find the repeating call pattern, add recursion limits, and review lock-free algorithms for correctness.
 
 5. **Q: You are migrating from `lock` to `ReaderWriterLockSlim` for a configuration cache. What trade-offs should you consider?**
    A: `ReaderWriterLockSlim` allows unlimited concurrent readers when no writer exists — great for config (read 1000x/sec, write 1x/hour). But it's ~2x slower than `lock` for the exclusive (write) case. It also has more overhead for very short critical sections. Only beneficial when reads significantly outnumber writes AND the read section is non-trivial (> 1µs). For a simple dictionary lookup, `lock` may be faster due to lower overhead.
+   > **Interview follow-up:** Under what pattern of read/write interleaving does `ReaderWriterLockSlim` exhibit writer starvation despite its fairness guarantees, and how do you detect it in production?
 
 6. **Q: You are building a backtesting engine that processes years of tick data. How do you parallelize it correctly?**
    A: Partition data by time window (e.g., one day per partition) — ensure no cross-partition dependencies. Use `Parallel.ForEach` on the partition list. Each partition runs sequentially (tick data is ordered). Aggregate results using `Interlocked` or a lock-protected list. Challenge: some strategies need look-back across partitions — implement a warm-up period or overlapping partitions. Use `ImmutableArray<T>` for strategy parameters to avoid synchronization.
@@ -255,7 +257,8 @@ public class WorkStealingScheduler
    A: Use `Interlocked.Increment` on a counter for each sliding window bucket. For a token bucket algorithm, use `Interlocked.CompareExchange` (CAS) in a `while` loop to atomically update remaining tokens. For a distributed rate limiter, use Redis `INCR` with `EXPIRE`. For high precision, use `long` ticks via `Stopwatch.GetTimestamp()`. Trade-off: `Interlocked` operations are ~5ns but lack waiting semantics — combine with `SemaphoreSlim` for blocking when rate is exceeded.
 
 10. **Q: You have a thread pool starvation issue — response times spike to 30s under load. How do you diagnose and fix it?**
-    A: Capture `ThreadPool` metrics: `ThreadPool.GetAvailableThreads` shows zero workers. Common causes: blocking calls on thread pool threads (`.Result`, `lock` held for long I/O), too many long-running tasks, or insufficient min threads. Fix: ensure no blocking calls in async code, increase `ThreadPool.SetMinThreads` to prevent latency spikes, and use `TaskCreationOptions.LongRunning` for truly long CPU-bound work. Monitor `clr!ThreadPoolWorkerThreadWait` in ETW traces.
+     A: Capture `ThreadPool` metrics: `ThreadPool.GetAvailableThreads` shows zero workers. Common causes: blocking calls on thread pool threads (`.Result`, `lock` held for long I/O), too many long-running tasks, or insufficient min threads. Fix: ensure no blocking calls in async code, increase `ThreadPool.SetMinThreads` to prevent latency spikes, and use `TaskCreationOptions.LongRunning` for truly long CPU-bound work. Monitor `clr!ThreadPoolWorkerThreadWait` in ETW traces.
+    > **Interview follow-up:** If you increase `SetMinThreads` to 100 but the starvation persists, what diagnostic step distinguishes between "not enough threads" and "threads are blocked and not completing work"?
 
 ---
 
@@ -295,11 +298,11 @@ public class WorkStealingScheduler
 
 ## Developer Recommendations
 
-- **Prefer `Task` over raw `Thread` for most scenarios** — A `Thread` has ~1MB stack and takes ~200µs to create. A `Task` uses the thread pool (~100 bytes, ~1µs dispatch). Tasks integrate with async/await, support cancellation, and enable composition (`WhenAll`, `WhenAny`). Reserve raw `Thread` for long-running CPU-bound operations that need a dedicated OS thread.
+- **Prefer `Task` over raw `Thread` for most scenarios** — A `Thread` has ~1MB stack and takes ~200µs to create. A `Task` uses the thread pool (~100 bytes, ~1µs dispatch). Tasks integrate with async/await, support cancellation, and enable composition (`WhenAll`, `WhenAny`). Reserve raw `Thread` for long-running CPU-bound operations that need a dedicated OS thread. A monitoring agent once created a raw `Thread` per connection for 10K concurrent connections, consuming 10GB+ of virtual memory just for thread stacks and crashing the process with `OutOfMemoryException` before reaching 5K connections.
 
 - **Use `SemaphoreSlim` for async-compatible synchronization** — Unlike `Monitor` (which blocks the thread), `SemaphoreSlim.WaitAsync()` returns a task that completes when the semaphore is acquired. This frees the thread during the wait, preventing thread pool starvation. Use it for resource pooling and rate limiting in async code.
 
-- **Set `ThreadPool.SetMinThreads` at application startup** — The default minimum thread count equals CPU count, causing latency spikes when burst traffic arrives. Set to at least `Environment.ProcessorCount * 4` for I/O-bound services. This prevents the hill-climbing algorithm from injecting threads too slowly during load spikes.
+- **Set `ThreadPool.SetMinThreads` at application startup** — The default minimum thread count equals CPU count, causing latency spikes when burst traffic arrives. Set to at least `Environment.ProcessorCount * 4` for I/O-bound services. This prevents the hill-climbing algorithm from injecting threads too slowly during load spikes. An API gateway once received a sudden traffic burst that queued 500 requests while the thread pool slowly injected threads one at a time every 500ms — the first requests timed out at 30 seconds before the pool had enough threads to process the backlog.
 
 - **Avoid `lock(this)` or locking on public types** — Lock on a private `readonly object` field. Locking public objects allows external code to participate in the lock, potentially causing deadlocks. Locking on strings is especially dangerous due to string interning (two identical string literals share the same object).
 

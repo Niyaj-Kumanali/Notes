@@ -1,11 +1,10 @@
 # Interview-Mastery — Learning Roadmap
 
-**Goal:** Transform existing notes into deep engineering references that explain *What*, *Why*, *How*, *When*, and *Why Not*.
-
 **How to use this roadmap:**
+- This file controls **sequencing only** — which file to work on next, and in what order.
+- For **how** to enrich each file, follow `.opencode-instructions.md` exclusively. That file is
+  the single source of truth for enrichment style, depth, and formatting.
 - Files are ordered by **dependency** — complete each file before moving to the next in the phase.
-- Within each file, add the supplementary sections (Why does it exist?, Real-World Analogy, How does it work internally?, etc.) **below** the existing content.
-- Do **not** remove, replace, or shorten existing content.
 - Mark files as `[x]` when done.
 
 ---
@@ -189,8 +188,9 @@ Complete only if targeting .NET roles.
 
 ## Tips
 
-- **One file at a time.** Open the file, read the existing content, then add the supplementary sections below it.
-- **If a file is empty or missing**, create it with your own notes first, then expand it.
+- **One file at a time.** Open the file, read the existing content, then enrich it according to
+  `.opencode-instructions.md` before moving to the next file.
+- **If a file is empty or missing**, create it with your own notes first, then enrich it.
 - **The C# track is parallel** — complete it after Phase 1 if you are a .NET developer, or skip it entirely for pure Java roles.
 - **Revisit Phase 5 (Database)** before any system-design interview. It's the most common differentiator between junior and senior candidates.
 

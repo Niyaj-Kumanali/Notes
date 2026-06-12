@@ -67,16 +67,16 @@
 
 ## Common Mistakes
 
-- **Standups become status reports** — Focus on blockers instead of updates
-- **Retros without action** — Track action items, no improvement without follow-through
-- **Story points as performance metric** — Leads to gaming; use only for planning
-- **Too many WIP items** — Context switching kills productivity; enforce WIP limits
-- **Mid-sprint changes** — Loss of focus; protect the sprint goal
-- **No DoD** — Technical debt accumulates; create and enforce Definition of Done
-- **PO unavailable** — Wrong priorities result; PO must be accessible daily
-- **Team too large (over 9)** — Communication overhead; split the team
-- **No automated testing** — Slow regression; invest in CI/CD
-- **Zombie Scrum** — Going through ceremonies without agile mindset; revisit values
+- **Standups become status reports** — Focus on blockers instead of updates. This *looks correct* because each person reporting what they did feels like accountability and gives managers the visibility they ask for. In practice, it turns a synchronization event into a one-way broadcast that hides blockers until they're critical — the person who needs help rarely raises their hand in a status roll call.
+- **Retros without action** — Track action items, no improvement without follow-through. This *looks correct* because having the conversation feels productive, and teams assume awareness alone drives change. Without tracked owners and deadlines, the same complaints reappear sprint after sprint, and cynicism replaces trust in the process.
+- **Story points as performance metric** — Leads to gaming; use only for planning. This *looks correct* because management wants data-driven evaluation, and points seem like an objective measure of developer output. In reality, points are a relative, team-specific estimate — comparing them across people incentivizes inflation, avoidance of complex work, and kills the collaboration that velocity actually depends on.
+- **Too many WIP items** — Context switching kills productivity; enforce WIP limits. This *looks correct* because starting more work feels like progress, and letting a developer sit idle while waiting on PR review seems wasteful. The hidden cost is task-switching overhead — a developer juggling 5 active items loses 30-50% of productive time to mental reload, which means every single item takes longer from start to finish.
+- **Mid-sprint changes** — Loss of focus; protect the sprint goal. This *looks correct* because the stakeholder's request feels genuinely urgent, and saying "no" to a VP or CEO seems like a career-limiting move. The production cost is a team that never finishes anything of substance — every mid-sprint change resets priorities, and the sprint goal becomes a decoration rather than a commitment, making delivery dates unpredictable for everyone.
+- **No DoD** — Technical debt accumulates; create and enforce Definition of Done. This *looks correct* because shipping faster without writing tests or documentation seems more productive in the moment, and "we'll come back to clean it up" always sounds reasonable. A missing DoD means every sprint ships untested, undocumented code — by sprint 5, the team spends roughly 50% of capacity fixing bugs from sprint 1 instead of building new features, and the "fast" approach becomes dramatically slower.
+- **PO unavailable** — Wrong priorities result; PO must be accessible daily. This *looks correct* because the PO seems busy with important stakeholders, and the team can "figure it out" and ask questions later. The production symptom is insidious rework — the team builds what they *think* is correct based on assumptions, which means the sprint review becomes a parade of rejected work, or worse, features ship that users don't actually need.
+- **Team too large (over 9)** — Communication overhead; split the team. This *looks correct* because adding more people should increase throughput — it is the obvious response to falling behind. The communication channels grow as n(n-1)/2: a 10-person team has 45 channels versus 15 for a 6-person team, so coordination overhead consumes the added capacity and velocity per person actually drops.
+- **No automated testing** — Slow regression; invest in CI/CD. This *looks correct* because manual testing "works" for small features, and writing automated tests takes time that could be spent on feature code. At 10-20 test cases, manual regression takes an hour; at 200+, it takes days — and the team eventually stops regression testing entirely, shipping every release with unknown breakage and praying nothing catastrophic was introduced.
+- **Zombie Scrum** — Going through ceremonies without agile mindset; revisit values. This *looks correct* because the team attends all ceremonies and uses the right vocabulary, so it *feels* like agile is working. The production symptom is zero improvement — velocity stagnates, the same problems recur every retro, and the team becomes cynical, treating agile as pointless overhead rather than a tool for continuous improvement.
 
 ---
 
@@ -114,11 +114,15 @@ A team's velocity dropped 50% after migrating from a monolith to microservices. 
 3. **Q: Management wants to measure developer productivity using story points per person. How do you respond?**
    A: Story points are a team-relative estimate, not an individual productivity metric. Comparing points across individuals creates perverse incentives: (1) people inflate estimates, (2) people avoid complex work, (3) collaboration drops. Propose alternative metrics: cycle time, deployment frequency, team happiness, customer satisfaction. Point out that individual velocity doesn't exist in agile frameworks.
 
+   > **Interview follow-up:** Management accepts your arguments against per-person velocity but responds: "Fine, we'll just measure team velocity and compare teams to each other." How do you respond? What makes velocity incomparable even between teams working on the same product?
+
 4. **Q: Your team uses 2-week sprints but consistently finishes all work by day 8, then sits idle waiting for the sprint to end. What's happening and how do you fix it?**
    A: The team is under-committing (sandbagging) or the PO isn't filling the backlog with enough refined items. Fix: (1) During sprint planning, use historical velocity as a guide, not a ceiling. (2) If work finishes early, pull the next item from the backlog (after PO confirms). (3) Consider shortening the sprint to 1 week to better match capacity. (4) Validate estimation — maybe the team has improved but estimates haven't adjusted.
 
 5. **Q: A regulated fintech company wants to adopt agile but auditors demand requirements traceability, sign-offs, and documentation. How do you reconcile?**
    A: Agile doesn't mean no documentation — it means the right documentation. Trace user stories → acceptance tests → test results. Use BDD (Gherkin scenarios) as living documentation. Automated CI/CD pipelines provide audit trails. Regulatory sign-offs become acceptance criteria in the Definition of Done. The key: documentation should be a byproduct of development, not a separate activity.
+
+   > **Interview follow-up:** A production incident reveals that a critical compliance rule was never captured as an acceptance criterion in any story — it was "tribal knowledge" the senior dev always handled. The auditor flags this as a traceability gap. Who owns the fix — PO, SM, or the team? How would you redesign the process so tribal knowledge is systematically encoded without creating a documentation treadmill?
 
 6. **Q: Your product owner is excellent at writing stories but terrible at prioritizing. The team builds perfect features that nobody uses. What do you recommend?**
    A: Train the PO on value-based prioritization using Weighted Shortest Job First (WSJF) or Opportunity Scoring. Introduce outcome-based metrics (user adoption, task completion rate) instead of output-based (features shipped). Run user research sessions where the team observes real users. If the PO still can't prioritize, escalate — an incapable PO is a systemic risk.
@@ -134,6 +138,8 @@ A team's velocity dropped 50% after migrating from a monolith to microservices. 
 
 10. **Q: Your team adopted agile but the rest of the organization is still waterfall. The team delivers working software every 2 weeks, but it sits in QA for 4 weeks before release. What do you do?**
     A: This is Water-Scrum-Fall. Fix: (1) Include QA in the sprint — shift testing left. (2) Automate regression tests so QA focuses on exploratory testing. (3) Create a release train — every sprint end triggers a deployment to a staging environment. (4) Negotiate with operations to allow continuous deployment or at least bi-weekly releases. (5) Make the case to management: the team delivers value in 2 weeks, but the organization delivers in 6 — the bottleneck is not the team.
+
+    > **Interview follow-up:** Operations agrees to bi-weekly releases but the Change Advisory Board (CAB) requires 2 weeks of pre-approval for every production deployment. Your bi-weekly release still has a 2-week lead time before it. How do you work within this constraint without violating the CAB mandate, and what data would you gather to eventually challenge the 2-week pre-approval rule?
 
 ---
 
@@ -179,9 +185,13 @@ A team's velocity dropped 50% after migrating from a monolith to microservices. 
 
 - **Enforce the Definition of Done strictly** — Skipping tests or code review to "go faster" creates technical debt that compounds. A relaxed DoD in sprint 1 leads to 50% rework in sprint 5. Trade-off: initially slower delivery velocity. Benefit: sustained velocity and quality over time.
 
+  **Production failure:** A payments team skipped integration tests in their DoD for "just this sprint" to hit a regulatory deadline. The untested code introduced a rounding error in transaction fees. It went undetected for three months. By then, 47,000 customers had been overcharged ~$380,000. Remediation — refunds, regulatory fines, mandatory audit — consumed 14 developer-months and triggered an SEC inquiry. The "one sprint shortcut" took nine months to fully resolve.
+
 - **Invest in automated testing and CI/CD** — Without automation, agile is just "fast waterfall." Automated regression tests enable the confidence to release every sprint. Trade-off: significant upfront investment in test infrastructure. Benefit: regression testing goes from 3 days to 3 minutes.
 
 - **Use retros for genuine improvement, not ritual** — Action items without owners and follow-through create cynicism. Each retro should produce at least one concrete, tracked action. Trade-off: retros take 60-90 minutes from delivery. Benefit: continuous improvement compounds — 5% better each sprint is 2.8x better in a year.
+
+  **Production failure:** A 40-person org ran retros every sprint for two years without tracking a single action item to completion. The same three complaints appeared in every retro — unclear requirements, unstable test environments, last-minute scope changes. The team stopped raising issues because "nothing ever changes." A developer satisfaction survey scored agile process at 1.8/5, and two senior engineers quit, citing "ceremonies without purpose." The retros had become a release valve without a repair mechanism — venting frustration without any pressure to fix the underlying causes.
 
 - **Cross-functional teams are non-negotiable** — If every sprint requires a dependency on another team (DBAs, QA, DevOps), you're not agile. Build these capabilities into the team. Trade-off: harder to hire (T-shaped people). Benefit: no external dependencies block delivery.
 

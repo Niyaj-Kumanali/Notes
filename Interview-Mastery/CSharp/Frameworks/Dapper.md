@@ -50,13 +50,13 @@ public class JsonTypeHandler<T> : SqlMapper.TypeHandler<T>
 
 ## Common Mistakes
 
-- **Not disposing connections** — `var conn = new SqlConnection(connStr); conn.Query(sql);` leaks the connection. Always use `await using`.
-- **Forgetting to open connection for transactions** — Dapper opens/closes automatically for simple queries, but transactions require manual `connection.Open()` before `BeginTransaction`.
-- **Wrong `splitOn` in multi-mapping** — If a JOIN has multiple `Id` columns and `splitOn` defaults to `"Id"`, all split columns after the first get the second table's `Id` value — wrong matching. Specify `splitOn` explicitly at each join boundary.
-- **Using `buffered: true` for huge result sets** — `connection.Query<HugeRow>("SELECT * FROM BillionRowTable")` loads all into memory. Use `buffered: false` and iterate.
-- **Mixing sync and async** — `connection.QueryAsync(sql).Result` can deadlock. Always await all the way.
-- **Multi-mapping with no matching rows** — `Query<Order, Customer, Order>(...).FirstOrDefault()` returns `null` if no rows. Check for null before accessing.
-- **Not checking return value** — `ExecuteAsync` returns `Task<int>` (rows affected). Ignoring it misses error signals or unexpected results.
+- **Not disposing connections** — `var conn = new SqlConnection(connStr); conn.Query(sql);` leaks the connection. Always use `await using`. This *looks correct* because the query returns results and the variable goes out of scope, but the underlying TCP connection is not returned to the ADO.NET connection pool until `Dispose` is called — without `using`, connections accumulate in a "leaked" state and the pool eventually starves, causing `SqlException: The connection pool has been exhausted` under load.
+- **Forgetting to open connection for transactions** — Dapper opens/closes automatically for simple queries, but transactions require manual `connection.Open()` before `BeginTransaction`. This *looks correct* because Dapper normally handles connection lifetime automatically, but `BeginTransaction` requires an open connection — forgetting the manual `Open()` throws `InvalidOperationException` at runtime with a message that can be confusing when you expect automatic management.
+- **Wrong `splitOn` in multi-mapping** — If a JOIN has multiple `Id` columns and `splitOn` defaults to `"Id"`, all split columns after the first get the second table's `Id` value — wrong matching. Specify `splitOn` explicitly at each join boundary. This *looks correct* because `splitOn: "Id"` is the default and the query returns data without error, but the second mapped object receives `Id` from the wrong table — the `Customer.Id` column value becomes the `Customer` object's `Name` property, producing silently incorrect domain objects.
+- **Using `buffered: true` for huge result sets** — `connection.Query<HugeRow>("SELECT * FROM BillionRowTable")` loads all into memory. Use `buffered: false` and iterate. This *looks correct* because the query executes and returns results without error, but Dapper's default buffered mode materializes the entire result set into a `List<T>` in memory — a 500MB result set causes a large LOH allocation, triggers Gen 2 GC, and can crash with `OutOfMemoryException` on memory-constrained servers.
+- **Mixing sync and async** — `connection.QueryAsync(sql).Result` can deadlock. Always await all the way. This *looks correct* because `.Result` accesses the task's result and appears to work in console applications, but in contexts with a `SynchronizationContext` (ASP.NET Classic, UI apps) the blocked thread is exactly the thread the async continuation needs to resume on, causing a deadlock that hangs the request indefinitely.
+- **Multi-mapping with no matching rows** — `Query<Order, Customer, Order>(...).FirstOrDefault()` returns `null` if no rows. Check for null before accessing. This *looks correct* because `FirstOrDefault` is the standard way to handle empty results, but the returned `null` cascades — accessing `order.Customer` throws `NullReferenceException` at a point far from the query, making the root cause hard to identify.
+- **Not checking return value** — `ExecuteAsync` returns `Task<int>` (rows affected). Ignoring it misses error signals or unexpected results. This *looks correct* because the query executed without throwing an exception, but a zero return value indicates no rows were affected — silently ignoring this means the application believes data was modified when the WHERE clause matched nothing, leading to silent data loss in production.
 
 ```csharp
 // Always parameterize — never concatenate
@@ -230,6 +230,7 @@ public class SqlGeographyHandler : SqlMapper.TypeHandler<SqlGeography>
 
 3. **Q: You have a Dapper query that returns 500K rows for a reporting export. The server's memory spikes to 2GB. How do you fix it?**
    A: Use `buffered: false` in `QueryAsync` — this returns a streaming `IEnumerable<T>` that reads one row at a time from the `IDataReader`. Materialize only what you need. For CSV export, write each row to the response stream as it's read. Example: `await conn.QueryAsync<Product>(sql, buffered: false).SelectAwait(async p => await writer.WriteLineAsync(p.ToCsv()))`. This keeps memory at O(1) regardless of result set size.
+   > **Interview follow-up:** With `buffered: false`, the `IDataReader` stays open while you stream — what happens to the database connection if the consumer is slow, and how does this affect connection pooling?
 
 4. **Q: Your Dapper multi-mapping query isn't populating child objects correctly. The `splitOn` column appears in multiple tables. What's happening?**
    A: With `splitOn: "Id"`, Dapper splits on the FIRST `Id` column in the result set. If both `Orders` and `Customers` have an `Id` column, the customer's `Id` gets mapped as part of the `Order` object (wrong). Fix: use column aliases in SQL (e.g., `SELECT o.Id AS OrderId, o.*, c.Id AS CustomerId, c.* ...`) and set `splitOn: "CustomerId"`. This ensures each split point is unambiguous.
@@ -239,6 +240,7 @@ public class SqlGeographyHandler : SqlMapper.TypeHandler<SqlGeography>
 
 6. **Q: You are debugging a thread-pool starvation issue caused by Dapper queries. The pattern is `Task.Run(() => conn.Query(sql)).Result`. What's wrong and how do you fix it?**
    A: This blocks the thread pool thread with `.Result` AND uses `Task.Run` to push sync work to another thread pool thread. The blocked thread can't process other work items, causing starvation. Fix: use async Dapper methods (`QueryAsync`) and `await` them all the way up. If you must call sync Dapper from an async context (rare), offload to a dedicated thread, not the thread pool. For console apps, use `.GetAwaiter().GetResult()`. In ASP.NET Core, never block on async.
+   > **Interview follow-up:** If you offload to a dedicated thread using `Task.Factory.StartNew` with `LongRunning`, how do you bound the number of dedicated threads to prevent resource exhaustion from concurrent offloaded calls?
 
 7. **Q: You need to implement a paginated search with dynamic filters and sorting. Dapper queries are raw SQL. How do you build the SQL without SQL injection?**
    A: Build the WHERE clause dynamically using a `List<string>` conditions and `DynamicParameters`. Never concatenate user input into SQL. Example:
@@ -269,7 +271,8 @@ var notes = await multi.ReadAsync<Note>();
 Each `Read` call advances the reader to the next result set. Maintain the same order as the stored procedure's SELECT statements. Use `ReadSingleAsync` for exactly-one-row result sets.
 
 10. **Q: Your Dapper queries are 3x slower than raw ADO.NET. You suspect the deserialization delegate generation is the bottleneck. What do you do?**
-    A: Dapper generates IL delegates on first use per `<T, column-set>`. This is expensive (~5-20ms). Warm up the cache at startup by executing a representative query for each entity type. For dynamic queries with varying column sets (SELECT *), the cache grows and each unique column set triggers a new IL generation. Fix: use explicit column lists (`SELECT Id, Name, ...`) to keep column sets stable. Also consider: Dapper's overhead vs ADO.NET is only ~2-5µs after cache warmup — if you're seeing 3x slower, profile to check if the issue is elsewhere (connection management, parameter sniffing, indexing).
+     A: Dapper generates IL delegates on first use per `<T, column-set>`. This is expensive (~5-20ms). Warm up the cache at startup by executing a representative query for each entity type. For dynamic queries with varying column sets (SELECT *), the cache grows and each unique column set triggers a new IL generation. Fix: use explicit column lists (`SELECT Id, Name, ...`) to keep column sets stable. Also consider: Dapper's overhead vs ADO.NET is only ~2-5µs after cache warmup — if you're seeing 3x slower, profile to check if the issue is elsewhere (connection management, parameter sniffing, indexing).
+    > **Interview follow-up:** If you have a query with 50 columns and only 5 are used after mapping, is Dapper still paying the cost of generating a delegate for all 50 columns, and how would you measure that overhead?
 
 ---
 
@@ -309,13 +312,13 @@ Each `Read` call advances the reader to the next result set. Maintain the same o
 
 ## Developer Recommendations
 
-- **Use `buffered: false` for large result sets** — Without it, Dapper materializes all rows into a `List<T>` before returning. For 500K rows, that's ~500MB of allocations. With `buffered: false`, rows are streamed from the `IDataReader`, keeping memory at O(1). Always use for reporting exports and batch processing.
+- **Use `buffered: false` for large result sets** — Without it, Dapper materializes all rows into a `List<T>` before returning. For 500K rows, that's ~500MB of allocations. With `buffered: false`, rows are streamed from the `IDataReader`, keeping memory at O(1). Always use for reporting exports and batch processing. A reporting API once loaded a 2M-row export with `buffered: true` — the server ran out of memory, the process was killed by the OOM killer, and the entire service was down for 5 minutes until the auto-recovery restarted the instance.
 
 - **Always use `await using` for Dapper connections** — Forgetting to dispose a `SqlConnection` leaks the connection back to the pool. The finalizer eventually returns it, but this delays resource reclamation and can cause pool exhaustion under load. Use `await using var conn = new SqlConnection(connStr)` for deterministic disposal.
 
 - **Prefer Dapper for read queries and EF Core for writes (CQRS)** — Dapper gives you full SQL control with lower overhead — ideal for complex queries and reporting. EF Core's change tracking is invaluable on the write side. Mixing both in the same project is common and recommended: use EF Core for domain operations, Dapper for optimized read models.
 
-- **Explicitly list columns in SELECT queries instead of `SELECT *`** — `SELECT *` causes different column sets when tables are altered, invalidating Dapper's deserialization cache and forcing re-compilation of IL delegates. Explicit column lists keep the cache stable and document exactly what data is needed. `SELECT *` also transfers unnecessary network data.
+- **Explicitly list columns in SELECT queries instead of `SELECT *`** — `SELECT *` causes different column sets when tables are altered, invalidating Dapper's deserialization cache and forcing re-compilation of IL delegates. Explicit column lists keep the cache stable and document exactly what data is needed. `SELECT *` also transfers unnecessary network data. A production incident occurred when a DBA added a `VARBINARY(MAX)` audit column to a table — `SELECT *` queries suddenly transferred megabytes per row and the deserialization cache for every query was invalidated, causing a cold-start lag spike that lasted until all unique query shapes had been re-cached.
 
 - **Use `DynamicParameters` over anonymous types for complex queries** — Anonymous types work well for simple parameters. `DynamicParameters` supports output parameters, table-valued parameters, and DbType specification. For stored procedures with output parameters or TVP, always use `DynamicParameters`.
 

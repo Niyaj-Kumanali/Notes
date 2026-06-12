@@ -155,13 +155,13 @@ export default defineConfig({
 
 ## Common Mistakes
 
-- **Forgetting to import from 'vitest'** — Using `describe`, `it`, `expect` without imports (unless `globals: true`)
-- **Confusing `vi.fn()` and `vi.spyOn()`** — `vi.fn()` creates a new mock; `vi.spyOn()` wraps an existing method
-- **Not awaiting async assertions** — `.resolves`/`.rejects` without `await` exits before promise resolves
-- **Sharing mutable state between tests** — State leaks across tests; reset in `beforeEach`
-- **Forgetting `vi.mock` is hoisted** — Imports before `vi.mock` still get the real module
-- **Not clearing mocks** — `vi.clearAllMocks()` in `beforeEach` to prevent call history leaks
-- **Over-mocking** — Mocking DB, cache, logger, and queue in one test hides real integration bugs
+- **Forgetting to import from 'vitest'** — Using `describe`, `it`, `expect` without imports (unless `globals: true`). This *looks correct* because if the project uses `globals: true` in config, the test works without imports, and the difference between global and imported usage is invisible until the config changes or the test runs in a different project.
+- **Confusing `vi.fn()` and `vi.spyOn()`** — `vi.fn()` creates a new mock; `vi.spyOn()` wraps an existing method. This *looks correct* because both produce mock functions that return configured values, and the distinction only matters when you need the real implementation to run for untested calls.
+- **Not awaiting async assertions** — `.resolves`/`.rejects` without `await` exits before promise resolves. This *looks correct* because the assertion does not throw synchronously — it returns a promise that Vitest cannot track without `await`, producing a silent false pass.
+- **Sharing mutable state between tests** — State leaks across tests; reset in `beforeEach`. This *looks correct* because shared variables reduce boilerplate and seem efficient, and the resulting flakiness appears random rather than structural.
+- **Forgetting `vi.mock` is hoisted** — Imports before `vi.mock` still get the real module. This *looks correct* because the code appears to execute top-to-bottom, and the hoisting behavior is invisible — `vi.mock` looks like any other function call.
+- **Not clearing mocks** — `vi.clearAllMocks()` in `beforeEach` to prevent call history leaks. This *looks correct* because each test appears isolated during development, and call history leakage only surfaces as unexplained assertion failures in specific test orderings.
+- **Over-mocking** — Mocking DB, cache, logger, and queue in one test hides real integration bugs. This *looks correct* because mocked tests are fast, never fail due to infrastructure, and achieve high coverage numbers, creating the illusion of thorough testing.
 
 ---
 
@@ -198,6 +198,8 @@ A team migrated to Vitest but tests are flaky — sometimes the mock works, some
 2. **Q: A Vitest test uses `vi.mock('../database')` but the real database is still queried. The mock seems to have no effect. What's going on?**
    A: `vi.mock` is hoisted above imports, but if the import path is dynamic, computed, or uses a variable, hoisting may fail. Fix: (1) Ensure the mock factory returns all exports: `vi.mock('../database', () => ({ query: vi.fn(), connect: vi.fn() }))`. (2) Check that `../database` resolves to the same path the module uses (not a different index file). (3) If the module uses named exports, the mock must return matching named exports. (4) Use `vi.hoisted()` to define mock variables that are accessible before imports.
 
+> **Interview follow-up:** How does `vi.mock` hoisting interact with ES module static imports — if the module you are mocking uses named exports, what must your mock factory return to satisfy the import binding?
+
 3. **Q: Your team uses Vitest with `pool: 'threads'`. Tests are fast but occasionally one test's mocks leak into another test's scope. How do you ensure test isolation?**
    A: Threads (worker_threads) share some module state. Fix: (1) Add `beforeEach(() => { vi.clearAllMocks(); vi.unstubAllEnvs(); })` to every test file. (2) Use `pool: 'forks'` instead of `pool: 'threads'` — forks create separate process spaces with better isolation. Trade-off: forks are 10-20% slower. (3) For critical tests, wrap each test in `describe` with its own `beforeEach`. (4) Never mock at the top level of a test file — mock inside `describe` blocks.
 
@@ -212,6 +214,8 @@ A team migrated to Vitest but tests are flaky — sometimes the mock works, some
    ```
    Each workspace entry can have its own config, setup files, and dependencies. Run all: `vitest run`. Run one: `vitest run --project web`.
 
+> **Interview follow-up:** What happens when two workspace entries share a dependency that behaves differently in `jsdom` vs `node` — how do you isolate the module instances between environments?
+
 5. **Q: A developer uses `vi.fn()` to mock a function but also wants to call the real implementation for specific arguments (e.g., real for valid input, mock for invalid). How?**
    A: Use `vi.fn().mockImplementation((arg) => { if (isValid(arg)) return realImpl(arg); else return mockReturn; })`. Or use `vi.spyOn(module, 'method').mockImplementation(...)` to wrap an existing method. For conditional fallthrough: `const spy = vi.spyOn(module, 'method'); spy.mockImplementation((arg) => { if (errorCase) return 'mock'; return spy.getOriginal()(arg); })`.
 
@@ -220,6 +224,8 @@ A team migrated to Vitest but tests are flaky — sometimes the mock works, some
 
 7. **Q: A Vitest integration test uses `globalSetup` to start a PostgreSQL container. The setup takes 10 seconds and runs once before all tests. But when a test modifies the database, other tests see the changes. How do you isolate database state?**
    A: Use a transaction-per-test pattern. In `globalSetup`, create the database and run migrations. In `beforeEach`, start a database transaction. In `afterEach`, roll back the transaction. This is fast (no container restart) and provides full isolation. For parallel workers, use a connection pool where each worker gets its own connection. Use a unique schema per worker: `CREATE SCHEMA IF NOT EXISTS test_worker_${workerId}`.
+
+> **Interview follow-up:** How do you handle database migrations when each parallel worker needs its own schema — do you run migrations per worker or once globally before the workers start?
 
 8. **Q: You need to test a Vite plugin that transforms `.mdx` files. How do you write a Vitest test for this without building the entire app?**
    A: Use Vite's build API programmatically:
@@ -283,9 +289,9 @@ A team migrated to Vitest but tests are flaky — sometimes the mock works, some
 
 ## Developer Recommendations
 
-- **Use `vi.spyOn` over `vi.mock` when possible** — `vi.mock` replaces the entire module; `vi.spyOn` wraps the real method. Spying catches more real behavior and reduces false positives. Trade-off: `vi.spyOn` doesn't work for all ESM patterns. Benefit: tests exercise real code paths, catching more bugs.
+- **Use `vi.spyOn` over `vi.mock` when possible** — `vi.mock` replaces the entire module; `vi.spyOn` wraps the real method. Spying catches more real behavior and reduces false positives. Trade-off: `vi.spyOn` doesn't work for all ESM patterns. Benefit: tests exercise real code paths, catching more bugs. A team used `vi.mock` for their entire data access layer and maintained 95% coverage, but every deployment to staging uncovered real SQL errors that the mocked tests never exercised — switching to `vi.spyOn` on the real module caught three critical query bugs in the first week.
 
-- **Set up `vi.clearAllMocks` in `beforeEach`** — Mock state leaks between tests in threaded pools. Always reset: `beforeEach(() => { vi.clearAllMocks(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); })`. Trade-off: boilerplate. Benefit: no order-dependent test failures.
+- **Set up `vi.clearAllMocks` in `beforeEach`** — Mock state leaks between tests in threaded pools. Always reset: `beforeEach(() => { vi.clearAllMocks(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); })`. Trade-off: boilerplate. Benefit: no order-dependent test failures. In a threaded pool, a team spent two weeks debugging a flaky test that only failed on the third CI run — the root cause was a mock return value from a previous test leaking through worker thread memory, which `vi.clearAllMocks()` would have eliminated.
 
 - **Use `pool: 'forks'` in CI for better isolation** — Threads share process state, which can cause mock leaks. Forks create separate processes. Trade-off: 10-20% slower. Benefit: eliminates an entire category of flaky tests.
 

@@ -145,16 +145,16 @@
 
 | File | Status |
 |------|--------|
-| Database/SQL.md | ⬜ |
-| Database/Indexing.md | ⬜ |
-| Database/Transactions.md | ⬜ |
-| Database/Isolation-Levels.md | ⬜ |
-| Database/Locking.md | ⬜ |
-| Database/Normalization.md | ⬜ |
-| Database/Denormalization.md | ⬜ |
-| Database/Query-Optimization.md | ⬜ |
-| Database/Execution-Plans.md | ⬜ |
-| Database/Stored-Procedures.md | ⬜ |
+| Database/SQL.md | ✅ |
+| Database/Indexing.md | ✅ |
+| Database/Transactions.md | ✅ |
+| Database/Isolation-Levels.md | ✅ |
+| Database/Locking.md | ✅ |
+| Database/Normalization.md | ✅ |
+| Database/Denormalization.md | ✅ |
+| Database/Query-Optimization.md | ✅ |
+| Database/Execution-Plans.md | ✅ |
+| Database/Stored-Procedures.md | ✅ |
 
 ---
 
@@ -162,13 +162,13 @@
 
 | File | Status |
 |------|--------|
-| Cloud-DevOps/Docker.md | ⬜ |
-| Cloud-DevOps/CI-CD.md | ⬜ |
-| Cloud-DevOps/Jenkins.md | ⬜ |
-| Cloud-DevOps/GitHub-Actions.md | ⬜ |
-| Cloud-DevOps/Azure-DevOps.md | ⬜ |
-| Cloud-DevOps/Azure.md | ⬜ |
-| Cloud-DevOps/AWS.md | ⬜ |
+| Cloud-DevOps/Docker.md | ✅ |
+| Cloud-DevOps/CI-CD.md | ✅ |
+| Cloud-DevOps/Jenkins.md | ✅ |
+| Cloud-DevOps/GitHub-Actions.md | ✅ |
+| Cloud-DevOps/Azure-DevOps.md | ✅ |
+| Cloud-DevOps/Azure.md | ✅ |
+| Cloud-DevOps/AWS.md | ✅ |
 
 ---
 
@@ -176,10 +176,10 @@
 
 | File | Status |
 |------|--------|
-| Testing/API-Testing.md | ⬜ |
-| Testing/Integration-Testing.md | ⬜ |
-| Testing/Jest.md | ⬜ |
-| Testing/Vitest.md | ⬜ |
+| Testing/API-Testing.md | ✅ |
+| Testing/Integration-Testing.md | ✅ |
+| Testing/Jest.md | ✅ |
+| Testing/Vitest.md | ✅ |
 
 ---
 
@@ -189,24 +189,24 @@
 
 | File | Status |
 |------|--------|
-| CSharp/Core/Collections.md | ⬜ |
-| CSharp/Core/LINQ.md | ⬜ |
-| CSharp/Core/Lambda-Expressions.md | ⬜ |
-| CSharp/Core/IO-Streams.md | ⬜ |
+| CSharp/Core/Collections.md | ✅ |
+| CSharp/Core/LINQ.md | ✅ |
+| CSharp/Core/Lambda-Expressions.md | ✅ |
+| CSharp/Core/IO-Streams.md | ✅ |
 
 ### Concurrency
 
 | File | Status |
 |------|--------|
-| CSharp/Concurrency/Multithreading.md | ⬜ |
-| CSharp/Concurrency/Async-Await.md | ⬜ |
+| CSharp/Concurrency/Multithreading.md | ✅ |
+| CSharp/Concurrency/Async-Await.md | ✅ |
 
 ### Frameworks
 
 | File | Status |
 |------|--------|
-| CSharp/Frameworks/Entity-Framework.md | ⬜ |
-| CSharp/Frameworks/Dapper.md | ⬜ |
+| CSharp/Frameworks/Entity-Framework.md | ✅ |
+| CSharp/Frameworks/Dapper.md | ✅ |
 
 ---
 
@@ -214,7 +214,7 @@
 
 | File | Status |
 |------|--------|
-| Methodology/Agile.md | ⬜ |
-| Methodology/Scrum.md | ⬜ |
+| Methodology/Agile.md | ✅ |
+| Methodology/Scrum.md | ✅ |
 
 
