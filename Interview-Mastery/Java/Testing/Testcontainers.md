@@ -95,12 +95,18 @@ static KafkaContainer kafka = new KafkaContainer(
 
 ## Common Mistakes
 
-- **Non-static `@Container`** — creates a new container per test, very slow. This *looks correct* because the `@Container` annotation is present and the container starts — the developer only notices the problem when the test suite takes 10 minutes instead of 30 seconds. Use `static` for containers shared across all tests.
-- **Forgetting `@Testcontainers`** — container lifecycle is not managed, container never starts. This *looks correct* because the `@Container` annotation is present on the field and the code compiles — the container simply never starts, and the test fails with a confusing connection refused error.
-- **Wrong `@DynamicPropertySource` method signature** — must be `static void` with `DynamicPropertyRegistry` parameter. This *looks correct* because the method compiles and the IDE may not flag it — the method simply never executes, and the Spring context uses default properties.
-- **Using `localhost` instead of container host** — containers run in their own network; use `postgres::getJdbcUrl` instead of hardcoded strings. This *looks correct* because `localhost:5432` is the standard PostgreSQL URL and works when the developer has a local PostgreSQL running — the test connects to the wrong database without error.
-- **Container version mismatch with local database** — test against the same database version used in production. This *looks correct* because the tests pass against `postgres:15` while production runs `postgres:14` — the minor version difference rarely causes issues until a query uses a feature not in production.
-- **Not handling container startup failures** — container may fail to start on resource-constrained CI runners. This *looks correct* because the container starts reliably on a developer's machine with sufficient resources — the startup failure only appears in CI with limited Docker memory.
+- **Non-static `@Container`** — creates a new container per test, very slow.
+  - **Why it looks correct:** the `@Container` annotation is present and the container starts — the developer only notices the problem when the test suite takes 10 minutes instead of 30 seconds. Use `static` for containers shared across all tests.
+- **Forgetting `@Testcontainers`** — container lifecycle is not managed, container never starts.
+  - **Why it looks correct:** the `@Container` annotation is present on the field and the code compiles — the container simply never starts, and the test fails with a confusing connection refused error.
+- **Wrong `@DynamicPropertySource` method signature** — must be `static void` with `DynamicPropertyRegistry` parameter.
+  - **Why it looks correct:** the method compiles and the IDE may not flag it — the method simply never executes, and the Spring context uses default properties.
+- **Using `localhost` instead of container host** — containers run in their own network; use `postgres::getJdbcUrl` instead of hardcoded strings.
+  - **Why it looks correct:** `localhost:5432` is the standard PostgreSQL URL and works when the developer has a local PostgreSQL running — the test connects to the wrong database without error.
+- **Container version mismatch with local database** — test against the same database version used in production.
+  - **Why it looks correct:** the tests pass against `postgres:15` while production runs `postgres:14` — the minor version difference rarely causes issues until a query uses a feature not in production.
+- **Not handling container startup failures** — container may fail to start on resource-constrained CI runners.
+  - **Why it looks correct:** the container starts reliably on a developer's machine with sufficient resources — the startup failure only appears in CI with limited Docker memory.
 
 ---
 
@@ -263,234 +269,243 @@ Toxiproxy sits between the application and PostgreSQL, injecting latency or cutt
 
 ## Scenario-Based Questions
 
-1. **Q: You are migrating a Spring Boot application from H2 in-memory database to PostgreSQL. The application has 200 repository tests that use `@DataJpaTest` with H2. Management wants to move to production in 2 weeks. How do you safely transition without rewriting all tests?**
-   A: Add Testcontainers PostgreSQL tests alongside existing H2 tests, then gradually migrate:
-   ```java
-   // Phase 1: Both run in CI (H2 for speed, PostgreSQL for accuracy)
-   @Tag("h2")
-   @DataJpaTest
-   class OrderRepositoryH2Test { /* existing H2 tests */ }
+- **Q: You are migrating a Spring Boot application from H2 in-memory database to PostgreSQL. The application has 200 repository tests that use `@DataJpaTest` with H2. Management wants to move to production in 2 weeks. How do you safely transition without rewriting all tests?**
+  - Add Testcontainers PostgreSQL tests alongside existing H2 tests, then gradually migrate:
+    ```java
+    // Phase 1: Both run in CI (H2 for speed, PostgreSQL for accuracy)
+    @Tag("h2")
+    @DataJpaTest
+    class OrderRepositoryH2Test { /* existing H2 tests */ }
 
-   @Tag("postgres")
-   @DataJpaTest
-   @Testcontainers
-   @AutoConfigureTestDatabase(replace = NONE) // don't replace with H2
-   class OrderRepositoryPostgresTest {
-       @Container static PostgreSQLContainer<?> pg = new PostgreSQLContainer<>("postgres:15");
-       @DynamicPropertySource static void props(DynamicPropertyRegistry r) { /* ... */ }
-       // Same test methods as H2 test — run against real PostgreSQL
-   }
-   ```
-   Strategy: (1) Keep H2 tests for fast local feedback (1s). (2) Add PostgreSQL variants that run in CI (30s). (3) Run both in CI for 1 sprint to catch all differences. (4) Remove H2 tests when PostgreSQL coverage is complete. Common differences caught: `BOOLEAN` vs `BIT`, `LONGVARCHAR` vs `TEXT`, constraint deferrability, sequence allocation size, and `Enum` ordinal vs string mapping.
+    @Tag("postgres")
+    @DataJpaTest
+    @Testcontainers
+    @AutoConfigureTestDatabase(replace = NONE) // don't replace with H2
+    class OrderRepositoryPostgresTest {
+        @Container static PostgreSQLContainer<?> pg = new PostgreSQLContainer<>("postgres:15");
+        @DynamicPropertySource static void props(DynamicPropertyRegistry r) { /* ... */ }
+        // Same test methods as H2 test — run against real PostgreSQL
+    }
+    ```
+  - Strategy: (1) Keep H2 tests for fast local feedback (1s). (2) Add PostgreSQL variants that run in CI (30s). (3) Run both in CI for 1 sprint to catch all differences. (4) Remove H2 tests when PostgreSQL coverage is complete.
+  - Common differences caught: `BOOLEAN` vs `BIT`, `LONGVARCHAR` vs `TEXT`, constraint deferrability, sequence allocation size, and `Enum` ordinal vs string mapping.
 
-2. **Q: A developer onboards to the project and runs tests locally for the first time. Testcontainers takes 5 minutes to pull the PostgreSQL image. The developer's internet is slow. The tests fail because Docker Desktop isn't running. How do you make the first-run experience smooth?**
-   A: Pre-pull images in a build script, and add a clear error message when Docker is unavailable:
+- **Q: A developer onboards to the project and runs tests locally for the first time. Testcontainers takes 5 minutes to pull the PostgreSQL image. The developer's internet is slow. The tests fail because Docker Desktop isn't running. How do you make the first-run experience smooth?**
+  - Pre-pull images in a build script, and add a clear error message when Docker is unavailable:
+    ```java
+    // Build script (Maven/Gradle): pre-pulls images before tests
+    // mvn validate or gradle --no-daemon testClasses pulls images
 
-   > **Interview follow-up:** The candidate suggested `@Testcontainers(disabledWithoutDocker = true)` to skip tests when Docker is unavailable. The developer's machine passes CI checks locally by skipping all Testcontainers tests. They submit a PR that introduces a PostgreSQL-specific query using `JSONB` — all tests pass locally (because they were skipped), all unit tests pass in CI, but the integration tests in CI catch the incompatibility only after 15 minutes of pipeline time. How would you design the local dev workflow so that a developer must have Testcontainers working before they can merge, without forcing every team member to always run the full integration suite?
-   ```java
-   // Build script (Maven/Gradle): pre-pulls images before tests
-   // mvn validate or gradle --no-daemon testClasses pulls images
+    // Graceful fallback when Docker is unavailable
+    @Testcontainers(disabledWithoutDocker = true) // Skip tests if Docker missing
+    @SpringBootTest
+    class OrderRepositoryTest {
+        @Container
+        static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:15");
+    }
+    ```
+  - `@Testcontainers(disabledWithoutDocker = true)` skips the entire test class if Docker isn't available, with a clear log message.
+  - For first-run speed: (1) Add a `DockerSetup` task in the build that runs `docker pull` before tests. (2) Use `withReuse(true)` — the container stays running between test runs. (3) Document in the README: "Run `docker pull postgres:15` once before first test." (4) For CI, cache the Docker image layer in the CI cache.
+  - **Interview follow-up:** The candidate suggested `@Testcontainers(disabledWithoutDocker = true)` to skip tests when Docker is unavailable. The developer's machine passes CI checks locally by skipping all Testcontainers tests. They submit a PR that introduces a PostgreSQL-specific query using `JSONB` — all tests pass locally (because they were skipped), all unit tests pass in CI, but the integration tests in CI catch the incompatibility only after 15 minutes of pipeline time. How would you design the local dev workflow so that a developer must have Testcontainers working before they can merge, without forcing every team member to always run the full integration suite?
 
-   // Graceful fallback when Docker is unavailable
-   @Testcontainers(disabledWithoutDocker = true) // Skip tests if Docker missing
-   @SpringBootTest
-   class OrderRepositoryTest {
-       @Container
-       static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:15");
-   }
-   ```
-   `@Testcontainers(disabledWithoutDocker = true)` skips the entire test class if Docker isn't available, with a clear log message. For first-run speed: (1) Add a `DockerSetup` task in the build that runs `docker pull` before tests. (2) Use `withReuse(true)` — the container stays running between test runs. (3) Document in the README: "Run `docker pull postgres:15` once before first test." (4) For CI, cache the Docker image layer in the CI cache.
+- **Q: A service uses MongoDB with unique indexes and GridFS for file storage. You want to test repository methods with Testcontainers. The MongoDB container takes 15 seconds to start and each test class starts a new container. The test suite has 10 test classes. How do you share one MongoDB container across all test classes?**
+  - Create a shared container in an abstract base class with manual lifecycle control:
+    ```java
+    public abstract class MongoTestBase {
+        private static final MongoDBContainer mongo = new MongoDBContainer("mongo:7");
 
-3. **Q: A service uses MongoDB with unique indexes and GridFS for file storage. You want to test repository methods with Testcontainers. The MongoDB container takes 15 seconds to start and each test class starts a new container. The test suite has 10 test classes. How do you share one MongoDB container across all test classes?**
-   A: Create a shared container in an abstract base class with manual lifecycle control:
-   ```java
-   public abstract class MongoTestBase {
-       private static final MongoDBContainer mongo = new MongoDBContainer("mongo:7");
+        static {
+            mongo.start();
+        }
 
-       static {
-           mongo.start();
-       }
+        @DynamicPropertySource
+        static void configureProperties(DynamicPropertyRegistry registry) {
+            registry.add("spring.data.mongodb.uri", mongo::getReplicaSetUrl);
+        }
+    }
 
-       @DynamicPropertySource
-       static void configureProperties(DynamicPropertyRegistry registry) {
-           registry.add("spring.data.mongodb.uri", mongo::getReplicaSetUrl);
-       }
-   }
+    class UserRepositoryTest extends MongoTestBase { /* ... */ }
+    class FileStoreTest extends MongoTestBase { /* ... */ }
+    ```
+  - The container starts once in the static initializer and stays running for all test classes. `@DynamicPropertySource` runs before the Spring context starts, ensuring the correct connection URI.
+  - For parallel execution, use `synchronized` on the container start or use Testcontainers' built-in singleton container support. The image `mongo:7` uses MongoDB's replica set mode which supports transactions.
+  - This reduces test time from 15s × 10 = 150s to 15s + 9 × 0.5s = 19.5s.
 
-   class UserRepositoryTest extends MongoTestBase { /* ... */ }
-   class FileStoreTest extends MongoTestBase { /* ... */ }
-   ```
-   The container starts once in the static initializer and stays running for all test classes. `@DynamicPropertySource` runs before the Spring context starts, ensuring the correct connection URI. For parallel execution, use `synchronized` on the container start or use Testcontainers' built-in singleton container support. The image `mongo:7` uses MongoDB's replica set mode which supports transactions. This reduces test time from 15s × 10 = 150s to 15s + 9 × 0.5s = 19.5s.
+- **Q: A microservice uses S3 (via LocalStack) to store user-uploaded files. An integration test uploads a file, verifies it's stored, downloads it, and checks the content. The test passes locally but fails in CI because LocalStack's S3 API behavior differs from production AWS S3 in subtle ways. How do you write tests that work reliably?**
+  - Pin LocalStack to a specific version and use the S3 API compatibility mode:
+    ```java
+    @Container
+    static LocalStackContainer localstack = new LocalStackContainer(
+            DockerImageName.parse("localstack/localstack:3.0.0"))
+        .withServices(Service.S3);
 
-4. **Q: A microservice uses S3 (via LocalStack) to store user-uploaded files. An integration test uploads a file, verifies it's stored, downloads it, and checks the content. The test passes locally but fails in CI because LocalStack's S3 API behavior differs from production AWS S3 in subtle ways. How do you write tests that work reliably?**
-   A: Pin LocalStack to a specific version and use the S3 API compatibility mode:
-   ```java
-   @Container
-   static LocalStackContainer localstack = new LocalStackContainer(
-           DockerImageName.parse("localstack/localstack:3.0.0"))
-       .withServices(Service.S3);
+    @DynamicPropertySource
+    static void properties(DynamicPropertyRegistry registry) {
+        registry.add("spring.cloud.aws.s3.endpoint",
+            () -> localstack.getEndpointOverride(Service.S3).toString());
+        registry.add("spring.cloud.aws.credentials.access-key", () -> "test");
+        registry.add("spring.cloud.aws.credentials.secret-key", () -> "test");
+        registry.add("spring.cloud.aws.region.static", () -> "us-east-1");
+    }
 
-   @DynamicPropertySource
-   static void properties(DynamicPropertyRegistry registry) {
-       registry.add("spring.cloud.aws.s3.endpoint",
-           () -> localstack.getEndpointOverride(Service.S3).toString());
-       registry.add("spring.cloud.aws.credentials.access-key", () -> "test");
-       registry.add("spring.cloud.aws.credentials.secret-key", () -> "test");
-       registry.add("spring.cloud.aws.region.static", () -> "us-east-1");
-   }
+    @Test
+    void shouldUploadAndDownloadFile() {
+        String key = "test/" + UUID.randomUUID() + ".txt";
+        s3Client.putObject(bucket, key, "Hello World");
 
-   @Test
-   void shouldUploadAndDownloadFile() {
-       String key = "test/" + UUID.randomUUID() + ".txt";
-       s3Client.putObject(bucket, key, "Hello World");
+        byte[] data = s3Client.getObjectAsBytes(bucket, key);
+        assertEquals("Hello World", new String(data));
+    }
+    ```
+  - Pin the specific LocalStack version (`3.0.0`) — `latest` can change behavior between CI runs. Use `getEndpointOverride()` which returns the correct local URL with port.
+  - For production parity: (1) Use `withLegacyEndpointMode()` if needed for SDK v1 compatibility. (2) Test S3 event notifications with LocalStack's notification system. (3) For S3 consistency model differences (read-after-write vs eventual), document the divergence between LocalStack and production AWS.
 
-       byte[] data = s3Client.getObjectAsBytes(bucket, key);
-       assertEquals("Hello World", new String(data));
-   }
-   ```
-   Pin the specific LocalStack version (`3.0.0`) — `latest` can change behavior between CI runs. Use `getEndpointOverride()` which returns the correct local URL with port. For production parity: (1) Use `withLegacyEndpointMode()` if needed for SDK v1 compatibility. (2) Test S3 event notifications with LocalStack's notification system. (3) For S3 consistency model differences (read-after-write vs eventual), document the divergence between LocalStack and production AWS.
+- **Q: A test uses `@Container` PostgreSQL with a Flyway migration that creates 20 tables. Each test method in the class modifies data. After running 20 test methods, the database has accumulated test data. The 21st test fails because it assumes an empty database. How do you handle test isolation with the shared container?**
+  - Use `@Sql` to reset data between tests or truncate tables in `@BeforeEach`:
+    ```java
+    @SpringBootTest
+    @Testcontainers
+    class OrderRepositoryTest {
+        @Autowired private JdbcTemplate jdbc;
 
-5. **Q: A test uses `@Container` PostgreSQL with a Flyway migration that creates 20 tables. Each test method in the class modifies data. After running 20 test methods, the database has accumulated test data. The 21st test fails because it assumes an empty database. How do you handle test isolation with the shared container?**
-   A: Use `@Sql` to reset data between tests or truncate tables in `@BeforeEach`:
-   ```java
-   @SpringBootTest
-   @Testcontainers
-   class OrderRepositoryTest {
-       @Autowired private JdbcTemplate jdbc;
+        @BeforeEach
+        void cleanDatabase() {
+            // Truncate all tables in correct order (respect foreign keys)
+            jdbc.execute("TRUNCATE TABLE order_items CASCADE");
+            jdbc.execute("TRUNCATE TABLE orders CASCADE");
+            jdbc.execute("TRUNCATE TABLE users CASCADE");
+        }
 
-       @BeforeEach
-       void cleanDatabase() {
-           // Truncate all tables in correct order (respect foreign keys)
-           jdbc.execute("TRUNCATE TABLE order_items CASCADE");
-           jdbc.execute("TRUNCATE TABLE orders CASCADE");
-           jdbc.execute("TRUNCATE TABLE users CASCADE");
-       }
+        @Test
+        @Sql(statements = "INSERT INTO users (id, email) VALUES (1, 'test@test.com')")
+        void testWithInitialData() {
+            // ...
+        }
+    }
+    ```
+  - For Spring Boot, use `@Sql(executionPhase = BEFORE_TEST_METHOD)` to run setup scripts and `@Sql(executionPhase = AFTER_TEST_METHOD)` for cleanup.
+  - For many test classes, extract the cleanup to a base class or use a `@BeforeEach` in an abstract base. TRUNCATE with CASCADE handles foreign key dependencies.
+  - For large schemas, consider restoring a database snapshot between test classes (using `pg_restore`) instead of running all migrations for each class.
 
-       @Test
-       @Sql(statements = "INSERT INTO users (id, email) VALUES (1, 'test@test.com')")
-       void testWithInitialData() {
-           // ...
-       }
-   }
-   ```
-   For Spring Boot, use `@Sql(executionPhase = BEFORE_TEST_METHOD)` to run setup scripts and `@Sql(executionPhase = AFTER_TEST_METHOD)` for cleanup. For many test classes, extract the cleanup to a base class or use a `@BeforeEach` in an abstract base. TRUNCATE with CASCADE handles foreign key dependencies. For large schemas, consider restoring a database snapshot between test classes (using `pg_restore`) instead of running all migrations for each class.
+- **Q: A team writes integration tests with Testcontainers that connect to PostgreSQL, Redis, Kafka, and LocalStack (S3). Starting 4 containers per test class takes 2 minutes. The test suite has 30 test classes, totaling 60 minutes. How do you reduce total CI time to under 15 minutes?**
+  - Create a single integration test suite that shares all containers:
+    ```java
+    @SpringBootTest
+    @Testcontainers
+    public interface SharedContainers {
+        PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:15");
+        GenericContainer<?> REDIS = new GenericContainer<>("redis:7-alpine").withExposedPorts(6379);
+        KafkaContainer KAFKA = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.4.0"));
 
-6. **Q: A team writes integration tests with Testcontainers that connect to PostgreSQL, Redis, Kafka, and LocalStack (S3). Starting 4 containers per test class takes 2 minutes. The test suite has 30 test classes, totaling 60 minutes. How do you reduce total CI time to under 15 minutes?**
-   A: Create a single integration test suite that shares all containers:
+        @DynamicPropertySource
+        static void properties(DynamicPropertyRegistry registry) {
+            registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
+            registry.add("spring.redis.host", REDIS::getHost);
+            registry.add("spring.redis.port", () -> REDIS.getMappedPort(6379));
+            registry.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
+        }
+    }
 
-   > **Interview follow-up:** The candidate proposed an interface with shared static containers. After 6 months, one of the 30 test classes needs a specific PostgreSQL extension (`pg_stat_statements`) that requires a different container image and startup command. Adding this to the shared PostgreSQL container would affect all 29 other test classes, potentially breaking them. How would you design the shared container approach to allow per-test-class customization (different images, different startup parameters) while still sharing the container startup cost?
-   ```java
-   @SpringBootTest
-   @Testcontainers
-   public interface SharedContainers {
-       PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:15");
-       GenericContainer<?> REDIS = new GenericContainer<>("redis:7-alpine").withExposedPorts(6379);
-       KafkaContainer KAFKA = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.4.0"));
+    // Multiple test classes implement the same interface
+    class OrderRepositoryTest implements SharedContainers { /* ... */ }
+    class KafkaEventTest implements SharedContainers { /* ... */ }
+    ```
+  - All containers are `static` and initialized once per JVM. Test classes implement an interface that exposes the shared containers. The Spring context is also shared (cached by Spring Boot) — the `@DynamicPropertySource` runs once.
+  - Total time: 2 minutes (container startup) + 30 × 5s (test execution) = ~4.5 minutes. Use `@DirtiesContext` sparingly — it destroys the shared context and forces a restart.
+  - **Interview follow-up:** The candidate proposed an interface with shared static containers. After 6 months, one of the 30 test classes needs a specific PostgreSQL extension (`pg_stat_statements`) that requires a different container image and startup command. Adding this to the shared PostgreSQL container would affect all 29 other test classes, potentially breaking them. How would you design the shared container approach to allow per-test-class customization (different images, different startup parameters) while still sharing the container startup cost?
 
-       @DynamicPropertySource
-       static void properties(DynamicPropertyRegistry registry) {
-           registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
-           registry.add("spring.redis.host", REDIS::getHost);
-           registry.add("spring.redis.port", () -> REDIS.getMappedPort(6379));
-           registry.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
-       }
-   }
+- **Q: A service uses Kafka transactions (exactly-once semantics). An integration test produces a message within a transaction, consumes it, and verifies the side effect. The test passes even when transactions are broken (the service processes the message before the transaction commits). How do you write a test that verifies transactional exactly-once processing?**
+  - Use Kafka's transactional API and verify that messages are consumed only after the transaction commits:
+    ```java
+    @Test
+    void shouldProcessMessagesExactlyOnce() {
+        // Start a Kafka transaction
+        kafkaTemplate.executeInTransaction(operations -> {
+            operations.send("orders", new OrderEvent("order-1", "CREATED"));
+            operations.send("orders", new OrderEvent("order-1", "UPDATED"));
+            return true;
+        });
 
-   // Multiple test classes implement the same interface
-   class OrderRepositoryTest implements SharedContainers { /* ... */ }
-   class KafkaEventTest implements SharedContainers { /* ... */ }
-   ```
-   All containers are `static` and initialized once per JVM. Test classes implement an interface that exposes the shared containers. The Spring context is also shared (cached by Spring Boot) — the `@DynamicPropertySource` runs once. Total time: 2 minutes (container startup) + 30 × 5s (test execution) = ~4.5 minutes. Use `@DirtiesContext` sparingly — it destroys the shared context and forces a restart.
+        // Consumer should get both messages exactly once
+        await().atMost(10, TimeUnit.SECONDS)
+            .untilAsserted(() -> {
+                List<OrderEvent> received = testConsumer.getReceivedEvents();
+                assertThat(received).hasSize(2);
+                assertThat(received.get(0).status()).isEqualTo("CREATED");
+                assertThat(received.get(1).status()).isEqualTo("UPDATED");
+            });
 
-7. **Q: A service uses Kafka transactions (exactly-once semantics). An integration test produces a message within a transaction, consumes it, and verifies the side effect. The test passes even when transactions are broken (the service processes the message before the transaction commits). How do you write a test that verifies transactional exactly-once processing?**
-   A: Use Kafka's transactional API and verify that messages are consumed only after the transaction commits:
-   ```java
-   @Test
-   void shouldProcessMessagesExactlyOnce() {
-       // Start a Kafka transaction
-       kafkaTemplate.executeInTransaction(operations -> {
-           operations.send("orders", new OrderEvent("order-1", "CREATED"));
-           operations.send("orders", new OrderEvent("order-1", "UPDATED"));
-           return true;
-       });
+        // Verify no duplicates
+        long uniqueOrderIds = testConsumer.getReceivedEvents().stream()
+            .map(OrderEvent::orderId).distinct().count();
+        assertEquals(1, uniqueOrderIds);
+    }
 
-       // Consumer should get both messages exactly once
-       await().atMost(10, TimeUnit.SECONDS)
-           .untilAsserted(() -> {
-               List<OrderEvent> received = testConsumer.getReceivedEvents();
-               assertThat(received).hasSize(2);
-               assertThat(received.get(0).status()).isEqualTo("CREATED");
-               assertThat(received.get(1).status()).isEqualTo("UPDATED");
-           });
+    @Test
+    void shouldNotProcessAbortedTransaction() {
+        // Start a transaction that is rolled back
+        assertThrows(RuntimeException.class, () ->
+            kafkaTemplate.executeInTransaction(operations -> {
+                operations.send("orders", new OrderEvent("order-2", "CREATED"));
+                throw new RuntimeException("rollback!");
+            })
+        );
 
-       // Verify no duplicates
-       long uniqueOrderIds = testConsumer.getReceivedEvents().stream()
-           .map(OrderEvent::orderId).distinct().count();
-       assertEquals(1, uniqueOrderIds);
-   }
+        // Consumer should NOT receive the message (transaction was aborted)
+        await().during(5, TimeUnit.SECONDS)
+            .untilAsserted(() -> {
+                List<OrderEvent> received = testConsumer.getReceivedEvents();
+                assertThat(received).isEmpty();
+            });
+    }
+    ```
+  - `executeInTransaction()` commits the transaction only if the lambda returns normally. If an exception is thrown, the transaction is rolled back and the message is never committed.
+  - The `during(5, SECONDS)` assertion verifies the negative case: the message does NOT arrive within 5 seconds. This tests the atomicity guarantee: either all messages in the transaction are delivered or none are.
 
-   @Test
-   void shouldNotProcessAbortedTransaction() {
-       // Start a transaction that is rolled back
-       assertThrows(RuntimeException.class, () ->
-           kafkaTemplate.executeInTransaction(operations -> {
-               operations.send("orders", new OrderEvent("order-2", "CREATED"));
-               throw new RuntimeException("rollback!");
-           })
-       );
+- **Q: A developer adds a Testcontainers test that uses `GenericContainer` with a custom image. The image entrypoint requires environment variables that differ between local dev and CI (API keys, secrets). How do you pass environment-specific configuration to Testcontainers without hardcoding secrets?**
+  - Use environment variables or `.env` files with `withEnv()`:
+    ```java
+    @Container
+    static GenericContainer<?> customService = new GenericContainer<>("my-service:1.0")
+        .withEnv("API_KEY", System.getenv("TEST_API_KEY"))
+        .withEnv("ENVIRONMENT", "test")
+        .withEnv("LOG_LEVEL", "DEBUG");
+    ```
+  - Never hardcode secrets in test code. For local development, use a `.env` file loaded at runtime:
+    ```java
+    // Load from .env.test file
+    Dotenv dotenv = Dotenv.configure().filename(".env.test").load();
+    customService.withEnv("API_KEY", dotenv.get("API_KEY"));
+    ```
+  - For CI, set secrets in the CI environment variables (`TEST_API_KEY`). Testcontainers supports `withCopyToContainer()` for config files mounted into the container.
+  - For complex configurations, create a `docker-compose.yml` for the external service and use `DockerComposeContainer` — it supports variable substitution from environment variables.
 
-       // Consumer should NOT receive the message (transaction was aborted)
-       await().during(5, TimeUnit.SECONDS)
-           .untilAsserted(() -> {
-               List<OrderEvent> received = testConsumer.getReceivedEvents();
-               assertThat(received).isEmpty();
-           });
-   }
-   ```
-   `executeInTransaction()` commits the transaction only if the lambda returns normally. If an exception is thrown, the transaction is rolled back and the message is never committed. The `during(5, SECONDS)` assertion verifies the negative case: the message does NOT arrive within 5 seconds. This tests the atomicity guarantee: either all messages in the transaction are delivered or none are.
+- **Q: An integration test with Testcontainers starts 4 containers (PostgreSQL, Redis, Kafka, Elasticsearch). One of the containers fails to start in CI with "no space left on device". The Docker image cache has accumulated 10GB of old images. How do you manage Docker disk space in CI?**
+  - Add Docker cleanup to the CI pipeline and use `.withReuse(false)` in CI:
+    ```yaml
+    # CI pipeline — clean Docker before and after
+    jobs:
+      test:
+        steps:
+          - name: Clean Docker
+            run: docker system prune -af --volumes
+          - name: Run tests
+            run: mvn verify
+          - name: Post-cleanup
+            run: docker system prune -af --volumes
+    ```
+  - Additional strategies: (1) Use smaller images: `postgres:15-alpine` (200MB vs 400MB), `redis:7-alpine` (30MB vs 120MB).
+  - (2) Set resource limits on containers:
+    ```java
+    new PostgreSQLContainer<>("postgres:15-alpine")
+        .withCreateContainerCmdModifier(cmd -> cmd.getHostConfig()
+            .withMemory(512 * 1024 * 1024L)  // 512MB max
+            .withCpuCount(1L));
+    ```
+  - (3) Combine containers where possible — use `Redpanda` instead of Kafka (smaller image, single binary). (4) Cache the Testcontainers `~/.testcontainers.properties` in CI with `testcontainers.reuse.enable=true` and a persistent Docker volume.
 
-8. **Q: A developer adds a Testcontainers test that uses `GenericContainer` with a custom image. The image entrypoint requires environment variables that differ between local dev and CI (API keys, secrets). How do you pass environment-specific configuration to Testcontainers without hardcoding secrets?**
-   A: Use environment variables or `.env` files with `withEnv()`:
-   ```java
-   @Container
-   static GenericContainer<?> customService = new GenericContainer<>("my-service:1.0")
-       .withEnv("API_KEY", System.getenv("TEST_API_KEY"))
-       .withEnv("ENVIRONMENT", "test")
-       .withEnv("LOG_LEVEL", "DEBUG");
-   ```
-   Never hardcode secrets in test code. For local development, use a `.env` file loaded at runtime:
-   ```java
-   // Load from .env.test file
-   Dotenv dotenv = Dotenv.configure().filename(".env.test").load();
-   customService.withEnv("API_KEY", dotenv.get("API_KEY"));
-   ```
-   For CI, set secrets in the CI environment variables (`TEST_API_KEY`). Testcontainers supports `withCopyToContainer()` for config files mounted into the container. For complex configurations, create a `docker-compose.yml` for the external service and use `DockerComposeContainer` — it supports variable substitution from environment variables.
-
-9. **Q: An integration test with Testcontainers starts 4 containers (PostgreSQL, Redis, Kafka, Elasticsearch). One of the containers fails to start in CI with "no space left on device". The Docker image cache has accumulated 10GB of old images. How do you manage Docker disk space in CI?**
-   A: Add Docker cleanup to the CI pipeline and use `.withReuse(false)` in CI:
-   ```yaml
-   # CI pipeline — clean Docker before and after
-   jobs:
-     test:
-       steps:
-         - name: Clean Docker
-           run: docker system prune -af --volumes
-         - name: Run tests
-           run: mvn verify
-         - name: Post-cleanup
-           run: docker system prune -af --volumes
-   ```
-   Additional strategies: (1) Use smaller images: `postgres:15-alpine` (200MB vs 400MB), `redis:7-alpine` (30MB vs 120MB). (2) Set resource limits on containers:
-   ```java
-   new PostgreSQLContainer<>("postgres:15-alpine")
-       .withCreateContainerCmdModifier(cmd -> cmd.getHostConfig()
-           .withMemory(512 * 1024 * 1024L)  // 512MB max
-           .withCpuCount(1L));
-   ```
-   (3) Combine containers where possible — use `Redpanda` instead of Kafka (smaller image, single binary). (4) Cache the Testcontainers `~/.testcontainers.properties` in CI with `testcontainers.reuse.enable=true` and a persistent Docker volume.
-
-10. **Q: A service sends notifications to Slack, PagerDuty, and email when critical errors occur. You want to write an integration test that verifies notifications are sent for specific error scenarios without actually sending real notifications. How do you mock external notification services with Testcontainers?**
-    A: Use `MockServerContainer` (or WireMock via `GenericContainer`) to simulate the notification endpoints:
+- **Q: A service sends notifications to Slack, PagerDuty, and email when critical errors occur. You want to write an integration test that verifies notifications are sent for specific error scenarios without actually sending real notifications. How do you mock external notification services with Testcontainers?**
+  - Use `MockServerContainer` (or WireMock via `GenericContainer`) to simulate the notification endpoints:
     ```java
     @Container
     static MockServerContainer mockServer = new MockServerContainer(
@@ -525,51 +540,72 @@ Toxiproxy sits between the application and PostgreSQL, injecting latency or cutt
         );
     }
     ```
-    MockServer acts as a real HTTP server at the configured URL. The application posts notifications to it as if it were the real Slack/PagerDuty. The test verifies the request body content, HTTP method, and headers. Unlike `@MockBean` which mocks the Java interface, MockServer tests the entire HTTP client stack — including serialization, timeouts, and retries. Each test class gets its own MockServer container, and `mockServerClient.reset()` clears expectations between tests.
+  - MockServer acts as a real HTTP server at the configured URL. The application posts notifications to it as if it were the real Slack/PagerDuty. The test verifies the request body content, HTTP method, and headers.
+  - Unlike `@MockBean` which mocks the Java interface, MockServer tests the entire HTTP client stack — including serialization, timeouts, and retries.
+  - Each test class gets its own MockServer container, and `mockServerClient.reset()` clears expectations between tests.
 
 ---
 
 ## Interview Questions
 
-1. **What is Testcontainers and why would you use it?**
-   A: Testcontainers is a Java library that spins up disposable Docker containers for integration testing. It provides real infrastructure (databases, message brokers, browsers) instead of in-memory fakes (H2) or mocks. This catches environment-specific bugs: SQL syntax differences, driver behavior, charset encoding, and constraint enforcement. It works in CI with Docker-in-Docker and supports container reuse for fast local development.
+- **What is Testcontainers and why would you use it?**
+  - Testcontainers is a Java library that spins up disposable Docker containers for integration testing. It provides real infrastructure (databases, message brokers, browsers) instead of in-memory fakes (H2) or mocks.
+  - This catches environment-specific bugs: SQL syntax differences, driver behavior, charset encoding, and constraint enforcement.
+  - It works in CI with Docker-in-Docker and supports container reuse for fast local development.
 
-2. **What is the difference between `@Container` on a static vs instance field?**
-   A: `static @Container` — container starts once before all tests in the class and stops after the last test. `instance @Container` — container starts before each test method and stops after each test. Static is preferred: container startup is expensive (5-30s), and the test database can be cleaned between tests with DDL (truncate) rather than restarting. Instance containers are used for truly isolated tests (e.g., testing different database versions).
+- **What is the difference between `@Container` on a static vs instance field?**
+  - `static @Container` — container starts once before all tests in the class and stops after the last test.
+  - `instance @Container` — container starts before each test method and stops after each test.
+  - Static is preferred: container startup is expensive (5-30s), and the test database can be cleaned between tests with DDL (truncate) rather than restarting.
+  - Instance containers are used for truly isolated tests (e.g., testing different database versions).
 
-3. **What is `@DynamicPropertySource` used for?**
-   A: `@DynamicPropertySource` injects container connection details (URL, port, credentials) into Spring's `Environment` before the application context starts. It must be `static void` with a `DynamicPropertyRegistry` parameter. This allows the application to connect to the dynamically allocated container ports without hardcoding. It runs once per test class (or once per context if shared across classes).
+- **What is `@DynamicPropertySource` used for?**
+  - `@DynamicPropertySource` injects container connection details (URL, port, credentials) into Spring's `Environment` before the application context starts.
+  - It must be `static void` with a `DynamicPropertyRegistry` parameter. This allows the application to connect to the dynamically allocated container ports without hardcoding.
+  - It runs once per test class (or once per context if shared across classes).
 
-4. **What is the difference between `PostgreSQLContainer` and `GenericContainer`?**
-   A: `PostgreSQLContainer` is a type-safe wrapper with convenience methods: `getJdbcUrl()`, `getUsername()`, `getPassword()`, `getDatabaseName()`, and supports initialization scripts. `GenericContainer` is the generic API for any Docker image — you manually configure ports, environment, commands, and health checks. Use typed containers for databases; use `GenericContainer` for custom services, caches, or tools.
+- **What is the difference between `PostgreSQLContainer` and `GenericContainer`?**
+  - `PostgreSQLContainer` is a type-safe wrapper with convenience methods: `getJdbcUrl()`, `getUsername()`, `getPassword()`, `getDatabaseName()`, and supports initialization scripts.
+  - `GenericContainer` is the generic API for any Docker image — you manually configure ports, environment, commands, and health checks.
+  - Use typed containers for databases; use `GenericContainer` for custom services, caches, or tools.
 
-5. **How do you share a container across multiple test classes?**
-   A: Use a static container in an abstract base class or an interface with default methods. The container starts in a `static` block and is shared across all test classes that extend/implement the base. Use `@DynamicPropertySource` in the base class to inject the connection properties. `@DirtiesContext` should be avoided as it forces a new Spring context and may restart the container.
+- **How do you share a container across multiple test classes?**
+  - Use a static container in an abstract base class or an interface with default methods. The container starts in a `static` block and is shared across all test classes that extend/implement the base.
+  - Use `@DynamicPropertySource` in the base class to inject the connection properties.
+  - `@DirtiesContext` should be avoided as it forces a new Spring context and may restart the container.
 
-6. **What is container reuse and how do you enable it?**
-   A: Container reuse (`withReuse(true)`) keeps the container running between test runs. After the first run that starts the container, subsequent runs connect to the existing container instead of starting a new one. This reduces test startup from 30s to <1s. Enable with: `testcontainers.reuse.enable=true` in `~/.testcontainers.properties` and `.withReuse(true)` on the container definition. The container is destroyed after a configurable idle timeout.
+- **What is container reuse and how do you enable it?**
+  - Container reuse (`withReuse(true)`) keeps the container running between test runs. After the first run that starts the container, subsequent runs connect to the existing container instead of starting a new one.
+  - This reduces test startup from 30s to <1s. Enable with: `testcontainers.reuse.enable=true` in `~/.testcontainers.properties` and `.withReuse(true)` on the container definition.
+  - The container is destroyed after a configurable idle timeout.
 
-7. **What is Toxiproxy and how is it used with Testcontainers?**
-   A: Toxiproxy is a network chaos engineering tool that sits between the application and a service to inject failures: latency, connection drops, packet loss, bandwidth limits. With Testcontainers, `ToxiproxyContainer` creates a proxy between the application and a database/message broker. Tests can cut connections, add latency, or corrupt data to verify resilience patterns (retries, circuit breakers, timeouts).
+- **What is Toxiproxy and how is it used with Testcontainers?**
+  - Toxiproxy is a network chaos engineering tool that sits between the application and a service to inject failures: latency, connection drops, packet loss, bandwidth limits.
+  - With Testcontainers, `ToxiproxyContainer` creates a proxy between the application and a database/message broker. Tests can cut connections, add latency, or corrupt data to verify resilience patterns (retries, circuit breakers, timeouts).
 
-8. **What is the difference between `@Testcontainers` and `@Container`?**
-   A: `@Testcontainers` (class-level) enables automatic lifecycle management: it starts all `@Container`-annotated fields before tests and stops them after. Without `@Testcontainers`, containers are not automatically started — you must call `container.start()` manually. Always use both: `@Testcontainers` on the class and `@Container` on each container field.
+- **What is the difference between `@Testcontainers` and `@Container`?**
+  - `@Testcontainers` (class-level) enables automatic lifecycle management: it starts all `@Container`-annotated fields before tests and stops them after.
+  - Without `@Testcontainers`, containers are not automatically started — you must call `container.start()` manually.
+  - Always use both: `@Testcontainers` on the class and `@Container` on each container field.
 
-9. **How do you test database migrations with Testcontainers?**
-   A: Use a Spring Boot test with a real database container, Flyway/Liquibase auto-configuration, and assertions against the actual schema:
-   ```java
-   @SpringBootTest @Testcontainers
-   class MigrationTest {
-       @Container static PostgreSQLContainer<?> db = new PostgreSQLContainer<>("postgres:15");
-       @DynamicPropertySource static void props(DynamicPropertyRegistry r) { /* map to datasource */ }
-       @Autowired DataSource dataSource;
-       @Test void verifyMigrations() { /* check tables, indexes, constraints exist */ }
-   }
-   ```
-   This catches: database-specific SQL syntax, type mapping differences, constraint ordering, and migration ordering issues before production deployment.
+- **How do you test database migrations with Testcontainers?**
+  - Use a Spring Boot test with a real database container, Flyway/Liquibase auto-configuration, and assertions against the actual schema:
+    ```java
+    @SpringBootTest @Testcontainers
+    class MigrationTest {
+        @Container static PostgreSQLContainer<?> db = new PostgreSQLContainer<>("postgres:15");
+        @DynamicPropertySource static void props(DynamicPropertyRegistry r) { /* map to datasource */ }
+        @Autowired DataSource dataSource;
+        @Test void verifyMigrations() { /* check tables, indexes, constraints exist */ }
+    }
+    ```
+  - This catches: database-specific SQL syntax, type mapping differences, constraint ordering, and migration ordering issues before production deployment.
 
-10. **How do you handle Testcontainers tests that are sensitive to Docker resource constraints in CI?**
-    A: Set explicit container resource limits: `.withCreateContainerCmdModifier(cmd -> cmd.getHostConfig().withMemory(512 * 1024 * 1024L).withCpuCount(1))`. Increase startup timeout: `.withStartupTimeout(Duration.ofMinutes(5))`. Retry on failure: `.withStartupAttempts(3)`. Use Alpine-based images (smaller, faster to pull). Pin specific image tags (never `latest`). Use `@Testcontainers(disabledWithoutDocker = true)` to gracefully skip tests when Docker is unavailable.
+- **How do you handle Testcontainers tests that are sensitive to Docker resource constraints in CI?**
+  - Set explicit container resource limits: `.withCreateContainerCmdModifier(cmd -> cmd.getHostConfig().withMemory(512 * 1024 * 1024L).withCpuCount(1))`.
+  - Increase startup timeout: `.withStartupTimeout(Duration.ofMinutes(5))`. Retry on failure: `.withStartupAttempts(3)`.
+  - Use Alpine-based images (smaller, faster to pull). Pin specific image tags (never `latest`).
+  - Use `@Testcontainers(disabledWithoutDocker = true)` to gracefully skip tests when Docker is unavailable.
 
 ---
 

@@ -34,11 +34,16 @@ sample.stop(Timer.builder("order.latency")
 
 ## Common Mistakes
 
-- **Too Many Metrics** — Every metric adds cost. Only add metrics you will act on. This *looks correct* because more data seems better — the cost in storage, query time, and cognitive load accumulates silently with every new metric added.
-- **High Cardinality** — Tags with user IDs or session IDs blow up metric storage. Use low-cardinality tags (endpoint, status, service). This *looks correct* because adding a `user_id` tag seems like a natural way to debug per-user issues — the cardinality explosion only becomes visible when the TSDB runs out of memory.
-- **No Alerts on Metrics** — Collecting without alerting is like a smoke detector without an alarm. This *looks correct* because the dashboards are visible and someone is "watching them" — the gap between "visible on a dashboard" and "someone is looking right now" is the failure mode.
-- **Alert Fatigue** — Too many false alerts cause engineers to ignore them. Alert on SLO burn rate, not raw metric thresholds. This *looks correct* because each alert rule seems reasonable in isolation — the cumulative noise of 50 well-intentioned rules is only apparent after engineers start silencing them all.
-- **Ignoring Business Metrics** — Technical metrics without business context don't tell the full story. This *looks correct* because pager-duty alerts fire on technical symptoms — the team doesn't realize they're fixing the smoke detector while the building burns until they see a customer churn report.
+- **Too Many Metrics** — Every metric adds cost. Only add metrics you will act on.
+  - **Why it looks correct:** More data seems better — the cost in storage, query time, and cognitive load accumulates silently with every new metric added.
+- **High Cardinality** — Tags with user IDs or session IDs blow up metric storage. Use low-cardinality tags (endpoint, status, service).
+  - **Why it looks correct:** Adding a `user_id` tag seems like a natural way to debug per-user issues — the cardinality explosion only becomes visible when the TSDB runs out of memory.
+- **No Alerts on Metrics** — Collecting without alerting is like a smoke detector without an alarm.
+  - **Why it looks correct:** The dashboards are visible and someone is "watching them" — the gap between "visible on a dashboard" and "someone is looking right now" is the failure mode.
+- **Alert Fatigue** — Too many false alerts cause engineers to ignore them. Alert on SLO burn rate, not raw metric thresholds.
+  - **Why it looks correct:** Each alert rule seems reasonable in isolation — the cumulative noise of 50 well-intentioned rules is only apparent after engineers start silencing them all.
+- **Ignoring Business Metrics** — Technical metrics without business context don't tell the full story.
+  - **Why it looks correct:** Pager-duty alerts fire on technical symptoms — the team doesn't realize they're fixing the smoke detector while the building burns until they see a customer churn report.
 
 ---
 
@@ -115,7 +120,7 @@ public class CheckoutController {
 
 1. **Q: You're on call for a checkout service with 50+ alert rules. Alerts fire constantly — "P99 latency > 500ms" fires 30 times/day but the team ignores it because it autocorrects. How do you make alerts actionable?**
     - A: Replace threshold-based alerts with SLO burn-rate alerts. Define an SLO: "95% of checkout requests complete in <500ms over 30 days." Error budget: 5% = 36 hours of bad requests. Alert only when the budget is burning faster than the SLO window can sustain. Multi-window approach: if error budget burns at 10x rate (budget exhausted in 3 days), alert immediately. This catches genuine degradation while ignoring brief blips that don't threaten the SLO.
-    > **Interview follow-up:** The multi-window approach alerts on burn rate over 5 minutes and 30 minutes — but what if the error rate spikes for 4 minutes and 59 seconds, just under the first window? Is this a blind spot, and how would you catch it?
+    - **Interview follow-up:** The multi-window approach alerts on burn rate over 5 minutes and 30 minutes — but what if the error rate spikes for 4 minutes and 59 seconds, just under the first window? Is this a blind spot, and how would you catch it?
 
 2. **Q: Your Prometheus server is running out of memory. You discover that each request is tagged with `user_id`, `session_id`, and `request_id`. TSDB size is 200GB for 10 services. How do you fix this?**
    - A: Remove `user_id`, `session_id`, and `request_id` from metric tags — they create millions of unique time series (cardinality explosion). Aggressive retention reduction: move data to Thanos/Cortex with longer retention. Keep metric tags to low-cardinality dimensions: `endpoint` (20 values), `status_code` (5 values), `service` (10 values), `region` (3 values). User-level analysis belongs in tracing and logs, not metrics.
@@ -125,7 +130,7 @@ public class CheckoutController {
 
 4. **Q: Your SLO says "P99 latency < 1s." The current P99 is 800ms. Suddenly it drops to 200ms. Is this good news?**
     - A: Not necessarily. A sudden dramatic improvement could mean: (a) the cache is warming and serving faster (good), (b) requests are failing fast instead of being processed (bad — check error rate), or (c) the metric instrumentation is broken and under-reporting (bad). Always check error rate alongside latency. If error rate spiked at the same time, the "improvement" is actually the system failing fast and returning errors immediately.
-    > **Interview follow-up:** You find that the latency drop correlates with an error rate spike — but the errors are handled gracefully (HTTP 200 with error body). Your SLI only measures HTTP status codes. How do you build a "good request" SLI that captures business-level failures without instrumenting every endpoint individually?
+    - **Interview follow-up:** You find that the latency drop correlates with an error rate spike — but the errors are handled gracefully (HTTP 200 with error body). Your SLI only measures HTTP status codes. How do you build a "good request" SLI that captures business-level failures without instrumenting every endpoint individually?
 
 5. **Q: Your monitoring dashboard shows CPU at 90%, response times at 200ms P99, and error rate at 0.1%. Everything looks fine, but users report the site is slow. What's missing?**
    - A: You may be monitoring the wrong saturation metrics. High CPU with good response times could mean the database or external service is the bottleneck. Add: database query latency (P99), connection pool wait times, downstream service latency (via distributed tracing), thread pool queue depth, and external API call latency. The bottleneck is likely downstream of your application — the application is waiting for a response from a slow service.
@@ -183,7 +188,8 @@ public class CheckoutController {
 
 ## Developer Recommendations
 
-- **Focus on the RED method (Rate, Errors, Duration) for every service** — These three metrics provide enough information to detect and diagnose most issues. Every service should export: requests/sec per endpoint, error rate per endpoint + error type, and latency distribution (P50/P95/P99). Add SLOs for these metrics and alert on burn rates. Before adding any other metric, ensure RED metrics are implemented correctly. One team skipped this and added 200 custom business metrics first — when their payment service slowed down, they couldn't tell whether it was a rate spike, an error surge, or a latency regression because none of the RED fundamentals were in place.
+- **Focus on the RED method (Rate, Errors, Duration) for every service** — These three metrics provide enough information to detect and diagnose most issues. Every service should export: requests/sec per endpoint, error rate per endpoint + error type, and latency distribution (P50/P95/P99). Add SLOs for these metrics and alert on burn rates. Before adding any other metric, ensure RED metrics are implemented correctly.
+  - **Production story:** One team skipped this and added 200 custom business metrics first — when their payment service slowed down, they couldn't tell whether it was a rate spike, an error surge, or a latency regression because none of the RED fundamentals were in place.
 
 - **Never tag metrics with high-cardinality values** — User IDs, request IDs, session IDs, and email addresses as metric tags cause cardinality explosions that crash monitoring systems. A tag with 10K unique values creates 10K time series. At 100 services × 100 metrics × 10K values = 100M time series = unusable monitoring. Use structured logs or traces for high-cardinality data; use metrics for aggregated, low-cardinality signals.
 

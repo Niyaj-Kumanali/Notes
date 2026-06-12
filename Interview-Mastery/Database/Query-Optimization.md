@@ -198,16 +198,26 @@ public class RoutingDataSource extends AbstractRoutingDataSource {
 
 ## Common Mistakes
 
-- **Premature optimization without measurement** — Always profile before optimizing; guessing the bottleneck wastes effort and often makes things worse. This *looks correct* because the slow query is obvious from application logs, but the root cause (missing index, bad plan, lock contention) is invisible without `EXPLAIN ANALYZE`.
-- **Ignoring database statistics** — Missing or stale ANALYZE leads to bad execution plans based on incorrect cardinality estimates. This *looks correct* because the query runs and returns results; the optimizer's wrong plan choice is invisible without comparing estimated versus actual rows in the execution plan.
-- **Using functions on indexed columns in WHERE** — Wrapping indexed columns in functions like `YEAR(date)` prevents index usage entirely. This *looks correct* because the query returns the right results and the index exists on the column; the implicit function-based transformation that blocks index usage is a database internals detail.
-- **Assuming join order in query matches execution order** — The optimizer freely reorders joins for performance; the query's FROM clause order is not the execution order. This *looks correct* because the SQL query reads top-to-bottom, and developers naturally assume the database processes it in the same left-to-right, top-to-bottom order as application code.
-- **Over-indexing** — Every additional index slows down INSERT, UPDATE, and DELETE operations on the table. This *looks correct* because indexes improve read performance, and the write amplification is invisible until batch INSERT operations start timing out.
-- **Not using EXPLAIN ANALYZE** — Guessing instead of measuring leads to wasted optimization effort on the wrong problems. This *looks correct* because the symptom (slow query) points to an obvious cause (missing index), but the real bottleneck is often something entirely different like a disk spill or lock contention.
-- **Fetching too much data** — Not using LIMIT and selecting unnecessary columns increases I/O, network transfer, and memory usage. This *looks correct* because the query works and the extra data doesn't cause problems on small datasets; the cost only becomes visible when the result set grows large enough to cause network saturation or OOM.
-- **N+1 queries from ORM** — The most common Hibernate performance issue, caused by lazy loading in loops instead of using JOIN FETCH. This *looks correct* because each individual query is fast (1-2ms), and the cumulative cost of N queries is invisible without enabling Hibernate statistics or looking at database-level query counts.
-- **Not tuning connection pool** — Too small causes contention; too large causes resource exhaustion and database overload. This *looks correct* because the default pool size (HikariCP defaults to 10) works fine in development where there's only one application instance; the contention or exhaustion only appears under production load with multiple instances.
-- **Relying on nested loop joins for large datasets** — A hash join or merge join is usually far more efficient for large result sets. This *looks correct* because nested loops work well on small datasets during development; the O(n×m) explosion only becomes apparent when both tables grow into the millions of rows.
+- **Premature optimization without measurement** — Always profile before optimizing; guessing the bottleneck wastes effort and often makes things worse.
+  - **Why it looks correct:** The slow query is obvious from application logs, but the root cause (missing index, bad plan, lock contention) is invisible without `EXPLAIN ANALYZE`.
+- **Ignoring database statistics** — Missing or stale ANALYZE leads to bad execution plans based on incorrect cardinality estimates.
+  - **Why it looks correct:** The query runs and returns results; the optimizer's wrong plan choice is invisible without comparing estimated versus actual rows in the execution plan.
+- **Using functions on indexed columns in WHERE** — Wrapping indexed columns in functions like `YEAR(date)` prevents index usage entirely.
+  - **Why it looks correct:** The query returns the right results and the index exists on the column; the implicit function-based transformation that blocks index usage is a database internals detail.
+- **Assuming join order in query matches execution order** — The optimizer freely reorders joins for performance; the query's FROM clause order is not the execution order.
+  - **Why it looks correct:** The SQL query reads top-to-bottom, and developers naturally assume the database processes it in the same left-to-right, top-to-bottom order as application code.
+- **Over-indexing** — Every additional index slows down INSERT, UPDATE, and DELETE operations on the table.
+  - **Why it looks correct:** Indexes improve read performance, and the write amplification is invisible until batch INSERT operations start timing out.
+- **Not using EXPLAIN ANALYZE** — Guessing instead of measuring leads to wasted optimization effort on the wrong problems.
+  - **Why it looks correct:** The symptom (slow query) points to an obvious cause (missing index), but the real bottleneck is often something entirely different like a disk spill or lock contention.
+- **Fetching too much data** — Not using LIMIT and selecting unnecessary columns increases I/O, network transfer, and memory usage.
+  - **Why it looks correct:** The query works and the extra data doesn't cause problems on small datasets; the cost only becomes visible when the result set grows large enough to cause network saturation or OOM.
+- **N+1 queries from ORM** — The most common Hibernate performance issue, caused by lazy loading in loops instead of using JOIN FETCH.
+  - **Why it looks correct:** Each individual query is fast (1-2ms), and the cumulative cost of N queries is invisible without enabling Hibernate statistics or looking at database-level query counts.
+- **Not tuning connection pool** — Too small causes contention; too large causes resource exhaustion and database overload.
+  - **Why it looks correct:** The default pool size (HikariCP defaults to 10) works fine in development where there's only one application instance; the contention or exhaustion only appears under production load with multiple instances.
+- **Relying on nested loop joins for large datasets** — A hash join or merge join is usually far more efficient for large result sets.
+  - **Why it looks correct:** Nested loops work well on small datasets during development; the O(n×m) explosion only becomes apparent when both tables grow into the millions of rows.
 
 ---
 
@@ -259,40 +269,59 @@ int bulkMarkProcessed();
 
 ## Scenario-Based Questions
 
-- **Q: You are debugging a Spring Boot endpoint that loads 50 articles. Each article has an author and comments. The endpoint makes 102 SQL queries. How do you identify and fix the N+1 queries?** A: Enable `hibernate.generate_statistics=true` and check logs. Fix with `JOIN FETCH` for immediate relationships and `@EntityGraph` for nested graphs: `@EntityGraph(attributePaths = {"author", "comments"})`. For deeply nested graphs, use `@BatchSize`.
-
-> **Interview follow-up:** After adding `JOIN FETCH` for author and comments, the query returns a Cartesian product — 50 articles × 1 author × 20 comments = 1000 rows where you expected 50. How do you deduplicate this correctly?
-- **Q: A query filtering by `WHERE YEAR(created_at) = 2024` is slow despite an index on `created_at`. The table has 50M rows. How do you fix it without changing application code?** A: Create a functional index: `CREATE INDEX idx_orders_year ON orders((EXTRACT(YEAR FROM created_at)))`. However, rewriting to `WHERE created_at >= '2024-01-01' AND created_at < '2025-01-01'` is better — sargable predicates allow range scans on the existing index.
-
-> **Interview follow-up:** The query is generated by a legacy ORM that you cannot modify. The ORM always generates `WHERE YEAR(created_at) = ?`. The functional index helps, but now every query scans the full year's index entries. How do you make the index more selective?
-- **Q: A paginated query with `ORDER BY created_at DESC LIMIT 20 OFFSET 100000` on a 10M row table takes 5 seconds. Each page gets slower. You cannot change the UI. How do you fix this?** A: Switch to keyset pagination internally while keeping the same API. Map `page=100` to `WHERE created_at < :cursor`. Return `created_at` as the cursor in the response. If arbitrary page jumps are required, use a covering index on `(created_at) INCLUDE (needed_columns)`.
-
-> **Interview follow-up:** The UI supports "jump to page 5000." Keyset pagination cannot skip pages. You need both deep-page access and fast pagination. How do you design a pagination strategy that supports both?
-- **Q: EXPLAIN ANALYZE shows `actual rows: 50000, plan rows: 1000` for an index scan. The query jumped from 50ms to 5s after a deployment. What caused this?** A: Stale statistics — a bulk data load changed distribution without ANALYZE. The optimizer underestimated rows and chose a plan optimized for 1000 rows. Run `ANALYZE` and increase autoanalyze frequency for tables with rapid changes.
-- **Q: A JOIN between orders (10M rows) and customers (5M rows) uses a nested loop with 10M iterations. CPU is at 100% and the query takes 30 seconds. How do you make it use a hash join?** A: Run ANALYZE on both tables first. If the optimizer still chooses nested loop, `work_mem` may be too low for the hash table. Increase it, or temporarily force with `enable_nestloop = off` to confirm hash join is faster.
-- **Q: `SELECT * FROM products WHERE description LIKE '%organic%'` on a 5M row table takes 20 seconds. The `description` column has a B-Tree index. Why doesn't the index help?** A: B-Tree indexes only support prefix search (`LIKE 'organic%'`). Wildcards at the start prevent index usage. Install `pg_trgm` and create a GIN trigram index: `CREATE INDEX idx_description_trgm ON products USING GIN (description gin_trgm_ops)`.
-- **Q: A Spring Boot app logs 500ms for a method calling `findById` 50 times in a loop. Each `findById` is 10ms. How do you reduce total to under 50ms?** A: The 50 calls are 50 SQL queries with network round trips. Use `findAllById` generating a single `WHERE id IN (...)` query. The single query is efficient with an indexed primary key.
-- **Q: A query joining 4 tables with WHERE, GROUP BY, and ORDER BY takes 20 seconds. The plan shows a sort spilling to disk (50MB). How do you fix it?** A: Increase `work_mem` to 64MB for this session. Better: create a composite index on the GROUP BY and ORDER BY columns to avoid the sort entirely. Check if the GROUP BY columns are covered by an existing index.
-- **Q: Your team uses `@Query("SELECT u FROM User u")` and filters in Java streams. The `users` table has 2M rows. The app runs out of memory. What's wrong?** A: The query loads all 2M users into memory. Use database-side filtering with WHERE. If full processing is needed, use streaming: `Stream<User>` with `@QueryHint(name = "org.hibernate.fetchSize", value = "100")` and process in a try-with-resources block.
-- **Q: A query that was fast yesterday (50ms) is slow today (5s). No code or schema changes. The plan is different. What do you check?** A: Plan regression — the optimizer chose a different plan due to changed statistics. Check `pg_stat_statements` for plan changes. Run EXPLAIN ANALYZE and compare to baseline. Fix: run ANALYZE, increase `default_statistics_target`, use `pg_hint_plan` to pin the good plan, or create extended statistics.
+- **Q:** You are debugging a Spring Boot endpoint that loads 50 articles. Each article has an author and comments. The endpoint makes 102 SQL queries. How do you identify and fix the N+1 queries?
+  - **A:** Enable `hibernate.generate_statistics=true` and check logs. Fix with `JOIN FETCH` for immediate relationships and `@EntityGraph` for nested graphs: `@EntityGraph(attributePaths = {"author", "comments"})`. For deeply nested graphs, use `@BatchSize`.
+  - **Interview follow-up:** After adding `JOIN FETCH` for author and comments, the query returns a Cartesian product — 50 articles × 1 author × 20 comments = 1000 rows where you expected 50. How do you deduplicate this correctly?
+- **Q:** A query filtering by `WHERE YEAR(created_at) = 2024` is slow despite an index on `created_at`. The table has 50M rows. How do you fix it without changing application code?
+  - **A:** Create a functional index: `CREATE INDEX idx_orders_year ON orders((EXTRACT(YEAR FROM created_at)))`. However, rewriting to `WHERE created_at >= '2024-01-01' AND created_at < '2025-01-01'` is better — sargable predicates allow range scans on the existing index.
+  - **Interview follow-up:** The query is generated by a legacy ORM that you cannot modify. The ORM always generates `WHERE YEAR(created_at) = ?`. The functional index helps, but now every query scans the full year's index entries. How do you make the index more selective?
+- **Q:** A paginated query with `ORDER BY created_at DESC LIMIT 20 OFFSET 100000` on a 10M row table takes 5 seconds. Each page gets slower. You cannot change the UI. How do you fix this?
+  - **A:** Switch to keyset pagination internally while keeping the same API. Map `page=100` to `WHERE created_at < :cursor`. Return `created_at` as the cursor in the response. If arbitrary page jumps are required, use a covering index on `(created_at) INCLUDE (needed_columns)`.
+  - **Interview follow-up:** The UI supports "jump to page 5000." Keyset pagination cannot skip pages. You need both deep-page access and fast pagination. How do you design a pagination strategy that supports both?
+- **Q:** EXPLAIN ANALYZE shows `actual rows: 50000, plan rows: 1000` for an index scan. The query jumped from 50ms to 5s after a deployment. What caused this?
+  - **A:** Stale statistics — a bulk data load changed distribution without ANALYZE. The optimizer underestimated rows and chose a plan optimized for 1000 rows. Run `ANALYZE` and increase autoanalyze frequency for tables with rapid changes.
+- **Q:** A JOIN between orders (10M rows) and customers (5M rows) uses a nested loop with 10M iterations. CPU is at 100% and the query takes 30 seconds. How do you make it use a hash join?
+  - **A:** Run ANALYZE on both tables first. If the optimizer still chooses nested loop, `work_mem` may be too low for the hash table. Increase it, or temporarily force with `enable_nestloop = off` to confirm hash join is faster.
+- **Q:** `SELECT * FROM products WHERE description LIKE '%organic%'` on a 5M row table takes 20 seconds. The `description` column has a B-Tree index. Why doesn't the index help?
+  - **A:** B-Tree indexes only support prefix search (`LIKE 'organic%'`). Wildcards at the start prevent index usage. Install `pg_trgm` and create a GIN trigram index: `CREATE INDEX idx_description_trgm ON products USING GIN (description gin_trgm_ops)`.
+- **Q:** A Spring Boot app logs 500ms for a method calling `findById` 50 times in a loop. Each `findById` is 10ms. How do you reduce total to under 50ms?
+  - **A:** The 50 calls are 50 SQL queries with network round trips. Use `findAllById` generating a single `WHERE id IN (...)` query. The single query is efficient with an indexed primary key.
+- **Q:** A query joining 4 tables with WHERE, GROUP BY, and ORDER BY takes 20 seconds. The plan shows a sort spilling to disk (50MB). How do you fix it?
+  - **A:** Increase `work_mem` to 64MB for this session. Better: create a composite index on the GROUP BY and ORDER BY columns to avoid the sort entirely. Check if the GROUP BY columns are covered by an existing index.
+- **Q:** Your team uses `@Query("SELECT u FROM User u")` and filters in Java streams. The `users` table has 2M rows. The app runs out of memory. What's wrong?
+  - **A:** The query loads all 2M users into memory. Use database-side filtering with WHERE. If full processing is needed, use streaming: `Stream<User>` with `@QueryHint(name = "org.hibernate.fetchSize", value = "100")` and process in a try-with-resources block.
+- **Q:** A query that was fast yesterday (50ms) is slow today (5s). No code or schema changes. The plan is different. What do you check?
+  - **A:** Plan regression — the optimizer chose a different plan due to changed statistics. Check `pg_stat_statements` for plan changes. Run EXPLAIN ANALYZE and compare to baseline. Fix: run ANALYZE, increase `default_statistics_target`, use `pg_hint_plan` to pin the good plan, or create extended statistics.
 
 ## Interview Questions
 
-- **What is query optimization?** A: Tuning SQL queries to minimize resource consumption (CPU, I/O, memory) and reduce response time. Requires understanding query plans, indexing, statistics, and database internals.
-- **What is the N+1 query problem in ORMs?** A: Loading N entities with one query, then N additional queries for related entities. Fix with JOIN FETCH, EntityGraph, or batch fetching.
-- **What is the difference between OFFSET and keyset pagination?** A: OFFSET reads all skipped rows internally — O(n) per page. Keyset uses `WHERE id > :cursor` — O(1) per page. Keyset cannot jump to arbitrary pages.
-- **What does EXPLAIN ANALYZE show and why is it useful?** A: Executes the query and shows actual times, row counts, and buffer usage. Reveals cardinality errors, disk spills, and inefficient operations.
-- **What is a covering index?** A: Contains all columns needed by a query, enabling index-only scans without heap access. Uses `INCLUDE` for non-key columns. Reduces I/O significantly.
-- **When should you use a bulk UPDATE?** A: When updating many rows with the same condition. A single UPDATE is orders of magnitude faster than row-by-row entity updates. Use `@Modifying @Query` in JPA.
-- **What is work_mem in PostgreSQL?** A: Controls memory for sort operations, hash tables, and bitmap operations. Too low causes disk spills (external merge sort), which is 100x slower than in-memory.
-- **How do you detect slow queries in Spring Boot?** A: Enable `hibernate.generate_statistics=true`, set `logging.level.org.hibernate.SQL=DEBUG`, and `LOG_QUERIES_SLOWER_THAN_MS=100`. On the DB side, query `pg_stat_statements`.
-- **What causes cardinality estimation errors?** A: Stale statistics, correlated columns (optimizer assumes independence), low `default_statistics_target`, and uneven data distribution. Fix with ANALYZE or extended statistics.
-- **Why is SELECT * bad for performance?** A: Reads all columns, increasing I/O, network, and memory. Prevents index-only scans. If schema changes, may return unexpected columns. Always select only needed columns.
+- **What is query optimization?**
+  - **A:** Tuning SQL queries to minimize resource consumption (CPU, I/O, memory) and reduce response time. Requires understanding query plans, indexing, statistics, and database internals.
+- **What is the N+1 query problem in ORMs?**
+  - **A:** Loading N entities with one query, then N additional queries for related entities. Fix with JOIN FETCH, EntityGraph, or batch fetching.
+- **What is the difference between OFFSET and keyset pagination?**
+  - **A:** OFFSET reads all skipped rows internally — O(n) per page. Keyset uses `WHERE id > :cursor` — O(1) per page. Keyset cannot jump to arbitrary pages.
+- **What does EXPLAIN ANALYZE show and why is it useful?**
+  - **A:** Executes the query and shows actual times, row counts, and buffer usage. Reveals cardinality errors, disk spills, and inefficient operations.
+- **What is a covering index?**
+  - **A:** Contains all columns needed by a query, enabling index-only scans without heap access. Uses `INCLUDE` for non-key columns. Reduces I/O significantly.
+- **When should you use a bulk UPDATE?**
+  - **A:** When updating many rows with the same condition. A single UPDATE is orders of magnitude faster than row-by-row entity updates. Use `@Modifying @Query` in JPA.
+- **What is work_mem in PostgreSQL?**
+  - **A:** Controls memory for sort operations, hash tables, and bitmap operations. Too low causes disk spills (external merge sort), which is 100x slower than in-memory.
+- **How do you detect slow queries in Spring Boot?**
+  - **A:** Enable `hibernate.generate_statistics=true`, set `logging.level.org.hibernate.SQL=DEBUG`, and `LOG_QUERIES_SLOWER_THAN_MS=100`. On the DB side, query `pg_stat_statements`.
+- **What causes cardinality estimation errors?**
+  - **A:** Stale statistics, correlated columns (optimizer assumes independence), low `default_statistics_target`, and uneven data distribution. Fix with ANALYZE or extended statistics.
+- **Why is SELECT * bad for performance?**
+  - **A:** Reads all columns, increasing I/O, network, and memory. Prevents index-only scans. If schema changes, may return unexpected columns. Always select only needed columns.
 
 ## Developer Recommendations
 
-- **Always profile before optimizing** — Guessing the bottleneck wastes effort. Use `EXPLAIN ANALYZE`, `pg_stat_statements`, and Hibernate statistics to identify actual slow queries. A team spent 2 weeks optimizing a "slow JOIN" that turned out to be a 3-second query. The real problem was a 15-second N+1 loop in a different endpoint that logged no errors, discovered only after enabling Hibernate statistics.
-- **Use JOIN FETCH to solve N+1 queries in JPA** — The most common Hibernate performance issue. `JOIN FETCH` loads related entities in the same query. For complex graphs, use `@EntityGraph`. A reporting endpoint that loaded 100 orders with lazy customer and product fetching generated 201 SQL queries. Under 50 concurrent users, the database connection pool was exhausted. Adding a single `JOIN FETCH o.customer JOIN FETCH o.product` reduced it to 1 query and eliminated the outage.
+- **Always profile before optimizing** — Guessing the bottleneck wastes effort. Use `EXPLAIN ANALYZE`, `pg_stat_statements`, and Hibernate statistics to identify actual slow queries.
+  - **Production story:** A team spent 2 weeks optimizing a "slow JOIN" that turned out to be a 3-second query. The real problem was a 15-second N+1 loop in a different endpoint that logged no errors, discovered only after enabling Hibernate statistics.
+- **Use JOIN FETCH to solve N+1 queries in JPA** — The most common Hibernate performance issue. `JOIN FETCH` loads related entities in the same query. For complex graphs, use `@EntityGraph`.
+  - **Production story:** A reporting endpoint that loaded 100 orders with lazy customer and product fetching generated 201 SQL queries. Under 50 concurrent users, the database connection pool was exhausted. Adding a single `JOIN FETCH o.customer JOIN FETCH o.product` reduced it to 1 query and eliminated the outage.
 - **Prefer keyset pagination over OFFSET for deep pages** — OFFSET is O(n) and degrades with page number. Keyset is O(1). Trade-off: loses ability to jump to arbitrary pages.
 - **Replace functions on indexed columns with sargable predicates** — `WHERE YEAR(date) = 2024` prevents index usage. Use `WHERE date >= '2024-01-01' AND date < '2025-01-01'`.
 - **Use streaming for large result sets** — Loading 1M rows into memory causes OOM. Use `Stream<T>` with fetch size hint and process in a try-with-resources block.

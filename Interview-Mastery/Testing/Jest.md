@@ -175,74 +175,71 @@ A legacy project uses Mocha + Chai + Sinon + Istanbul. The team wants Jest for b
 ## Scenario-Based Questions
 
 1. **Q: You're debugging a test that passes when run alone but fails when run with all other tests. The test reads from a JSON file on disk. What's likely happening and how do you fix it?**
-   A: Shared mutable filesystem state — another test modifies the same JSON file. Fix: (1) Use `beforeEach` to copy a fresh fixture file. (2) Use `jest.mock` to mock the file-reading function instead. (3) Better: use `jest.createMockFromModule` to automatically mock the module. For integration-level tests, use `os.tmpdir()` with unique temp directories per test that are cleaned up in `afterEach`.
+   - **A:** Shared mutable filesystem state — another test modifies the same JSON file. Fix: (1) Use `beforeEach` to copy a fresh fixture file. (2) Use `jest.mock` to mock the file-reading function instead. (3) Better: use `jest.createMockFromModule` to automatically mock the module. For integration-level tests, use `os.tmpdir()` with unique temp directories per test that are cleaned up in `afterEach`.
 
 2. **Q: Your team has 1500 Jest snapshot tests for React components. Every time someone changes a shared component, 300 snapshots break, causing massive PR diffs. Developers start accepting snapshots without reviewing them. How do you fix this?**
-   A: Snapshots on shared components create coupling. Fix: (1) Use `toMatchSnapshot({ prop: expect.any(String) })` to ignore non-deterministic fields. (2) For shared components, use inline snapshots or explicit assertions instead of file snapshots. (3) Better: use testing-library queries (`getByText`, `getByRole`) instead of snapshot testing — test behavior, not markup. (4) If you keep snapshot tests, run them in CI but don't make them blocking for shared component changes — trust code review.
-
-> **Interview follow-up:** If you switch to Testing Library queries over snapshots, how do you prevent the same brittleness from reappearing through over-specific `getByRole` or `getByTestId` assertions?
+   - **A:** Snapshots on shared components create coupling. Fix: (1) Use `toMatchSnapshot({ prop: expect.any(String) })` to ignore non-deterministic fields. (2) For shared components, use inline snapshots or explicit assertions instead of file snapshots. (3) Better: use testing-library queries (`getByText`, `getByRole`) instead of snapshot testing — test behavior, not markup. (4) If you keep snapshot tests, run them in CI but don't make them blocking for shared component changes — trust code review.
+   - **Interview follow-up:** If you switch to Testing Library queries over snapshots, how do you prevent the same brittleness from reappearing through over-specific `getByRole` or `getByTestId` assertions?
 
 3. **Q: You're using `jest.useFakeTimers()` to test a debounced search input. The test calls the debounced function, advances time, but the function never fires. What's wrong?**
-   A: Common mistake: the debounce implementation uses `setTimeout`, but Jest's fake timers need to be configured correctly. Fix: ensure `jest.useFakeTimers()` is called before importing the debounced function (fake timers must be active when the module is loaded). Use `jest.advanceTimersByTime(debounceDelay)` not `jest.runAllTimers()` — `runAllTimers` may fire all pending timers including infinite loops. Also ensure the debounce function is the one using `setTimeout` (some libraries use `requestAnimationFrame` which fake timers don't support).
+   - **A:** Common mistake: the debounce implementation uses `setTimeout`, but Jest's fake timers need to be configured correctly. Fix: ensure `jest.useFakeTimers()` is called before importing the debounced function (fake timers must be active when the module is loaded). Use `jest.advanceTimersByTime(debounceDelay)` not `jest.runAllTimers()` — `runAllTimers` may fire all pending timers including infinite loops. Also ensure the debounce function is the one using `setTimeout` (some libraries use `requestAnimationFrame` which fake timers don't support).
 
 4. **Q: A legacy test suite uses `done` callbacks everywhere. Half the tests time out because `done` is called twice or never called. How do you migrate these tests to modern async/await?**
-   A: Systematic migration: (1) Run `jest --detectOpenHandles` to find leaking tests. (2) Replace `done` with `async/await` pattern: `test('name', async () => { const result = await asyncFunction(); expect(result).toBe('x'); })`. (3) For tests that use `done` in `.then/.catch`, replace with `await` and `expect.rejects`. (4) Use `jest-codemods` for automated transformation. (5) After migration, add an ESLint rule banning `done` in new tests.
+   - **A:** Systematic migration: (1) Run `jest --detectOpenHandles` to find leaking tests. (2) Replace `done` with `async/await` pattern: `test('name', async () => { const result = await asyncFunction(); expect(result).toBe('x'); })`. (3) For tests that use `done` in `.then/.catch`, replace with `await` and `expect.rejects`. (4) Use `jest-codemods` for automated transformation. (5) After migration, add an ESLint rule banning `done` in new tests.
 
 5. **Q: A React component test uses `fireEvent.change(input, { target: { value: 'new' } })` but the component's state doesn't update. The test fails but the feature works in the browser. What's happening?**
-   A: Likely the component uses a controlled input and the test doesn't wrap the event in `act()`. Fix: wrap the event in `act()`: `await act(async () => { fireEvent.change(input, { target: { value: 'new' } }); })`. Better: use `@testing-library/user-event` instead of `fireEvent` — it automatically wraps in `act` and simulates more realistic interactions (keypress events, focus/blur). User-event also handles edge cases like clearing input before typing.
-
-> **Interview follow-up:** How would you write a test that verifies a controlled input correctly handles state updates triggered by asynchronous validation running in parallel with user keystrokes?
+   - **A:** Likely the component uses a controlled input and the test doesn't wrap the event in `act()`. Fix: wrap the event in `act()`: `await act(async () => { fireEvent.change(input, { target: { value: 'new' } }); })`. Better: use `@testing-library/user-event` instead of `fireEvent` — it automatically wraps in `act` and simulates more realistic interactions (keypress events, focus/blur). User-event also handles edge cases like clearing input before typing.
+   - **Interview follow-up:** How would you write a test that verifies a controlled input correctly handles state updates triggered by asynchronous validation running in parallel with user keystrokes?
 
 6. **Q: Your test suite runs in 10 minutes. A colleague adds 1000 parameterized tests using `test.each`, increasing runtime to 30 minutes. How do you optimize?**
-   A: Parameterized tests are useful but can explode test count. Fix: (1) Use `test.each` with `describe.each` to group related parameters. (2) Run parameterized tests in parallel within a file — Jest parallelizes at the file level, not the test level. (3) Split parameterized tests into separate files for better parallelization. (4) Use `--maxWorkers=50%` in CI to leverage all CPUs. (5) Profile with `jest --verbose --showSeed` to find slow test cases and reduce parameter count.
+   - **A:** Parameterized tests are useful but can explode test count. Fix: (1) Use `test.each` with `describe.each` to group related parameters. (2) Run parameterized tests in parallel within a file — Jest parallelizes at the file level, not the test level. (3) Split parameterized tests into separate files for better parallelization. (4) Use `--maxWorkers=50%` in CI to leverage all CPUs. (5) Profile with `jest --verbose --showSeed` to find slow test cases and reduce parameter count.
 
 7. **Q: You need to test a function that uses `crypto.randomUUID()` to generate IDs. Every test run has different IDs, making snapshot tests fail. How do you handle non-deterministic values?**
-   A: Mock the non-deterministic function: `jest.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue('fixed-uuid-123')`. For snapshot tests, use property matchers: `expect(result).toMatchSnapshot({ id: expect.any(String) })`. Better: pass a test-specific ID generator via dependency injection — in tests, inject a deterministic generator (counter-based). This makes assertions explicit without snapshot coupling.
-
-> **Interview follow-up:** What happens to your deterministic ID strategy when the same test runs across multiple parallel workers — do you get ID collisions, and how do you prevent them?
+   - **A:** Mock the non-deterministic function: `jest.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue('fixed-uuid-123')`. For snapshot tests, use property matchers: `expect(result).toMatchSnapshot({ id: expect.any(String) })`. Better: pass a test-specific ID generator via dependency injection — in tests, inject a deterministic generator (counter-based). This makes assertions explicit without snapshot coupling.
+   - **Interview follow-up:** What happens to your deterministic ID strategy when the same test runs across multiple parallel workers — do you get ID collisions, and how do you prevent them?
 
 8. **Q: You're testing a Node.js server that uses `process.env` for configuration. Different tests need different environment variables, but they share the same process. Tests start failing when run together. How do you isolate env-dependent tests?**
-   A: Never modify `process.env` directly — it leaks between tests. Fix: (1) Use `jest.resetModules()` in `beforeEach` to clear the module cache. (2) Set env vars before importing the module being tested: `beforeEach(() => { process.env.NODE_ENV = 'test'; delete require.cache[require.resolve('../src/config')]; })`. (3) Better: use a config module that reads from a dependency-injected source — in tests, inject a test config object. (4) Use `jest.spyOn` to mock specific config values.
+   - **A:** Never modify `process.env` directly — it leaks between tests. Fix: (1) Use `jest.resetModules()` in `beforeEach` to clear the module cache. (2) Set env vars before importing the module being tested: `beforeEach(() => { process.env.NODE_ENV = 'test'; delete require.cache[require.resolve('../src/config')]; })`. (3) Better: use a config module that reads from a dependency-injected source — in tests, inject a test config object. (4) Use `jest.spyOn` to mock specific config values.
 
 9. **Q: A team uses Jest to test a Python-based data pipeline (via child_process). Tests take 5 seconds each because spawning Python is slow. There are 200 tests — total 17 minutes. How do you speed this up?**
-   A: The architecture creates coupling between JS tests and Python runtime. Fix: (1) Run Python tests in Python (pytest) and test the JS layers separately. (2) If cross-language testing is essential, split into smoke tests (run once, not per test) and unit tests. (3) Mock the Python process: `jest.spyOn(child_process, 'execFile').mockResolvedValue({ stdout: 'result' })`. (4) Use `beforeAll` to start a Python server process, `afterAll` to stop it, and communicate via HTTP instead of spawning per test.
+   - **A:** The architecture creates coupling between JS tests and Python runtime. Fix: (1) Run Python tests in Python (pytest) and test the JS layers separately. (2) If cross-language testing is essential, split into smoke tests (run once, not per test) and unit tests. (3) Mock the Python process: `jest.spyOn(child_process, 'execFile').mockResolvedValue({ stdout: 'result' })`. (4) Use `beforeAll` to start a Python server process, `afterAll` to stop it, and communicate via HTTP instead of spawning per test.
 
 10. **Q: You have a Jest custom environment that sets up jsdom with specific browser polyfills. A new team member adds a test that imports a library incompatible with jsdom (uses `WebSocket`). The whole test file crashes. How do you isolate incompatible tests?**
-    A: Jest supports per-file environments via docblock: `/** @jest-environment node */` at the top of the file. Fix: add the docblock to tests that need Node.js APIs. For mixed environments: split into separate test files with different environment pragmas. Configure Jest's `projects` to use different environments per subdirectory. For a monorepo, use a root-level `jest.config.js` with `projects: [ '<rootDir>/packages/*' ]` — each package can have its own environment.
+    - **A:** Jest supports per-file environments via docblock: `/** @jest-environment node */` at the top of the file. Fix: add the docblock to tests that need Node.js APIs. For mixed environments: split into separate test files with different environment pragmas. Configure Jest's `projects` to use different environments per subdirectory. For a monorepo, use a root-level `jest.config.js` with `projects: [ '<rootDir>/packages/*' ]` — each package can have its own environment.
 
 ---
 
 ## Interview Questions
 
 1. **What is Jest and why is it popular?**
-   A: A zero-config JS testing framework by Meta. Popular because it includes test runner, assertions, mocking, coverage, and snapshots in one package — no need for Mocha+Chai+Sinon+Istanbul.
+   - **A:** A zero-config JS testing framework by Meta. Popular because it includes test runner, assertions, mocking, coverage, and snapshots in one package — no need for Mocha+Chai+Sinon+Istanbul.
 
 2. **What is the difference between `toBe` and `toEqual`?**
-   A: `toBe` uses `Object.is` (reference equality for objects). `toEqual` deep-compares values. Use `toEqual` for objects and arrays; use `toBe` for primitives.
+   - **A:** `toBe` uses `Object.is` (reference equality for objects). `toEqual` deep-compares values. Use `toEqual` for objects and arrays; use `toBe` for primitives.
 
 3. **What is the purpose of `jest.mock`?**
-   A: Automatically replaces a module's exports with mock implementations. Hoisted to the top of the file by Jest, ensuring the mock is in place before any imports resolve.
+   - **A:** Automatically replaces a module's exports with mock implementations. Hoisted to the top of the file by Jest, ensuring the mock is in place before any imports resolve.
 
 4. **How do you test async code in Jest?**
-   A: Return a promise, use `async/await`, or use the `done` callback. `await expect(fn()).resolves.toBe(value)` for resolved promises. `await expect(fn()).rejects.toThrow()` for rejected promises.
+   - **A:** Return a promise, use `async/await`, or use the `done` callback. `await expect(fn()).resolves.toBe(value)` for resolved promises. `await expect(fn()).rejects.toThrow()` for rejected promises.
 
 5. **What are Jest lifecycle hooks and their order?**
-   A: `beforeAll` (once before all), `beforeEach` (before each test), `afterEach` (after each test), `afterAll` (once after all). Execution: beforeAll → beforeEach → test → afterEach → (repeat) → afterAll.
+   - **A:** `beforeAll` (once before all), `beforeEach` (before each test), `afterEach` (after each test), `afterAll` (once after all). Execution: beforeAll → beforeEach → test → afterEach → (repeat) → afterAll.
 
 6. **What is snapshot testing and when should you use it?**
-   A: Captures the output of a test and compares it to a stored snapshot. Good for: UI components, serialization, config files. Bad for: large snapshots that nobody reviews, non-deterministic output.
+   - **A:** Captures the output of a test and compares it to a stored snapshot. Good for: UI components, serialization, config files. Bad for: large snapshots that nobody reviews, non-deterministic output.
 
 7. **How does Jest run tests in parallel?**
-   A: Each test file runs in its own child process (`child_process.fork`). `--maxWorkers` controls concurrency. `--runInBand` runs sequentially (for debugging).
+   - **A:** Each test file runs in its own child process (`child_process.fork`). `--maxWorkers` controls concurrency. `--runInBand` runs sequentially (for debugging).
 
 8. **What is `jest.spyOn` and how is it different from `jest.mock`?**
-   A: `spyOn` wraps an existing method (preserving original), tracks calls, and can mock selectively. `mock` replaces the entire module. Use `spyOn` when you need the real implementation most of the time.
+   - **A:** `spyOn` wraps an existing method (preserving original), tracks calls, and can mock selectively. `mock` replaces the entire module. Use `spyOn` when you need the real implementation most of the time.
 
 9. **What are the F.I.R.S.T. principles of testing?**
-   A: Fast (run quickly), Isolated (no shared state), Repeatable (same result every time), Self-validating (pass/fail, no manual checking), Timely (written before or alongside code).
+   - **A:** Fast (run quickly), Isolated (no shared state), Repeatable (same result every time), Self-validating (pass/fail, no manual checking), Timely (written before or alongside code).
 
 10. **How do you debug a failing Jest test?**
-    A: (1) `--verbose` for detailed output. (2) `--runInBand` to disable parallel execution. (3) `--detectOpenHandles` for async leaks. (4) `test.only` to isolate a single test. (5) `console.log` or debugger statement with `node --inspect-brk`.
+    - **A:** (1) `--verbose` for detailed output. (2) `--runInBand` to disable parallel execution. (3) `--detectOpenHandles` for async leaks. (4) `test.only` to isolate a single test. (5) `console.log` or debugger statement with `node --inspect-brk`.
 
 ---
 
