@@ -68,12 +68,12 @@ source = new EncryptionDecorator(source);
 
 ## Common Mistakes
 
-- **Pattern Overuse** — applying patterns where a simpler solution suffices. "Hello World" doesn't need Abstract Factory, Builder, Visitor, and Mediator.
-- **Singleton Abuse** — singletons cause hidden dependencies and testability issues. Let Spring manage singleton scope instead of implementing your own.
-- **Misapplying Inheritance** — using inheritance when composition is more appropriate. Prefer Strategy over subclassing for varying behaviors.
-- **Pattern Rigidity** — treating patterns as rigid rules instead of guidelines. Adapt the pattern to your specific context.
-- **Implementing Patterns From Scratch** — Spring Boot already implements Proxy, Template Method, Singleton, Factory, and Observer. Leverage the framework.
-- **Proxies Without Interface (CGLIB vs JDK Dynamic)** — Spring uses JDK Dynamic Proxy when the target implements an interface, CGLIB when it doesn't. CGLIB creates a subclass at runtime. Both have the same performance characteristics. Spring Boot defaults to CGLIB for `@EnableAspectJAutoProxy`. Ensure `@Configuration` classes are not `final` if CGLIB proxies are used.
+- **Pattern Overuse** — applying patterns where a simpler solution suffices. "Hello World" doesn't need Abstract Factory, Builder, Visitor, and Mediator. This *looks correct* because: using patterns shows design sophistication and prepares for future extensibility — the complexity of Abstract Factory for what could be a simple `new` call only becomes technical debt when someone has to trace through four indirection layers to understand the code.
+- **Singleton Abuse** — singletons cause hidden dependencies and testability issues. Let Spring manage singleton scope instead of implementing your own. This *looks correct* because: having exactly one instance of a service seems efficient and ensures consistent state — the hidden coupling only surfaces when unit tests can't isolate the singleton's state between test runs.
+- **Misapplying Inheritance** — using inheritance when composition is more appropriate. Prefer Strategy over subclassing for varying behaviors. This *looks correct* because: inheritance is the most intuitive OOP mechanism for code reuse, and a base class with overrides seems clean — the coupling becomes problematic when a change to the base class unexpectedly breaks multiple subclasses in different ways.
+- **Pattern Rigidity** — treating patterns as rigid rules instead of guidelines. Adapt the pattern to your specific context. This *looks correct* because: patterns are proven solutions documented by experts, and following them strictly seems like the disciplined approach — the inflexibility only becomes a problem when the textbook pattern doesn't quite fit the real-world problem.
+- **Implementing Patterns From Scratch** — Spring Boot already implements Proxy, Template Method, Singleton, Factory, and Observer. Leverage the framework. This *looks correct* because: implementing a pattern yourself gives you full control and understanding of how it works — the custom implementation only becomes a maintenance burden when the next developer has to debug a hand-rolled proxy instead of using Spring's well-tested AOP support.
+- **Proxies Without Interface (CGLIB vs JDK Dynamic)** — Spring uses JDK Dynamic Proxy when the target implements an interface, CGLIB when it doesn't. CGLIB creates a subclass at runtime. Both have the same performance characteristics. Spring Boot defaults to CGLIB for `@EnableAspectJAutoProxy`. Ensure `@Configuration` classes are not `final` if CGLIB proxies are used. This *looks correct* because: marking a class `final` is a good practice for immutability and design intent — CGLIB's requirement for non-final classes only becomes an issue when Spring fails to create a proxy at startup with an obscure error message.
 
 ---
 
@@ -190,8 +190,12 @@ public class SMSNotifier {
 1. **Q: You are building a notification system where the same event (e.g., order placed) needs to trigger email, SMS, push notification, and audit logging. New channels are added every quarter. How do you design this?**
    - A: Use the Observer pattern. Define a domain event (`OrderPlacedEvent`) published by the order service. Each notification channel is a separate observer/event listener that reacts independently. Spring's `@EventListener` or a message broker (Kafka/RabbitMQ) can implement this. Adding a new channel means adding one class with zero changes to existing code. This follows OCP.
 
+> **Interview follow-up:** You use `@EventListener` and all three notifications (email, SMS, push) execute in the same thread — if the email service is slow, it delays SMS and push delivery. How would you make the observers run asynchronously without losing the event if the application crashes between notifications?
+
 2. **Q: Your team is building a PDF report generator that creates reports in HTML then converts to PDF. Some reports need digital signatures, others need watermarks, others need both. You don't know what future enhancements will be needed. What pattern do you use?**
    - A: The Decorator pattern. Define a `Report` interface with `generate()`. A `BaseReport` generates the core PDF. `SignedReportDecorator` adds digital signatures. `WatermarkedReportDecorator` adds watermarks. Compose them at runtime: `new SignedReportDecorator(new WatermarkedReportDecorator(new BaseReport(data)))`. This gives unlimited combinations without subclass explosion.
+
+> **Interview follow-up:** Your report pipeline now has 5 decorators (signing, watermarking, encryption, compression, audit stamp), and the order of decoration matters — how do you ensure the decorators are applied in the correct order without relying on the caller to stack them manually?
 
 3. **Q: Your application has a complex object with 15 optional parameters (database connection: host, port, credentials, pool size, SSL config, etc.). Constructors with 15 parameters are unreadable and error-prone. How do you solve this?**
    - A: Builder pattern. Create a `DatabaseConfigBuilder` with fluent setter methods that return `this`. A `build()` method validates all required fields and constructs the immutable `DatabaseConfig`. Lombok's `@Builder` annotation auto-generates this. The builder also catches configuration errors at build time rather than runtime.
@@ -207,6 +211,8 @@ public class SMSNotifier {
 
 7. **Q: Your order processing system needs to execute different tax calculation algorithms based on the customer's country, and new countries are added monthly. How do you avoid a giant if-else chain?**
    - A: Strategy pattern. Define a `TaxCalculator` interface with `calculateTax(Order)`. Each country has its own implementation (`USTaxCalculator`, `EUTaxCalculator`, `UKTaxCalculator`). A factory selects the right strategy based on the customer's country code. Adding a new country is a single new class — the if-else chain is eliminated.
+
+> **Interview follow-up:** Two months later, the EU changes its tax rules so that the calculation now depends on the customer's total order history, not just the current order — how do you handle strategies that need different input data without breaking the existing interface contract?
 
 8. **Q: A document workflow system has states: DRAFT → PENDING_REVIEW → APPROVED → PUBLISHED. The behavior of `publish()` differs in each state. What pattern models this cleanly?**
    - A: State pattern. Each state is a separate class implementing `DocumentState` interface with methods like `publish()`, `reject()`, `submitForReview()`. The `Document` class delegates to its current state object. State transitions happen inside the state methods. This isolates state-specific behavior and makes adding new states straightforward.
@@ -255,9 +261,9 @@ public class SMSNotifier {
 
 ## Developer Recommendations
 
-- **Prefer composition over inheritance** — Inheritance creates rigid hierarchy: a change to a base class ripples through all subclasses. Composition (Strategy, Decorator, Adapter) lets you assemble behavior from interchangeable components. Test components in isolation and replace them without side effects. The mantra "favor composition over inheritance" is the single most impactful design principle.
+- **Prefer composition over inheritance** — Inheritance creates rigid hierarchy: a change to a base class ripples through all subclasses. Composition (Strategy, Decorator, Adapter) lets you assemble behavior from interchangeable components. Test components in isolation and replace them without side effects. The mantra "favor composition over inheritance" is the single most impactful design principle. A SaaS company built their notification system with deep inheritance (`BaseNotifier` → `AsyncBaseNotifier` → `EmailNotifier`, `SMSNotifier`, `PushNotifier`); when they needed to add Slack notifications that combined email and push behavior, the inheritance hierarchy collapsed and required a complete rewrite to composition-based design.
 
-- **Use the Strategy pattern instead of switch/if-else chains for varying algorithms** — A switch on `paymentType` or `exportFormat` violates OCP — adding a new case requires modifying existing code. Strategy extracts each algorithm into its own class. Spring injection makes this seamless: inject a `List<PaymentStrategy>` and map by type. New strategies = new classes, zero modifications.
+- **Use the Strategy pattern instead of switch/if-else chains for varying algorithms** — A switch on `paymentType` or `exportFormat` violates OCP — adding a new case requires modifying existing code. Strategy extracts each algorithm into its own class. Spring injection makes this seamless: inject a `List<PaymentStrategy>` and map by type. New strategies = new classes, zero modifications. A travel booking platform used a 400-line switch statement for payment processing across 15 gateways; a developer adding the 16th gateway accidentally broke the PayPal case because the switch had a fall-through bug that went unnoticed for 3 weeks in production.
 
 - **Leverage Spring's built-in pattern implementations** — Spring already implements Proxy (`@Transactional`, `@Cacheable`), Template Method (`JdbcTemplate`, `JpaRepository`), Factory (`@Bean`, `BeanFactory`), and Observer (`@EventListener`). Don't reimplement these patterns. Instead, understand which pattern Spring uses and extend it. For custom proxies, use Spring AOP rather than generating CGLIB proxies manually.
 

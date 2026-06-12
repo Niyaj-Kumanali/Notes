@@ -143,14 +143,14 @@ public class FineGrainedCacheConfig {
 
 ## Common Mistakes
 
-- **Using `@Cacheable` on methods with side effects** — On a cache hit, the method does not execute, so side effects (event publishing, logging, counters) are silently skipped. Use `@CachePut` for methods that must always execute and update the cache.
-- **Self-invocation bypassing the cache** — Calling a `@Cacheable` method from within the same class does not trigger caching because the AOP proxy is bypassed. Extract to a separate bean for the cache to work.
-- **No TTL or eviction policy** — Cached data becomes stale over time and returns outdated information to users. Always set `expireAfterWrite` or use `@CacheEvict` on update operations to keep data fresh.
-- **Too large cache causing OOM** — Without `maximumSize`, the cache can grow unbounded and exhaust heap memory. Always set a size limit appropriate for your data volume and available memory.
-- **Caching mutable objects** — If the cached object is modified after retrieval, the cached copy changes too, corrupting the cache for all subsequent callers. Return immutable objects, records, or defensive copies.
-- **`@Cacheable` on private methods** — Ignored because the proxy cannot intercept private methods. Use public methods only for caching annotations to be effective.
-- **Forgetting `@EnableCaching`** — Without it, no caching annotations are processed and all methods execute unconditionally. Always add `@EnableCaching` to a configuration class.
-- **Not monitoring cache hit ratio** — Without monitoring, you cannot tune cache sizes and TTLs effectively. Enable `recordStats()` on Caffeine and expose cache metrics via Micrometer and Actuator.
+- **Using `@Cacheable` on methods with side effects** — On a cache hit, the method does not execute, so side effects (event publishing, logging, counters) are silently skipped. This *looks correct* because the annotation says "cacheable" which implies the method is expensive and repeating is wasteful — the side effects are invisible until an audit log is missing. Use `@CachePut` for methods that must always execute and update the cache.
+- **Self-invocation bypassing the cache** — Calling a `@Cacheable` method from within the same class does not trigger caching because the AOP proxy is bypassed. This *looks correct* because the method compiles, runs, and returns the correct result — the cache is simply absent, with no error or warning. Extract to a separate bean for the cache to work.
+- **No TTL or eviction policy** — Cached data becomes stale over time and returns outdated information to users. This *looks correct* because during development with low traffic and fresh data, stale entries never surface — the problem only becomes visible weeks later when a user sees data that should have been updated. Always set `expireAfterWrite` or use `@CacheEvict` on update operations to keep data fresh.
+- **Too large cache causing OOM** — Without `maximumSize`, the cache can grow unbounded and exhaust heap memory. This *looks correct* because the cache works fine with small datasets during development — the OOM only occurs after sustained production traffic with high cardinality keys. Always set a size limit appropriate for your data volume and available memory.
+- **Caching mutable objects** — If the cached object is modified after retrieval, the cached copy changes too, corrupting the cache for all subsequent callers. This *looks correct* because the first caller that modifies the object works correctly — the corruption only manifests when a second caller retrieves what appears to be the same object but sees the first caller's modifications. Return immutable objects, records, or defensive copies.
+- **`@Cacheable` on private methods** — Ignored because the proxy cannot intercept private methods. This *looks correct* because the `@Cacheable` annotation is syntactically valid and the code compiles — Spring provides no warning that private cache annotations are silently ignored. Use public methods only for caching annotations to be effective.
+- **Forgetting `@EnableCaching`** — Without it, no caching annotations are processed and all methods execute unconditionally. This *looks correct* because all methods still return the correct results — they just run the full expensive method every time, which is indistinguishable from correct behavior without profiling. Always add `@EnableCaching` to a configuration class.
+- **Not monitoring cache hit ratio** — Without monitoring, you cannot tune cache sizes and TTLs effectively. This *looks correct* because the application works correctly regardless of hit ratio — the missing performance only becomes known when a load test shows poor throughput. Enable `recordStats()` on Caffeine and expose cache metrics via Micrometer and Actuator.
 
 ---
 
@@ -246,6 +246,8 @@ public class MultiLevelCacheConfig {
    public Product save(Product product) { ... }
    ```
 
+   > **Interview follow-up:** The candidate suggested `@CacheEvict(value = "productLists", allEntries = true)` on every write. If there are 50 different list caches (by category, by search query, by price range, etc.) and the application performs 1000 writes/second, all 50 list caches are evicted 1000 times/second. Every subsequent read request misses every list cache, causing 50,000 cache misses per second that all hit the database. How would you design a cache invalidation strategy that avoids this mass-eviction cascade?
+
 2. **Q: You cache the result of a method that returns a mutable object. A caller modifies the returned object. The next caller gets the modified (corrupted) data from the cache. How do you prevent this?**
    A: Never cache mutable objects directly. Either: (a) Return a defensive copy from the cached method, (b) Make the object immutable (use records), or (c) Clone the object on cache retrieval:
    ```java
@@ -266,6 +268,8 @@ public class MultiLevelCacheConfig {
 
 4. **Q: Your Redis cache performance degrades over time. The cache hit rate drops from 95% to 60%. You suspect memory pressure causes Redis to evict keys. How do you diagnose and fix this?**
    A: Check Redis eviction stats: `INFO stats` shows `evicted_keys`. Common causes: (a) TTL is too long — stale keys accumulate. (b) No TTL set — keys live forever. (c) Too many unique keys — high cardinality in key generation (e.g., including timestamps in keys). Fix: Set appropriate TTLs, review key generation to exclude high-cardinality values, and configure Redis maxmemory-policy to `allkeys-lru` (least recently used) for a sane eviction strategy.
+
+   > **Interview follow-up:** The candidate suggested switching from `noeviction` to `allkeys-lru`. After the change, the hit ratio recovers to 90% but some customers report seeing stale data for 15+ minutes. Redis evicted their product cache keys because they were least recently used, and the next request had to re-fetch from the database — but the database has a write-heavy replica lag of 2 seconds, and the re-fetched data is sometimes not yet visible. The stale data persists because the eviction happened minutes ago and the cache simply has no entry for that key now. What combination of TTL, eviction policy, and write strategy would you use to prevent this scenario?
 
 5. **Q: You have a service that calls an external weather API. The API rate-limits to 10 calls/minute. Your application serves 100 requests/second. How do you cache the weather data so you never exceed the rate limit?**
    A: Use `@Cacheable` with a long TTL and `sync = true`:

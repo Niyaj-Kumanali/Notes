@@ -137,12 +137,12 @@ public class FeatureFlagEndpoint {
 
 ## Common Mistakes
 
-- **Exposing sensitive endpoints in production** — Endpoints like `heapdump`, `env`, and `threaddump` expose sensitive information including PII and secrets. Always restrict exposure to only the endpoints your operations team actually needs.
-- **Not securing actuator endpoints** — Actuator endpoints are HTTP-accessible by default and should be protected with Spring Security or network-level restrictions. Unsecured endpoints can leak sensitive data about your application internals.
-- **Leaving `show-details: always`** — Exposes detailed health information to anyone who can reach the endpoint. Use `when-authorized` to restrict detailed health data to authenticated users with specific roles.
-- **Not creating custom health indicators** — The default health check only covers basic Spring components like DataSource. Add custom health checks for all critical external services including third-party APIs, message queues, and custom services.
-- **Not exposing metrics to Prometheus** — Without Prometheus-formatted metrics, you cannot set up proper monitoring dashboards and alerting rules for production operations.
-- **No metrics tags** — Without consistent tags (application name, environment, instance), metrics from multiple instances and environments cannot be correlated or filtered in dashboards.
+- **Exposing sensitive endpoints in production** — Endpoints like `heapdump`, `env`, and `threaddump` expose sensitive information including PII and secrets. This *looks correct* because `include: "*"` is the easiest configuration and works perfectly in development — the data leakage is invisible until a security audit discovers the exposed endpoints. Always restrict exposure to only the endpoints your operations team actually needs.
+- **Not securing actuator endpoints** — Actuator endpoints are HTTP-accessible by default and should be protected with Spring Security or network-level restrictions. This *looks correct* because the endpoints are accessible to developers for debugging — the security risk only becomes apparent when the application is deployed to production with the same open configuration. Unsecured endpoints can leak sensitive data about your application internals.
+- **Leaving `show-details: always`** — Exposes detailed health information to anyone who can reach the endpoint. This *looks correct* because the ops team needs details to diagnose issues, and `always` is the most convenient setting — the information is shared freely until a competitor or attacker uses it for reconnaissance. Use `when-authorized` to restrict detailed health data to authenticated users with specific roles.
+- **Not creating custom health indicators** — The default health check only covers basic Spring components like DataSource. This *looks correct* because the default `/health` returns UP and the orchestrator keeps the pod running — the false positive only matters when the downstream dependency fails and the application stops working while reporting healthy. Add custom health checks for all critical external services including third-party APIs, message queues, and custom services.
+- **Not exposing metrics to Prometheus** — Without Prometheus-formatted metrics, you cannot set up proper monitoring dashboards and alerting rules for production operations. This *looks correct* because the application works without Prometheus — the lack of monitoring only becomes obvious during a production incident when there are no charts or alerts to analyze. Add `micrometer-registry-prometheus` and include `prometheus` in exposed endpoints.
+- **No metrics tags** — Without consistent tags (application name, environment, instance), metrics from multiple instances and environments cannot be correlated or filtered in dashboards. This *looks correct* because metrics render correctly in the `/actuator/metrics` endpoint — the missing tags only matter when you try to query Prometheus for `average_response_time by application` and get a combined number for all services.
 
 ---
 
@@ -279,6 +279,8 @@ public class OrderMetrics {
    ```
    The separate port should not be exposed to the public internet.
 
+   > **Interview follow-up:** The candidate proposed a separate management port on 8081. A developer runs the application locally using `--server.port=8080` and a shared IDE run config that was configured before the management port was added. The developer is unaware of the management port change and spends 2 hours debugging why the application appears to start but never becomes healthy (they're checking port 8080, not 8081). How would you design the configuration so that the separate management port is only enabled in production profiles, and what logging or startup banner would you add to make the port separation visible to developers?
+
 3. **Q: Your application has 50+ metrics. Developers keep adding new ones inconsistently — some use dots, some use underscores; some tag with `application`, some don't. Prometheus queries become confusing. How do you standardize?**
    A: Enforce naming conventions with a custom `MeterFilter`:
    ```java
@@ -367,6 +369,8 @@ public class OrderMetrics {
 
 9. **Q: You configure `management.endpoints.web.exposure.include=*` for development. The build pipeline accidentally deploys this to production. What is the impact and how do you prevent it?**
    A: Impact: `*` exposes all endpoints including `heapdump` (full JVM memory dump with PII), `env` (environment variables with secrets), `threaddump` (running threads), `loggers` (change log levels), `shutdown` (shut down the application). Mitigation: (a) Use separate config per profile — `management.endpoints.web.exposure.include=health,info,metrics,prometheus` for production. (b) Add a `@ConditionalOnCloudPlatform` or profile check that refuses to start with dangerous exposure in production. (c) Use ArchUnit to test that the production config does not include sensitive endpoints.
+
+   > **Interview follow-up:** The candidate suggested ArchUnit to test production config. A year later, the team migrates from `application.properties` to a Spring Cloud Config server. The ArchUnit test reads the local `application-production.properties` file, but the effective configuration is now served remotely by the config server — the local file only contains overrides. The ArchUnit test passes because the local file uses safe endpoint exposure, but the config server delivers `include=*`, which is the actual configuration in production. How would you write a runtime check that validates the effective (not just the file-based) actuator exposure on application startup in production?
 
 10. **Q: Your application is slow and you suspect a thread pool exhaustion. How do you use Actuator to diagnose this in production?**
     A: Check multiple endpoints: (a) `/actuator/metrics/jvm.threads.live` — number of live threads. (b) `/actuator/metrics/jvm.threads.peak` — peak thread count. (c) `/actuator/metrics/tomcat.threads.current` — current Tomcat threads. (d) `/actuator/threaddump` — full thread dump to see blocked/waiting threads. Compare with configured pool sizes:

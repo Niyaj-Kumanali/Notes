@@ -121,19 +121,19 @@
 
 ## Common Mistakes
 
-- **Using `fixedRate` when tasks can overrun** — If a task takes 10 seconds but `fixedRate` is 5 seconds, executions pile up or overlap. Use `fixedDelay` to prevent overlap when task duration is unpredictable.
+- **Using `fixedRate` when tasks can overrun** — If a task takes 10 seconds but `fixedRate` is 5 seconds, executions pile up or overlap. This *looks correct* because the annotation says "every 5 seconds" and it works perfectly when the task completes quickly — the overlap only manifests when a slow network or database call extends execution time. Use `fixedDelay` to prevent overlap when task duration is unpredictable.
 
-- **Cron at the same second for many tasks** — Multiple tasks triggering simultaneously cause a thundering herd. Stagger cron times (e.g., `0 0 2 * * ?` and `0 5 2 * * ?`) to spread load across different seconds or minutes.
+- **Cron at the same second for many tasks** — Multiple tasks triggering simultaneously cause a thundering herd. This *looks correct* because all tasks use `0 0 2 * * ?` which reads as "daily at 2 AM" — the repeating second field value is visually consistent, and the performance impact is invisible in testing with few tasks. Stagger cron times (e.g., `0 0 2 * * ?` and `0 5 2 * * ?`) to spread load across different seconds or minutes.
 
-- **No error handling** — If a scheduled task throws an unhandled exception, the task stops permanently because Spring's default scheduler does not retry. Always wrap the task body in try-catch with logging and alerting.
+- **No error handling** — If a scheduled task throws an unhandled exception, the task stops permanently because Spring's default scheduler does not retry. This *looks correct* because the task method is straightforward and appears to never throw — the unhandled exception is a rare edge case that only surfaces in production. Always wrap the task body in try-catch with logging and alerting.
 
-- **Forgetting `@EnableScheduling`** — Without this annotation on a `@Configuration` class, all `@Scheduled` annotations are silently ignored and no tasks run. Add it once at the application level.
+- **Forgetting `@EnableScheduling`** — Without this annotation on a `@Configuration` class, all `@Scheduled` annotations are silently ignored and no tasks run. This *looks correct* because the code compiles, the `@Scheduled` annotation is present, and there is no error message — the tasks simply never execute. Add it once at the application level.
 
-- **Long-running tasks blocking the pool** — With the default single-threaded scheduler, one long task blocks all others from executing. Increase pool size or use `@Async` for long-running operations to free the scheduler thread.
+- **Long-running tasks blocking the pool** — With the default single-threaded scheduler, one long task blocks all others from executing. This *looks correct* because the application starts without errors and the long task runs to completion — the developer only notices the problem when other scheduled tasks fail to run on time. Increase pool size or use `@Async` for long-running operations to free the scheduler thread.
 
-- **Tasks not idempotent** — Scheduled tasks can be accidentally triggered multiple times in clustered deployments or during failover. Ensure all scheduled tasks are idempotent so duplicate executions produce correct results.
+- **Tasks not idempotent** — Scheduled tasks can be accidentally triggered multiple times in clustered deployments or during failover. This *looks correct* because in single-instance development, the task runs once as expected — duplicate execution is a clustered deployment problem that doesn't surface in local testing. Ensure all scheduled tasks are idempotent so duplicate executions produce correct results.
 
-- **Default single-thread pool** — Only one task runs at a time by default. If you have multiple `@Scheduled` methods, they queue up behind a slow task. Configure a `ThreadPoolTaskScheduler` with a sufficient pool size.
+- **Default single-thread pool** — Only one task runs at a time by default. If you have multiple `@Scheduled` methods, they queue up behind a slow task. This *looks correct* because the application starts without errors and all tasks eventually run — the sequential execution is only noticeable when a task takes minutes and others miss their deadlines. Configure a `ThreadPoolTaskScheduler` with a sufficient pool size.
 
 ---
 
@@ -251,6 +251,8 @@ public class HealthCheckTask {
 - **Q: Your scheduled task runs every hour and processes pending orders. After a deployment, you notice the task has not run for 8 hours. No errors in logs. What happened?**
   A: The task method threw an exception that propagated up, and Spring's default scheduler silently stopped the task — it will NOT reschedule after an exception. Always wrap the task body in try-catch with logging and alerting. Use an aspect that monitors every task execution and alerts on failures to prevent silent stops.
 
+  > **Interview follow-up:** The candidate correctly identified the silent stop due to unhandled exceptions. The team adds `try-catch` with logging to the task, but two weeks later the task stops again — the try-catch was added to the scheduled wrapper method, but the wrapper calls a private helper that throws a `NullPointerException` for a specific edge case, and the wrapper's catch clause catches the generic `Exception` but the log level is `DEBUG` which is disabled in production. How would you prevent this class of silent failure across ALL scheduled tasks, not just this one?
+
 - **Q: Your Spring Boot application runs on 5 instances. A scheduled task that sends a daily summary email fires 5 times — one per instance. Customers get 5 identical emails. How do you solve this?**
   A: Use a distributed lock mechanism like ShedLock, which uses a shared database table or Redis to coordinate locks across instances. Only one instance acquires the lock and executes the task; if that instance fails, another picks it up after the lock expires. Alternative approaches include database `SELECT ... FOR UPDATE` row locks or Redis `SETNX` locks.
 
@@ -262,6 +264,8 @@ public class HealthCheckTask {
 
 - **Q: Your `@Scheduled` task runs on a fixedDelay of 10 seconds. After a database migration that takes 2 hours, the task resumes with 10 second intervals. But it tries to process 2 hours of backlog data and the system crashes. How do you prevent this?**
   A: Add a guard that limits how far back the task looks, processing only events within a bounded time window. Better yet, use a cron that runs once per minute and processes a limited batch within each run, preventing the catch-up avalanche. Use alerting to detect when backlog exceeds normal thresholds.
+
+  > **Interview follow-up:** The candidate proposed a bounded time window. If the database migration took 2 hours, and the guard limits the window to 5 minutes of backlog, the remaining 1 hour 55 minutes of unprocessed events are permanently lost — they exist in the database but the task will never see them because the next run only looks at events newer than its last watermark. How would you design recovery so that backlog is processed gradually over multiple runs without crashing the system, and without data loss?
 
 - **Q: You create a `@Scheduled` method in a `@Configuration` class. The method never runs. Why?**
   A: `@Configuration` classes are processed early in the lifecycle and the `ScheduledAnnotationBeanPostProcessor` may not scan them. Move `@Scheduled` methods to a `@Component` class. The `@Configuration` class should only contain `@Bean` definitions, not scheduled task implementations.

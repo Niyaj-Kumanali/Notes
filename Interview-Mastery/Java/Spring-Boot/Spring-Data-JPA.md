@@ -209,14 +209,14 @@ List<UserDto> findAllDto();
 
 ## Common Mistakes
 
-- **N+1 queries** — Fetching entities in a loop causes N extra SQL queries, turning fast operations into slow ones. Fix with `JOIN FETCH` or `@EntityGraph` to eagerly load associations in a single query.
-- **`LazyInitializationException`** — Accessing a lazy-loaded association outside a transaction throws this exception. Fix by loading eagerly within the transaction, using `JOIN FETCH`, or switching to DTO projections.
-- **Not using `@Transactional` on modifying queries** — Without it, lazy loading fails and changes may not be flushed to the database. Always add `@Transactional` on service methods that modify data.
-- **Using entities as DTOs** — Over-fetching data, circular JSON references during serialization, and performance issues. Use DTO projections instead to select only the fields you need.
-- **`CascadeType.ALL` everywhere** — Unintended cascading deletes can wipe out large parts of the database accidentally. Be explicit about which cascade types you actually need (`PERSIST`, `MERGE`).
-- **`FetchType.EAGER` on associations** — Causes Cartesian product joins that fetch massive amounts of data even when not needed. Use `LAZY` as default and `@EntityGraph` for specific queries.
-- **Not specifying `@Column`** — Results in unexpected column names and default lengths that may not match your schema. Always explicitly define column names and constraints.
-- **`equals()` and `hashCode()` based on database ID** — Objects lose identity before persistence (ID is null for new entities). Use a business key or UUID that is stable across the entity lifecycle.
+- **N+1 queries** — Fetching entities in a loop causes N extra SQL queries, turning fast operations into slow ones. This *looks correct* because each individual query succeeds and returns data — the performance problem only manifests as the dataset grows, and without SQL logging enabled, the extra queries are invisible. Fix with `JOIN FETCH` or `@EntityGraph` to eagerly load associations in a single query.
+- **`LazyInitializationException`** — Accessing a lazy-loaded association outside a transaction throws this exception. This *looks correct* because the entity reference contains the correct ID, and the getter method exists — the code reads naturally, and the error only fires when the getter is actually called outside the session. Fix by loading eagerly within the transaction, using `JOIN FETCH`, or switching to DTO projections.
+- **Not using `@Transactional` on modifying queries** — Without it, lazy loading fails and changes may not be flushed to the database. This *looks correct* because `save()` returns immediately without errors — the data may eventually be flushed by OSIV or by a subsequent transactional method, masking the missing annotation. Always add `@Transactional` on service methods that modify data.
+- **Using entities as DTOs** — Over-fetching data, circular JSON references during serialization, and performance issues. This *looks correct* because returning an entity directly is the path of least resistance — the data is correct during development, and the performance impact is only visible under load. Use DTO projections instead to select only the fields you need.
+- **`CascadeType.ALL` everywhere** — Unintended cascading deletes can wipe out large parts of the database accidentally. This *looks correct* because `CascadeType.ALL` is the quickest way to make related entities persist, and during development with minimal data, cascading never causes visible problems. Be explicit about which cascade types you actually need (`PERSIST`, `MERGE`).
+- **`FetchType.EAGER` on associations** — Causes Cartesian product joins that fetch massive amounts of data even when not needed. This *looks correct* because EAGER loading eliminates `LazyInitializationException`, and for small datasets the performance impact is negligible — the problem only grows as the entity graph deepens. Use `LAZY` as default and `@EntityGraph` for specific queries.
+- **Not specifying `@Column`** — Results in unexpected column names and default lengths that may not match your schema. This *looks correct* because Hibernate generates a schema that works, and the application runs without errors — the mismatch only surfaces when a DBA reviews the production schema or a migration script fails. Always explicitly define column names and constraints.
+- **`equals()` and `hashCode()` based on database ID** — Objects lose identity before persistence (ID is null for new entities). This *looks correct* because the natural choice for equality is the primary key — and it works correctly once the entity is persisted. The bug only manifests before persisting, when two new entities compare as equal despite being different objects. Use a business key or UUID that is stable across the entity lifecycle.
 
 ---
 
@@ -243,7 +243,9 @@ List<Order> findAllWithDetails();
 List<Order> findAllWithGraph();
 ```
 
-The fix reduced page load time from 8s to 200ms for an order with 50 items.
+   The fix reduced page load time from 8s to 200ms for an order with 50 items.
+
+   > **Interview follow-up:** The candidate used `JOIN FETCH` for two associations (items, customer). If `Order` has 20 fields and 8 associations, joining all of them creates a Cartesian product — 100 orders × 50 items × 1 customer = 5000 rows in the result set. How would you balance the number of JOIN FETCHes against the row explosion, and when would you switch to batch fetching with `@BatchSize` instead?
 
 ### Scenario 2: Multi-Tenant SaaS with Dynamic Query Filters
 

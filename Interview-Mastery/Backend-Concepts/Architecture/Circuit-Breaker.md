@@ -49,13 +49,13 @@ public PaymentResponse paymentFallback(PaymentRequest request, Throwable t) {
 
 ## Common Mistakes
 
-- **No Fallback for OPEN State** — throwing an exception when the circuit is open instead of providing a fallback method that returns cached data or a sensible default.
-- **Too Sensitive Thresholds** — opening the circuit on a single failure causes unnecessary outages; set a minimum call count and rate threshold.
-- **Too Long Wait in OPEN State** — 30 seconds is usually sufficient; longer waits prolong degradation unnecessarily.
-- **Not Recording Relevant Exceptions** — recording only generic `Exception.class` instead of specific exceptions like `TimeoutException`, `ConnectException`, `HttpServerErrorException`.
-- **Circuit Breaker Without Monitoring** — if you can't see circuit breaker state changes, you can't respond to outages.
-- **Shared Circuit Breaker for Different APIs of the Same Service** — If a service has a health endpoint (always OK) and a payment endpoint (failing), a single circuit breaker for the whole service treats both the same. Use separate circuit breakers for different logical endpoints or operations within the same downstream service.
-- **Not Setting Minimum Number of Calls** — With default `minimumNumberOfCalls = 10`, the first failure on a quiet system can open the circuit. For low-traffic services, the circuit may never collect enough samples to make a statistically valid decision. Set `minimumNumberOfCalls` to 5-10 for high-traffic and 2-3 for low-traffic services.
+- **No Fallback for OPEN State** — throwing an exception when the circuit is open instead of providing a fallback method that returns cached data or a sensible default. This *looks correct* because: throwing an exception makes the failure visible and avoids returning stale or incorrect data — the problem is that throwing an exception still fails the request, defeating the purpose of the circuit breaker's graceful degradation.
+- **Too Sensitive Thresholds** — opening the circuit on a single failure causes unnecessary outages; set a minimum call count and rate threshold. This *looks correct* because: any failure is undesirable, so reacting immediately seems like the safest approach — the circuit tripping on a single transient blip causes more downtime than the failure itself.
+- **Too Long Wait in OPEN State** — 30 seconds is usually sufficient; longer waits prolong degradation unnecessarily. This *looks correct* because: waiting longer gives the downstream more time to recover, which seems safer — the extended wait just means users experience degraded fallback behavior for longer than necessary.
+- **Not Recording Relevant Exceptions** — recording only generic `Exception.class` instead of specific exceptions like `TimeoutException`, `ConnectException`, `HttpServerErrorException`. This *looks correct* because: catching all exceptions is the simplest configuration and ensures nothing is missed — recording too many exception types (including client errors) causes the circuit to open for the wrong reasons.
+- **Circuit Breaker Without Monitoring** — if you can't see circuit breaker state changes, you can't respond to outages. This *looks correct* because: the circuit breaker handles failures silently and the system continues operating — without visibility, you only discover degraded service when users report that recommendations look stale or payments are pending.
+- **Shared Circuit Breaker for Different APIs of the Same Service** — If a service has a health endpoint (always OK) and a payment endpoint (failing), a single circuit breaker for the whole service treats both the same. Use separate circuit breakers for different logical endpoints or operations within the same downstream service. This *looks correct* because: one circuit breaker per service is simpler to configure and manage — the shared circuit opens for the healthy endpoint too, blocking critical calls alongside the failing one.
+- **Not Setting Minimum Number of Calls** — With default `minimumNumberOfCalls = 10`, the first failure on a quiet system can open the circuit. For low-traffic services, the circuit may never collect enough samples to make a statistically valid decision. Set `minimumNumberOfCalls` to 5-10 for high-traffic and 2-3 for low-traffic services. This *looks correct* because: the defaults seem reasonable and changing them requires understanding the traffic patterns — the default `minimumNumberOfCalls` of 10 means a low-traffic service with 3 requests per minute will never open its circuit breaker regardless of failure rate.
 
 ---
 
@@ -140,11 +140,15 @@ public List<Product> dbFallback(String category, Throwable t) {
 1. **Q: You are building a payment processing system that calls an external gateway. How do you prevent a gateway slowdown from taking down your entire service?**
    A: Combine a CircuitBreaker with a TimeLimiter and Bulkhead. The TimeLimiter caps each call at 2s. The Bulkhead dedicates a separate thread pool for payment calls (max 10 threads). The CircuitBreaker opens at 50% failure rate over a 20-request window. The fallback returns a "processing" status and queues the payment for retry. This three-layer defense ensures a gateway issue affects only payments, not the entire application.
 
+> **Interview follow-up:** The fallback returns "processing" and queues the payment for retry, but 3 hours later the gateway is still down and the retry queue has 50,000 pending payments — how do you prevent the retry queue itself from becoming a failure vector?
+
 2. **Q: A recommendation service occasionally has 5-second GC pauses. How do you configure a circuit breaker to handle slow responses differently from errors?**
    A: Use `slowCallDurationThreshold` and `slowCallRateThreshold` alongside `failureRateThreshold`. Set the threshold at 500ms — any call exceeding this is counted as slow. When 50% of calls are slow in a 20-request window, the circuit opens. This catches degraded performance before hard errors occur. Add a separate TimeLimiter at 2s to cut off truly hung requests.
 
 3. **Q: Your circuit breaker opens, but the downstream service recovers quickly. How do you minimize downtime while avoiding flapping?**
    A: Use a short `waitDurationInOpenState` (5-15s) combined with gradual HALF_OPEN recovery. In HALF_OPEN, send only 1-3 test requests. If they succeed, transition to CLOSED. If even one fails, go back to OPEN. For critical services, use a gradual recovery — start with 1% of traffic, then 10%, then 100% — monitoring failure rates at each step.
+
+> **Interview follow-up:** With gradual recovery at 1% traffic, how do you ensure that the probe requests are representative of real traffic patterns and not just hitting a warmed-up cache or a healthy instance while other instances are still failing?
 
 4. **Q: A third-party API charges per call. How do you balance circuit breaker protection with cost when they have occasional blips?**
    A: Use a higher `minimumNumberOfCalls` (e.g., 50) and a longer sliding window before opening. This prevents brief blips from triggering protection and eating into your API budget. Set `failureRateThreshold` to 60-70% to tolerate minor issues. Consider a separate cost-aware fallback that degrades to cached responses for non-critical calls.
@@ -166,6 +170,8 @@ public List<Product> dbFallback(String category, Throwable t) {
 
 10. **Q: You have a circuit breaker around a Redis cache call. If Redis fails, should the circuit breaker prevent reads or fall through to the database?**
     A: Configure the circuit breaker to record only connection-level failures, not cache misses. The fallback should go directly to the database (cache-aside pattern). Set a short `waitDurationInOpenState` (5s) since Redis typically recovers quickly. Once the circuit closes, the cache warms up naturally as subsequent reads populate it. Never let a cache circuit breaker become a single point of failure.
+
+> **Interview follow-up:** All requests now fall through to the database when the cache circuit is open, causing the database connection pool to saturate under the extra load — how do you protect the database from the cache miss storm without adding another circuit breaker around the database?
 
 ---
 
@@ -205,9 +211,9 @@ public List<Product> dbFallback(String category, Throwable t) {
 
 ## Developer Recommendations
 
-- **Layer circuit breaker with TimeLimiter and Bulkhead** — A circuit breaker alone doesn't prevent slow responses from blocking threads; it only stops calls after failures accumulate. TimeLimiter caps individual call duration (e.g., 2s). Bulkhead dedicates separate thread pools per downstream service. Together, they provide defense in depth: Bulkhead isolates, TimeLimiter cuts off slow calls, CircuitBreaker stops calling dead services.
+- **Layer circuit breaker with TimeLimiter and Bulkhead** — A circuit breaker alone doesn't prevent slow responses from blocking threads; it only stops calls after failures accumulate. TimeLimiter caps individual call duration (e.g., 2s). Bulkhead dedicates separate thread pools per downstream service. Together, they provide defense in depth: Bulkhead isolates, TimeLimiter cuts off slow calls, CircuitBreaker stops calling dead services. A major airline had a circuit breaker on their booking API but no TimeLimiter — when the upstream seat-mapping service hung, the circuit breaker took 30 seconds and 10 failures to open, by which time all Tomcat threads were exhausted and the entire booking site was down for 12 minutes.
 
-- **Use recordExceptions/ignoreExceptions explicitly** — The default records all exceptions as failures, including 4xx client errors. Explicitly configure `recordExceptions` to include only `ConnectException`, `TimeoutException`, `HttpServerErrorException` and `ignoreExceptions` for `HttpClientErrorException`. This ensures the circuit opens only for genuine downstream health issues, not bad client requests.
+- **Use recordExceptions/ignoreExceptions explicitly** — The default records all exceptions as failures, including 4xx client errors. Explicitly configure `recordExceptions` to include only `ConnectException`, `TimeoutException`, `HttpServerErrorException` and `ignoreExceptions` for `HttpClientErrorException`. This ensures the circuit opens only for genuine downstream health issues, not bad client requests. A fintech startup used the default exception recording and their circuit breaker opened every time a customer entered an invalid card number (400 Bad Request) — the circuit stayed open for 30 seconds, blocking all payment attempts despite the downstream service being perfectly healthy.
 
 - **Use slow-call detection alongside failure-rate detection** — Failures (exceptions) alone miss the case where a service responds but takes 10 seconds. Enable `slowCallDurationThreshold` and `slowCallRateThreshold` to catch degraded performance. Set the slow-call threshold based on your P99 latency — typically 2-3x the normal P99.
 

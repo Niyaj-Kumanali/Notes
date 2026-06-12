@@ -199,14 +199,14 @@ public class GraphQLSecurityConfig {
 
 ## Common Mistakes
 
-- **Ignoring N+1 problem** — always batch database calls with DataLoader
-- **Over-fetching in resolvers** — only fetch fields that are requested
-- **Not using pagination** — GraphQL still needs pagination for lists
-- **Deeply nested queries** — limit query depth to prevent abuse
-- **Exposing internal schema** — disable introspection in production
-- **No query complexity limits** — can lead to DoS attacks
-- **Treating GraphQL like REST** — don't create separate endpoints
-- **Not handling errors properly** — use structured error responses
+- **Ignoring N+1 problem** — always batch database calls with DataLoader. This *looks correct* because: the resolver for a single field looks innocent — it just fetches data for one parent — and the quadratic explosion only becomes visible when a client requests a list of 100 items with three nested relationship fields.
+- **Over-fetching in resolvers** — only fetch fields that are requested. This *looks correct* because: the resolver doesn't know which fields the client asked for, so fetching the entire entity seems safe — until a high-traffic field triggers expensive joins that the client never uses.
+- **Not using pagination** — GraphQL still needs pagination for lists. This *looks correct* because: GraphQL already lets clients limit fields, so developers assume that prevents overload — but omitting pagination still allows a request for 100,000 items with all their nested relationships.
+- **Deeply nested queries** — limit query depth to prevent abuse. This *looks correct* because: the schema defines valid relationships, so any query that follows the schema seems legitimate — the exponential blowup of resolver calls at depth 15 is not obvious from the query text.
+- **Exposing internal schema** — disable introspection in production. This *looks correct* because: introspection is a core GraphQL feature used by GraphiQL and developer tools — developers treat it as harmless documentation until an attacker uses it to map the entire API surface for crafting denial-of-service queries.
+- **No query complexity limits** — can lead to DoS attacks. This *looks correct* because: depth limiting seems sufficient, and complexity analysis adds configuration overhead — but a shallow query requesting 50 list fields at depth 3 can still cost more than a deep query with a few fields.
+- **Treating GraphQL like REST** — don't create separate endpoints. This *looks correct* because: REST conventions are deeply familiar, and creating separate endpoints for different operations provides clear separation — but it defeats GraphQL's single-endpoint batching and over-fetching elimination advantages.
+- **Not handling errors properly** — use structured error responses. This *looks correct* because: GraphQL always returns HTTP 200 even on errors, so throwing an exception seems fine — but unstructured errors in the `errors` array force clients to parse message strings instead of handling typed error codes.
 
 ---
 
@@ -333,6 +333,8 @@ WebSocket configuration: enable heartbeats every 15 seconds (Spring's `WebSocket
 2. **Q: A malicious client sends a query that requests `users { posts { comments { user { posts { comments { user { ... } } } } } } }` — 20 levels deep. Each level triggers downstream service calls. The server CPU spikes to 100% and crashes. How do you prevent this?**
    - A: (1) Implement max query depth instrumentation: limit to 8-10 levels. (2) Implement query complexity analysis: assign costs to each field (e.g., `user = 1`, `posts = 5`, `comments = 3`). Reject queries exceeding a total budget (e.g., 500). (3) Rate limit by query cost: charge clients per query cost, not per query count. (4) Disable introspection in production — limits schema discovery. (5) Timeout long-running queries at the server level. Depth and complexity limits are the primary defense against GraphQL DoS attacks.
 
+> **Interview follow-up:** You set a complexity limit of 500, but a legitimate admin dashboard query needs cost 600 — how do you handle this without increasing the limit for everyone?
+
 3. **Q: Your mobile team wants to migrate from REST to GraphQL to reduce over-fetching. You have 200 REST endpoints and 50 mobile clients. How do you migrate without downtime?**
    - A: (1) Add a `/graphql` endpoint alongside existing REST endpoints. (2) Build GraphQL resolvers that delegate to the same services as REST controllers — no business logic rewrite needed. (3) Run both systems in parallel for 6-12 months. (4) Use the strangler fig pattern: new features go to GraphQL first, REST receives only bug fixes. (5) Gradually migrate mobile screens REST → GraphQL. (6) When REST traffic drops to zero, deprecate and remove. Add an OpenAPI-to-GraphQL wrapper if clients need time to migrate.
 
@@ -342,6 +344,8 @@ WebSocket configuration: enable heartbeats every 15 seconds (Spring's `WebSocket
 5. **Q: Your GraphQL API has no caching strategy. Each query hits the database directly, and the same data is fetched repeatedly. How do you implement caching at different levels?**
    - A: (1) DataLoader's per-request cache: within a single GraphQL request, repeated loads of the same entity hit the cache, not the database. (2) Resolver-level caching: cache expensive resolver results in Redis with TTL per field type. (3) Persisted queries: store common queries server-side; CDN-cache their results. (4) `@cacheControl` directive: annotate schema fields with `maxAge` and `scope` (PUBLIC/PRIVATE) for CDN caching. (5) Response caching at the HTTP level for GET requests (if using automatic persisted queries).
 
+> **Interview follow-up:** If you cache the result of `user(id: 1) { posts { title } }` but another mutation adds a new post, how does the cache know to invalidate that specific query shape?
+
 6. **Q: How do you implement pagination in GraphQL for a feed that updates in real-time (new posts created every second)?**
    - A: Use the Relay Connection spec with cursor-based pagination. The query returns `edges` (each with a cursor) and `pageInfo` (with `hasNextPage` and `endCursor`). The cursor is a timestamp or opaque token. Clients pass `first: 20, after: "cursor"`. New posts don't shift page boundaries because the cursor is fixed. For real-time updates, combine with a subscription that pushes new posts, which the client prepends to the cached list.
 
@@ -350,6 +354,8 @@ WebSocket configuration: enable heartbeats every 15 seconds (Spring's `WebSocket
 
 8. **Q: Your GraphQL mutation `createUser` returns only a success boolean. The client needs the new user's ID to navigate to the user profile. What's wrong and how do you fix it?**
    - A: GraphQL mutations should return the affected object(s) so clients can update their cache and proceed with subsequent operations. Always follow the pattern: `mutation { createUser(input: ...) { id name email } }`. Return the created/modified object. If performance is a concern, use a `clientMutationId` pattern or return at minimum the ID. A mutation that returns only a boolean forces the client to refetch, defeating GraphQL's efficiency advantage.
+
+> **Interview follow-up:** What security risk does returning the full created object introduce if your mutation accepts a `role` input field that only admins should be allowed to set?
 
 9. **Q: Your GraphQL schema evolves over time — you need to rename `email` to `emailAddress` and change `name` from a single field to `firstName` + `lastName`. How do you handle this without breaking existing queries?**
    - A: GraphQL uses schema evolution, not versioning. (1) Add the new fields alongside old ones: `firstName`, `lastName`, and `emailAddress`. (2) Mark old fields as `@deprecated(reason: "Use firstName and lastName")`. (3) Keep old fields working until you've verified no clients use them. (4) Remove old fields only when their usage drops to zero (can be monitored via query logging). (5) GraphQL's field-based selection means clients that don't request deprecated fields are unaffected — no versioning needed.
@@ -395,9 +401,9 @@ WebSocket configuration: enable heartbeats every 15 seconds (Spring's `WebSocket
 
 ## Developer Recommendations
 
-- **Always use DataLoader to prevent N+1 queries** — The N+1 problem is the most common GraphQL performance issue. DataLoader batches all field resolutions within a single request execution into one batch query. Implement it from the start — retrofitting DataLoader after the schema is built requires rewriting resolvers. Register batch loaders for every relationship (one-to-many, many-to-one, many-to-many).
+- **Always use DataLoader to prevent N+1 queries** — The N+1 problem is the most common GraphQL performance issue. DataLoader batches all field resolutions within a single request execution into one batch query. Implement it from the start — retrofitting DataLoader after the schema is built requires rewriting resolvers. Register batch loaders for every relationship (one-to-many, many-to-one, many-to-many). A social media company's GraphQL API crashed during a product launch when a client queried 200 feed posts with `author { avatar comments { user { profile } } }` — the resolver chain triggered 1,400+ database queries per request, taking the database from 5% CPU to 98% in under two minutes.
 
-- **Implement query depth and complexity limits before going to production** — GraphQL's flexible query structure makes it vulnerable to DoS attacks. Depth limits prevent deeply nested queries. Complexity analysis assigns costs to fields and rejects expensive queries. These are GraphQL-specific security measures that REST doesn't need. Without them, a single malicious query can crash your server.
+- **Implement query depth and complexity limits before going to production** — GraphQL's flexible query structure makes it vulnerable to DoS attacks. Depth limits prevent deeply nested queries. Complexity analysis assigns costs to fields and rejects expensive queries. These are GraphQL-specific security measures that REST doesn't need. Without them, a single malicious query can crash your server. An e-commerce site learned this when a competitor sent a query requesting `allProducts { variants { inventory { warehouse { location } } } }` repeated across 15 levels — the server ran out of memory and the site was down for 45 minutes before they added depth limiting.
 
 - **Use cursor-based pagination (Relay Connection spec) for all list fields** — Offset pagination breaks with concurrent inserts and performs poorly on large offsets. The Relay Connection spec provides stable, efficient pagination that works regardless of data changes. Return `hasNextPage` and `endCursor` in every paginated response. This is standard in GraphQL ecosystem — Apollo, Relay, and all major clients support it.
 

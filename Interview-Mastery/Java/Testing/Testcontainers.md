@@ -95,12 +95,12 @@ static KafkaContainer kafka = new KafkaContainer(
 
 ## Common Mistakes
 
-- **Non-static `@Container`** — creates a new container per test, very slow. Use `static` for containers shared across all tests.
-- **Forgetting `@Testcontainers`** — container lifecycle is not managed, container never starts.
-- **Wrong `@DynamicPropertySource` method signature** — must be `static void` with `DynamicPropertyRegistry` parameter.
-- **Using `localhost` instead of container host** — containers run in their own network; use `postgres::getJdbcUrl` instead of hardcoded strings.
-- **Container version mismatch with local database** — test against the same database version used in production.
-- **Not handling container startup failures** — container may fail to start on resource-constrained CI runners. Add retries or use `withStartupTimeout()`.
+- **Non-static `@Container`** — creates a new container per test, very slow. This *looks correct* because the `@Container` annotation is present and the container starts — the developer only notices the problem when the test suite takes 10 minutes instead of 30 seconds. Use `static` for containers shared across all tests.
+- **Forgetting `@Testcontainers`** — container lifecycle is not managed, container never starts. This *looks correct* because the `@Container` annotation is present on the field and the code compiles — the container simply never starts, and the test fails with a confusing connection refused error.
+- **Wrong `@DynamicPropertySource` method signature** — must be `static void` with `DynamicPropertyRegistry` parameter. This *looks correct* because the method compiles and the IDE may not flag it — the method simply never executes, and the Spring context uses default properties.
+- **Using `localhost` instead of container host** — containers run in their own network; use `postgres::getJdbcUrl` instead of hardcoded strings. This *looks correct* because `localhost:5432` is the standard PostgreSQL URL and works when the developer has a local PostgreSQL running — the test connects to the wrong database without error.
+- **Container version mismatch with local database** — test against the same database version used in production. This *looks correct* because the tests pass against `postgres:15` while production runs `postgres:14` — the minor version difference rarely causes issues until a query uses a feature not in production.
+- **Not handling container startup failures** — container may fail to start on resource-constrained CI runners. This *looks correct* because the container starts reliably on a developer's machine with sufficient resources — the startup failure only appears in CI with limited Docker memory.
 
 ---
 
@@ -285,6 +285,8 @@ Toxiproxy sits between the application and PostgreSQL, injecting latency or cutt
 
 2. **Q: A developer onboards to the project and runs tests locally for the first time. Testcontainers takes 5 minutes to pull the PostgreSQL image. The developer's internet is slow. The tests fail because Docker Desktop isn't running. How do you make the first-run experience smooth?**
    A: Pre-pull images in a build script, and add a clear error message when Docker is unavailable:
+
+   > **Interview follow-up:** The candidate suggested `@Testcontainers(disabledWithoutDocker = true)` to skip tests when Docker is unavailable. The developer's machine passes CI checks locally by skipping all Testcontainers tests. They submit a PR that introduces a PostgreSQL-specific query using `JSONB` — all tests pass locally (because they were skipped), all unit tests pass in CI, but the integration tests in CI catch the incompatibility only after 15 minutes of pipeline time. How would you design the local dev workflow so that a developer must have Testcontainers working before they can merge, without forcing every team member to always run the full integration suite?
    ```java
    // Build script (Maven/Gradle): pre-pulls images before tests
    // mvn validate or gradle --no-daemon testClasses pulls images
@@ -375,6 +377,8 @@ Toxiproxy sits between the application and PostgreSQL, injecting latency or cutt
 
 6. **Q: A team writes integration tests with Testcontainers that connect to PostgreSQL, Redis, Kafka, and LocalStack (S3). Starting 4 containers per test class takes 2 minutes. The test suite has 30 test classes, totaling 60 minutes. How do you reduce total CI time to under 15 minutes?**
    A: Create a single integration test suite that shares all containers:
+
+   > **Interview follow-up:** The candidate proposed an interface with shared static containers. After 6 months, one of the 30 test classes needs a specific PostgreSQL extension (`pg_stat_statements`) that requires a different container image and startup command. Adding this to the shared PostgreSQL container would affect all 29 other test classes, potentially breaking them. How would you design the shared container approach to allow per-test-class customization (different images, different startup parameters) while still sharing the container startup cost?
    ```java
    @SpringBootTest
    @Testcontainers

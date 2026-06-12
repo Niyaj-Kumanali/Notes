@@ -181,25 +181,25 @@
 
 ## Common Bottlenecks
 
-- **N+1 queries** — Slow list endpoints caused by fetching entities and accessing lazy associations in a loop. Fix with `JOIN FETCH` or `@EntityGraph` to load all required data in a single query.
+- **N+1 queries** — Slow list endpoints caused by fetching entities and accessing lazy associations in a loop. This *looks correct* because each individual query succeeds and returns data — the performance problem is invisible without SQL logging or profiling. Fix with `JOIN FETCH` or `@EntityGraph` to load all required data in a single query.
 
-- **Missing database indexes** — Full table scans on WHERE, JOIN, or ORDER BY columns cause performance degradation as tables grow. Add composite indexes based on query patterns and use `EXPLAIN ANALYZE` to verify index usage.
+- **Missing database indexes** — Full table scans on WHERE, JOIN, or ORDER BY columns cause performance degradation as tables grow. This *looks correct* because queries return correct results and are fast in development with small datasets — the scans only become slow as the table grows to millions of rows. Add composite indexes based on query patterns and use `EXPLAIN ANALYZE` to verify index usage.
 
-- **No caching** — Same data fetched repeatedly from the database without a cache layer. Add `@Cacheable` with appropriate TTL and monitor cache hit ratio to ensure effectiveness.
+- **No caching** — Same data fetched repeatedly from the database without a cache layer. This *looks correct* because the application works correctly and returns fresh data every time — the performance loss is invisible without monitoring query volume. Add `@Cacheable` with appropriate TTL and monitor cache hit ratio to ensure effectiveness.
 
-- **Large JSON responses** — Full entities serialized as JSON include unnecessary columns and trigger lazy associations. Use DTO projections and pagination to reduce payload size and serialization overhead.
+- **Large JSON responses** — Full entities serialized as JSON include unnecessary columns and trigger lazy associations. This *looks correct* because the endpoint returns valid JSON and the data is correct — the excessive payload size and serialization time only become apparent under load or on slow networks. Use DTO projections and pagination to reduce payload size and serialization overhead.
 
-- **Synchronous blocking I/O** — REST calls, file I/O, or database operations block Tomcat threads, causing thread pool exhaustion under load. Use `@Async` for truly parallelizable tasks or reactive programming for I/O-bound services.
+- **Synchronous blocking I/O** — REST calls, file I/O, or database operations block Tomcat threads, causing thread pool exhaustion under load. This *looks correct* because with low concurrency, each request completes within the expected time — the thread exhaustion only occurs when concurrent requests exceed the pool size. Use `@Async` for truly parallelizable tasks or reactive programming for I/O-bound services.
 
-- **Open Session in View (OSIV)** — Database connection held for the entire HTTP request, including view rendering and serialization. Set `spring.jpa.open-in-view=false` to force explicit fetch planning and release connections earlier.
+- **Open Session in View (OSIV)** — Database connection held for the entire HTTP request, including view rendering and serialization. This *looks correct* because lazy associations work without `LazyInitializationException` and developers see it as a convenient feature — the hidden cost is holding a database connection for the entire response serialization. Set `spring.jpa.open-in-view=false` to force explicit fetch planning and release connections earlier.
 
-- **Full table scans** — Slow queries on large tables that scan every row instead of using indexes. Use `EXPLAIN ANALYZE` to identify scans and add appropriate indexes on filtered and joined columns.
+- **Full table scans** — Slow queries on large tables that scan every row instead of using indexes. This *looks correct* because the query returns the right data and modern hardware makes small scans fast — the scan only becomes a problem when the table outgrows the buffer pool. Use `EXPLAIN ANALYZE` to identify scans and add appropriate indexes on filtered and joined columns.
 
-- **Serialization bottleneck** — Jackson serialization of complex object graphs with circular references and lazy associations. Use flat DTOs, optimize Jackson configuration with `@JsonView`, and consider Protocol Buffers for latency-critical APIs.
+- **Serialization bottleneck** — Jackson serialization of complex object graphs with circular references and lazy associations. This *looks correct* because serialization succeeds and the response is valid JSON — the 400ms spent serializing is invisible when the total response time is under a second. Use flat DTOs, optimize Jackson configuration with `@JsonView`, and consider Protocol Buffers for latency-critical APIs.
 
-- **Memory leaks** — Application crashes with OOM after days of running due to unbounded caches, thread-local accumulation, or classloader leaks. Perform heap dump analysis with Eclipse MAT to identify leak suspects.
+- **Memory leaks** — Application crashes with OOM after days of running due to unbounded caches, thread-local accumulation, or classloader leaks. This *looks correct* because the application starts fine and passes all tests — the gradual memory growth is only detectable through monitoring over hours or days. Perform heap dump analysis with Eclipse MAT to identify leak suspects.
 
-- **Classpath scanning** — Slow startup with large codebases that scan many packages. Use explicit `@ComponentScan` with specific base packages and exclude unused auto-configurations.
+- **Classpath scanning** — Slow startup with large codebases that scan many packages. This *looks correct* because the application starts successfully and serves requests — the 4-minute startup time is only a problem when Kubernetes kills the pod before it becomes ready. Use explicit `@ComponentScan` with specific base packages and exclude unused auto-configurations.
 
 ---
 
@@ -294,7 +294,9 @@ Also added monitoring: HikariCP metrics exposed via Actuator for Grafana dashboa
   A: Production likely has slower disks (classpath scanning is I/O-bound), more auto-configuration classes matched, Hibernate schema validation on a large database, or network-attached config files. Diagnose by adding `-Dspring.autoconfigure.logging=true` to see which auto-configurations match and enabling `logging.level.org.springframework.boot=DEBUG`. Fix by excluding unused auto-configurations, using explicit `@ComponentScan`, setting `spring.jpa.hibernate.ddl-auto=none` if schema is managed externally, and enabling AOT compilation.
 
 2. **Q: Your API response time P95 is 2 seconds. The P50 is 200ms. What's causing the tail latency and how do you fix it?**
-  A: A large gap between P50 and P95 indicates occasional slow requests from GC pauses, cache misses after TTL expiry, thread contention behind a slow request, or database query plan changes. Tune GC with G1GC and `MaxGCPauseMillis=50`, add cache warming via `@EventListener(ContextRefreshedEvent.class)`, use async processing for slow paths, and pin query plans. Profile with JFR or Async Profiler to identify the actual cause.
+   A: A large gap between P50 and P95 indicates occasional slow requests from GC pauses, cache misses after TTL expiry, thread contention behind a slow request, or database query plan changes. Tune GC with G1GC and `MaxGCPauseMillis=50`, add cache warming via `@EventListener(ContextRefreshedEvent.class)`, use async processing for slow paths, and pin query plans. Profile with JFR or Async Profiler to identify the actual cause.
+
+   > **Interview follow-up:** The candidate suggested profiling with JFR to find the root cause. After profiling, the P95 spike is traced to a specific external API call that times out 5% of the time (30s timeout). The timeout is unavoidable — the external API occasionally has 30s pauses. The client library has no built-in circuit breaker. One slow external API call blocks a Tomcat thread for 30 seconds, which then blocks other requests that need the same thread pool. The P95 covers all endpoints, not just the one calling the external API. How would you isolate the slow external API so it doesn't affect the P95 of other, unrelated endpoints?
 
 3. **Q: You deploy a Spring Boot 3.x application and notice memory usage is 30% higher than Spring Boot 2.x for the same code. What changed?**
   A: Spring Boot 3.x uses virtual threads by default with Tomcat, which adds virtual thread scheduler and carrier thread management overhead. Spring 6 also uses more records and sealed classes internally, increasing object allocation. Check if `spring.threads.virtual.enabled=true` is set and profile allocation rates with JFR between versions. Consider disabling virtual threads if memory is constrained.
@@ -318,7 +320,9 @@ Also added monitoring: HikariCP metrics exposed via Actuator for Grafana dashboa
   A: Reduce object allocation rate by avoiding object creation in hot paths — reuse buffers, use `StringBuilder` instead of concatenation, and use `LongAdder` instead of `AtomicLong`. Use primitive collections (Eclipse Collections, FastUtil) to avoid boxing, pool expensive objects like byte arrays and JSON parsers, and tune G1GC with `-XX:G1NewSizePercent=5 -XX:G1MaxNewSizePercent=40`. For sub-millisecond pause times, use ZGC (Java 17+) at the cost of higher CPU usage.
 
 10. **Q: You optimize a critical endpoint from 2 seconds to 200ms. Two weeks later, it's back to 1 second. You check git history — no code changes to that endpoint. What happened?**
-  A: Performance regression without code changes is usually data growth or configuration drift. Check if database table size has grown significantly (queries fast on 100K rows may be slow on 10M rows), index fragmentation, cache hit ratio drops, connection pool contention from more concurrent users, or upstream service degradation. Add performance regression tests to CI/CD that alert if P95 response time exceeds a threshold.
+   A: Performance regression without code changes is usually data growth or configuration drift. Check if database table size has grown significantly (queries fast on 100K rows may be slow on 10M rows), index fragmentation, cache hit ratio drops, connection pool contention from more concurrent users, or upstream service degradation. Add performance regression tests to CI/CD that alert if P95 response time exceeds a threshold.
+
+   > **Interview follow-up:** The candidate suggested performance regression tests in CI/CD. The test passes because it runs against a fixed dataset of 1000 rows in the CI environment, but the production database has 10M rows. The test assertion monitors P95 response time at 200ms ± 50ms and always passes because the CI dataset is small. How would you design performance tests that detect data-volume regressions when the CI dataset cannot match production scale?
 
 ---
 

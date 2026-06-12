@@ -227,14 +227,14 @@ public DeferredResult<String> asyncProcess() {
 
 ## Common Mistakes
 
-- **Forgetting `@ResponseBody` or not using `@RestController`** — Methods return view names instead of JSON, causing `404` or template resolution errors. Always use `@RestController` for REST APIs.
-- **Returning entities directly** — Circular JSON references (`@JsonBackReference` / `@JsonManagedReference` needed) and over-fetching cause serialization errors. Use DTOs instead of entities in controller responses.
-- **Not using `@Valid` or `@Validated` on request bodies** — Invalid input passes through to the service layer without validation. Always validate at the controller boundary with `@Valid`.
-- **Exposing internal IDs in URLs** — Sequential IDs in paths are predictable and pose a security risk. Consider using UUIDs for public-facing resources.
-- **Inconsistent error handling** — Each controller returns different error formats, making API clients harder to build. Use `@RestControllerAdvice` for consistent error responses across all endpoints.
-- **Not setting response status codes** — All successful responses return 200 by default. Use `@ResponseStatus` or `ResponseEntity` for correct and meaningful status codes.
-- **Missing CORS configuration for frontend access** — The browser blocks cross-origin requests without proper CORS headers. Configure `WebMvcConfigurer` with `addCorsMappings` for frontend access.
-- **Large request bodies without size limits** — Can cause out-of-memory errors. Set `spring.servlet.multipart.max-request-size` and use `@Size` on request DTOs to enforce limits.
+- **Forgetting `@ResponseBody` or not using `@RestController`** — Methods return view names instead of JSON, causing `404` or template resolution errors. This *looks correct* because the method compiles and returns an object — the framework error message (404) does not mention the missing `@ResponseBody`, making the root cause hard to identify. Always use `@RestController` for REST APIs.
+- **Returning entities directly** — Circular JSON references (`@JsonBackReference` / `@JsonManagedReference` needed) and over-fetching cause serialization errors. This *looks correct* because returning an entity works during development with small datasets — the `LazyInitializationException` only appears in production when the Hibernate session closes before Jackson serializes the response. Use DTOs instead of entities in controller responses.
+- **Not using `@Valid` or `@Validated` on request bodies** — Invalid input passes through to the service layer without validation. This *looks correct* because the DTO has `@NotNull` annotations, and the controller method accepts it — developers expect validation to happen automatically, but Spring only activates it when `@Valid` is present on the parameter. Always validate at the controller boundary with `@Valid`.
+- **Exposing internal IDs in URLs** — Sequential IDs in paths are predictable and pose a security risk. This *looks correct* because auto-increment IDs are natural identifiers, and the endpoint works perfectly — the security risk is invisible until a malicious actor enumerates IDs. Consider using UUIDs for public-facing resources.
+- **Inconsistent error handling** — Each controller returns different error formats, making API clients harder to build. This *looks correct* because each developer handles errors in their controller, and every endpoint works correctly when there are no errors — the problem only surfaces when API clients must parse multiple error formats. Use `@RestControllerAdvice` for consistent error responses across all endpoints.
+- **Not setting response status codes** — All successful responses return 200 by default. This *looks correct* because 200 OK is a valid HTTP status, and the client receives the data — the lack of `201 Created` or `204 No Content` is invisible to developers testing with browser dev tools. Use `@ResponseStatus` or `ResponseEntity` for correct and meaningful status codes.
+- **Missing CORS configuration for frontend access** — The browser blocks cross-origin requests without proper CORS headers. This *looks correct* because backend-to-backend calls and curl requests work fine — the CORS error only appears in the browser's JavaScript console, which backend developers may not check. Configure `WebMvcConfigurer` with `addCorsMappings` for frontend access.
+- **Large request bodies without size limits** — Can cause out-of-memory errors. This *looks correct* because the application handles small payloads without issues during testing — the OOM only occurs under attack or with a large legitimate upload in production. Set `spring.servlet.multipart.max-request-size` and use `@Size` on request DTOs to enforce limits.
 
 ---
 
@@ -370,6 +370,8 @@ public class AuditLogInterceptor implements HandlerInterceptor {
    ```
    Also handle `ServletRequestBindingException` as a parent for other binding errors. This ensures your custom format covers all parameter-related errors.
 
+   > **Interview follow-up:** The candidate added `MissingServletRequestParameterException` to the global handler. If the application has 50 endpoints and a new developer forgets to handle a different binding exception (e.g., `TypeMismatchException`), the client gets Spring's default 400 response instead of the custom format. How would you ensure ALL HTTP 400 errors use the custom format, including ones you haven't explicitly handled?
+
 4. **Q: Your API uses `@RequestParam(defaultValue = "0") int page` for pagination. A client sends `page=-1` and receives a 200 with no data. How do you validate this properly?**
    A: Add `@Validated` at the controller class level and use validation annotations on parameters:
    ```java
@@ -447,6 +449,8 @@ public class AuditLogInterceptor implements HandlerInterceptor {
    }
    ```
    The DTO only includes the fields that should be serialized. No lazy-loading surprises, no circular JSON references, no over-fetching. Add an ArchUnit test to enforce `@RestController` methods never return entity types.
+
+   > **Interview follow-up:** The candidate suggested banning entities from controllers with ArchUnit. If a `@RestController` method returns `ResponseEntity<Order>` (wrapping the entity inside `ResponseEntity`), a naive ArchUnit rule checking the return type of the method may miss it. How would you write an ArchUnit rule that catches entities wrapped in `ResponseEntity`, `CompletableFuture`, or `Mono`?
 
 9. **Q: You need to accept both `application/json` and `application/xml` requests, and return responses in the same format the client sent. Some endpoints should only support JSON. How do you configure this?**
    A: Configure content negotiation globally, then restrict specific endpoints:

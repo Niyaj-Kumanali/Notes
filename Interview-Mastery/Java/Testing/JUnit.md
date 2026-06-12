@@ -141,13 +141,13 @@ static Stream<Arguments> provideOrders() {
 
 ## Common Mistakes
 
-Not using `assertAll()` for multiple assertions on the same logical object causes unnecessary fix-rerun cycles. Without `assertAll`, the first assertion failure throws an exception, skipping the remaining assertions. You fix the first failure, rerun, find the second failure, fix, rerun — N cycles for N failures. `assertAll()` executes all assertions and reports every failure at once, so you fix everything in one pass.
+Not using `assertAll()` for multiple assertions on the same logical object causes unnecessary fix-rerun cycles. This *looks correct* because each individual `assertEquals` is standard JUnit usage, and the first failure throws an exception — the developer fixes it, reruns, and never realizes that other assertions also failed. Without `assertAll`, the first assertion failure throws an exception, skipping the remaining assertions. You fix the first failure, rerun, find the second failure, fix, rerun — N cycles for N failures. `assertAll()` executes all assertions and reports every failure at once, so you fix everything in one pass.
 
-Declaring `@BeforeAll` or `@AfterAll` methods as non-static without `@TestInstance(Lifecycle.PER_CLASS)` causes a `JUnitException` at runtime because the default lifecycle creates a new test instance for each method, making static access necessary. Either add the `static` keyword or change the test instance lifecycle.
+Declaring `@BeforeAll` or `@AfterAll` methods as non-static without `@TestInstance(Lifecycle.PER_CLASS)` causes a `JUnitException` at runtime. This *looks correct* because the method compiles and the IDE may not flag it — the error only surfaces when the test class actually runs. Either add the `static` keyword or change the test instance lifecycle.
 
-Writing a parameterized test method without the `@ParameterizedTest` annotation (using `@Test` instead) causes only the first argument set to run — the rest are silently ignored because JUnit treats it as a regular test method. Always verify that parameterized tests are annotated with `@ParameterizedTest`, not `@Test`.
+Writing a parameterized test method without the `@ParameterizedTest` annotation (using `@Test` instead) causes only the first argument set to run — the rest are silently ignored. This *looks correct* because the first test case passes, giving the impression that the test is working — the remaining cases are never executed. Always verify that parameterized tests are annotated with `@ParameterizedTest`, not `@Test`.
 
-Using `Thread.sleep()` for async testing instead of Awaitility introduces flakiness: if the sleep time is too short, the test fails intermittently on slow CI machines; if too long, the test suite takes unnecessary extra time. Awaitility's `await().atMost(5, SECONDS).untilAsserted(() -> ...)` polls efficiently and completes as soon as the condition is met.
+Using `Thread.sleep()` for async testing instead of Awaitility introduces flakiness. This *looks correct* because `Thread.sleep(3000)` is a straightforward approach and usually works on a developer's fast machine — the flakiness only appears on slow CI runners where the async operation occasionally takes 3.1 seconds. Awaitility's `await().atMost(5, SECONDS).untilAsserted(() -> ...)` polls efficiently and completes as soon as the condition is met.
 
 ---
 
@@ -257,6 +257,8 @@ A: Reproduce the flakiness by running the suspicious test 100 times with `@Repea
 **Q: A test suite has 2000 tests. Running them sequentially takes 45 minutes. Some tests share a database and cannot run concurrently. How do you parallelize safely?**
 
 A: Enable JUnit 5's parallel execution and use `@ResourceLock` to serialize tests that share the same external resource:
+
+> **Interview follow-up:** The candidate proposed using `@ResourceLock("database")` and `@ResourceLock("filesystem")` to isolate shared resources. A developer creates a new test class with 30 test methods that use the database, but forgets to add `@ResourceLock("database")`. During parallel execution, this class runs concurrently with other database tests, causing intermittent failures that are hard to reproduce. How would you enforce, through CI or static analysis, that every test class interacting with a shared resource is annotated with the correct `@ResourceLock`?
 ```java
 // Enable in junit-platform.properties:
 junit.jupiter.execution.parallel.enabled=true
@@ -281,6 +283,8 @@ Test classes without `@ResourceLock` run in full parallel. Tests with the same `
 **Q: A developer writes `assertEquals(42, compute())` without a message. The test fails in CI and the developer can't tell which assertion failed or what the actual value was. How do you enforce descriptive assertion messages across the team?**
 
 A: Use AssertJ for fluent assertions that generate descriptive failure messages automatically without manual message strings. `assertThat(order.getTotal()).isEqualByComparingTo(BigDecimal.valueOf(100))` produces "Expected: BigDecimal<100> but was: BigDecimal<95>" without any developer-written message. For teams that prefer JUnit assertions, create custom assertion wrappers and use the lambda supplier form `assertTrue(condition, () -> "message built on failure")` so the message construction has zero cost for passing tests. Add a static analysis rule (ErrorProne or SpotBugs) that flags bare `assertEquals` and `assertTrue` calls without a message parameter, enforcing the team convention through automated code review.
+
+> **Interview follow-up:** The candidate suggested AssertJ for descriptive messages. The team adopts AssertJ but a junior developer writes `assertThat(actual).isEqualTo(expected).isEqualTo(expected2)` thinking both conditions will be checked. In reality, `isEqualTo(expected2)` is compared against the result of `isEqualTo(expected)`, which returns `AbstractAssert` — the test passes even though `expected2` is wrong. How would you prevent this misuse through code review guidelines or static analysis?
 
 **Q: A microservice depends on 4 external APIs (payment gateway, shipping, email, fraud detection). Unit tests mock these. Integration tests call real APIs. The integration tests are slow (30s per test) and flaky (network issues). How do you design a test strategy that balances speed, confidence, and reliability?**
 

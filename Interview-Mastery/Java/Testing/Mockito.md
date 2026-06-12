@@ -188,14 +188,14 @@ class OrderControllerTest {
 
 ## Common Mistakes
 
-- **Mocking the class under test** — unit tests should test real logic, not mock it
-- **Not using `@InjectMocks` properly** — constructor injection is most reliable; field/setter injection is fragile
-- **Over-stubbing** — only stub what's needed for the specific test scenario; unnecessary stubs make tests brittle
-- **Mixing matchers and literals** — must use matchers for ALL args if using matchers for ANY arg
-- **Not verifying interactions** — verify that the expected interactions actually occurred, especially for void methods
-- **Using `@Spy` when `@Mock` would do** — spies should be rare; they indicate the class needs refactoring
-- **Stubbing `equals()`/`hashCode()`** — don't stub these; use `refEq()` or `argThat()` for comparison
-- **Ignoring `verifyNoMoreInteractions()`** — helps detect unexpected calls that may hide bugs
+- **Mocking the class under test** — unit tests should test real logic, not mock it. This *looks correct* because the mock compiles and the test passes — but it tests Mockito's default return values, not the actual class behavior. Always test real logic, not mock it.
+- **Not using `@InjectMocks` properly** — constructor injection is most reliable; field/setter injection is fragile. This *looks correct* because the test runs without errors — `@InjectMocks` silently skips mismatched dependencies, leaving fields null until the tested code path triggers an NPE. Constructor injection is most reliable; field/setter injection is fragile.
+- **Over-stubbing** — only stub what's needed for the specific test scenario. This *looks correct* because more stubbing makes the test feel more thorough — but unnecessary stubs make tests brittle, breaking when production code legitimately changes. Only stub what's needed for the specific test scenario.
+- **Mixing matchers and literals** — must use matchers for ALL args if using matchers for ANY arg. This *looks correct* because the code looks reasonable at a glance — the `InvalidUseOfMatchersException` at runtime is confusing, and the developer may not connect it to the mixed usage pattern.
+- **Not verifying interactions** — verify that the expected interactions actually occurred, especially for void methods. This *looks correct* because the test checks the return value, which is sufficient to make the assertion pass — the missing side effect (e.g., an email that wasn't sent) is invisible in the test result.
+- **Using `@Spy` when `@Mock` would do** — spies should be rare. This *looks correct* because `@Spy` works and the test passes — the design smell (too many responsibilities) is invisible when tests are green. Always prefer extracting the stubbed method into its own class.
+- **Stubbing `equals()`/`hashCode()`** — don't stub these. This *looks correct* because the IDE autocomplete suggests `equals()` and stubbing it compiles — the developer doesn't realize that Mockito uses these internally for argument matching. Use `refEq()` or `argThat()` for comparison.
+- **Ignoring `verifyNoMoreInteractions()`** — helps detect unexpected calls that may hide bugs. This *looks correct* because the test passes without it, and adding the check feels like over-specification — the extra method call only matters if it has a real side effect that changes behavior.
 
 ---
 
@@ -373,6 +373,8 @@ Mockito's `timeout()` verifier polls the mock until the verification passes or t
 
 3. **Q: You have a legacy class with 10 `@Autowired` fields and no constructor injection. You want to write a unit test for it. `@InjectMocks` doesn't reliably inject 10 dependencies. Manual `setField()` calls are fragile. How do you test this legacy code without refactoring it?**
    A: Use Mockito's `ReflectionTestUtils` (from Spring) or plain reflection to set private fields:
+
+   > **Interview follow-up:** The candidate used `ReflectionTestUtils.setField()` to test 10 `@Autowired` fields. After 3 sprints of adding features, the class now has 15 `@Autowired` fields. The `setField()` calls in the test take up 30 lines, and every time a new field is added, the test silently uses a null dependency until a code path exercises it. How would you use this test as leverage to refactor the production class toward constructor injection incrementally, without rewriting the entire class at once?
    ```java
    // Legacy class with field injection
    public class LegacyService {
@@ -496,6 +498,8 @@ Mockito's `timeout()` verifier polls the mock until the verification passes or t
 
 8. **Q: A test verifies that `orderService.processOrder(order)` calls `orderRepository.save(order)`. After a refactoring, `processOrder()` now saves the order inside a `@Transactional` method which proxies `OrderService`. The `@InjectMocks` creates a plain (non-proxied) instance, so the test doesn't exercise the transaction behavior. How do you test Spring-proxied behavior?**
    A: Use Spring's `@ExtendWith(SpringExtension.class)` with a minimal context:
+
+   > **Interview follow-up:** The candidate added a Spring integration test specifically for transaction behavior. The team now has 100 unit tests using `@InjectMocks` across 20 service classes. After the team adds `@Transactional` to 5 more methods, 15 of those 100 tests pass despite not testing the actual transaction boundaries. A production incident occurs when a `@Transactional` rollback doesn't work because the catch block swallows the exception. Which of the 100 tests would have caught this bug, and how would you design a policy for deciding when a `@InjectMocks` unit test is sufficient versus when a Spring context test is required?
    ```java
    // Unit test — doesn't test transactional behavior
    @ExtendWith(MockitoExtension.class)

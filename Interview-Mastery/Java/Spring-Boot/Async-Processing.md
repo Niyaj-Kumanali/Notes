@@ -132,13 +132,13 @@ future.exceptionally(ex -> {
 
 ## Common Mistakes
 
-- **Self-invocation bypassing the proxy** — Calling an `@Async` method from within the same class executes synchronously because the AOP proxy is not involved. Extract to a separate bean for async behavior to work.
-- **`@Async` on private methods** — Ignored because the proxy cannot intercept private methods. Only use `@Async` on public methods for the annotation to be effective.
-- **No exception handler for void methods** — Exceptions in void async methods are silently swallowed and completely lost. Always configure `AsyncUncaughtExceptionHandler` to catch and log failures.
-- **Default thread pool (unbounded)** — `SimpleAsyncTaskExecutor` creates a new thread for every call, leading to thread leaks and OOM under load. Always configure a proper `ThreadPoolTaskExecutor` for production.
-- **Forgetting `@EnableAsync`** — Without it, `@Async` methods execute synchronously in the caller's thread, negating the performance benefit entirely.
-- **Not handling context propagation** — Security context, transaction context, and MDC are not propagated to the async thread by default. Use `TaskDecorator` to capture and restore context across threads.
-- **Returning `void` without error handling inside the method** — Any exception inside a `void` async method is lost unless caught internally. Always wrap the method body in try-catch with proper logging and alerting.
+- **Self-invocation bypassing the proxy** — Calling an `@Async` method from within the same class executes synchronously because the AOP proxy is not involved. This *looks correct* because the method compiles and runs — the async behavior is simply absent, and no error or warning indicates the proxy was bypassed. Extract to a separate bean for async behavior to work.
+- **`@Async` on private methods** — Ignored because the proxy cannot intercept private methods. This *looks correct* because the annotation is present on the method and the code compiles — Spring provides no warning that private `@Async` methods are silently ignored. Only use `@Async` on public methods for the annotation to be effective.
+- **No exception handler for void methods** — Exceptions in void async methods are silently swallowed and completely lost. This *looks correct* because the caller receives an immediate return and the application continues without error — the failure is invisible. Always configure `AsyncUncaughtExceptionHandler` to catch and log failures.
+- **Default thread pool (unbounded)** — `SimpleAsyncTaskExecutor` creates a new thread for every call, leading to thread leaks and OOM under load. This *looks correct* because during development with low traffic, the executor works fine — threads are created and garbage-collected normally. The OOM only occurs under sustained production load. Always configure a proper `ThreadPoolTaskExecutor` for production.
+- **Forgetting `@EnableAsync`** — Without it, `@Async` methods execute synchronously in the caller's thread, negating the performance benefit entirely. This *looks correct* because the application works and the method returns the correct result — the only difference is performance, which is invisible without profiling. Add `@EnableAsync` on a `@Configuration` class.
+- **Not handling context propagation** — Security context, transaction context, and MDC are not propagated to the async thread by default. This *looks correct* because the async method executes successfully — the missing context only manifests when audit logs lack user info or security checks fail in the async thread. Use `TaskDecorator` to capture and restore context across threads.
+- **Returning `void` without error handling inside the method** — Any exception inside a `void` async method is lost unless caught internally. This *looks correct* because the method logic appears correct and testing with valid inputs never triggers exceptions — the error handling gap only surfaces when a production edge case causes a failure. Always wrap the method body in try-catch with proper logging and alerting.
 
 ---
 
@@ -292,6 +292,8 @@ public class AsyncConfig implements AsyncConfigurer {
 3. **Q: Your async thread pool executes 50 concurrent tasks. Each task queries the database. The database connection pool (size 10) is exhausted, and tasks start failing with connection timeout errors. How do you tune the system?**
    A: Rule of thumb: async pool size ≤ database connection pool size. If you have 10 DB connections, the async pool should have at most 10 threads. If async tasks perform I/O (DB calls, REST calls), use a larger pool but bound it. Better approach: separate async pools by operation type — one for CPU-bound (size = core count) and one for I/O-bound (larger, but limited by downstream capacity). Monitor both pool saturation and connection pool wait times.
 
+   > **Interview follow-up:** The candidate set the async pool size to 10 to match the DB connection pool. However, the application also has 20 HTTP handler threads that may execute synchronous database queries. Under traffic, HTTP threads take 6 connections, the async pool takes 4, and throughput is fine — but a traffic spike causes HTTP threads to grab 8 connections, leaving only 2 for async tasks. The async queue backs up to 500 pending tasks, and the application runs out of memory. How would you design the sizing so HTTP threads and async threads don't compete for the same limited connection pool?
+
 4. **Q: Your `@Async` method is annotated with `@Transactional`. The method runs in a separate thread, but the transaction scope is unclear. Does it join the caller's transaction or create its own?**
    A: The `@Async` method runs in a completely different thread. The caller's transaction context is NOT propagated (transactions are thread-bound). The `@Transactional` on the async method creates its OWN transaction. If you need the async operation to participate in the caller's transaction, you cannot use `@Async` — execute synchronously or use a distributed transaction. The async method's transaction has propagation `REQUIRED` (creates a new one since there's no existing transaction in the async thread).
 
@@ -338,6 +340,8 @@ public class AsyncConfig implements AsyncConfigurer {
    executor.setRejectedExecutionHandler(new CallerRunsPolicy());
    ```
    This slows down the request rate because the caller (e.g., HTTP handler thread) is now doing the async work. The HTTP thread pool fills up, and the load balancer stops sending requests. This is a graceful degradation. Also consider circuit breaker patterns for downstream services.
+
+   > **Interview follow-up:** The candidate suggested `CallerRunsPolicy` for natural backpressure. The async task that runs on the caller thread performs a slow I/O operation (e.g., compressing and uploading a 500MB file). The HTTP thread is now blocked for 30 seconds doing the upload. During those 30 seconds, the HTTP thread pool has one fewer thread available to serve requests, and the remaining threads may also become blocked as they hit the same backpressure. The entire application eventually stalls. What alternative rejection policy or architectural change would you use to prevent a single slow async task from taking down all HTTP request handling?
 
 8. **Q: You run integration tests with `@Async` methods. Tests complete before the async method finishes, and assertions fail because the side effects haven't happened yet. How do you test async behavior deterministically?**
    A: Use `CompletableFuture` return types and `get()` with a timeout:

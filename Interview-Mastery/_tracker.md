@@ -17,9 +17,9 @@
 
 | File | Status |
 |------|--------|
-| Core-Concepts/DSA.md | ⬜ |
-| Core-Concepts/OOPs.md | ⬜ |
-| Core-Concepts/Coupling-and-Cohesion.md | ⬜ |
+| Core-Concepts/DSA.md | ✅ |
+| Core-Concepts/OOPs.md | ✅ |
+| Core-Concepts/Coupling-and-Cohesion.md | ✅ |
 
 ---
 
@@ -27,45 +27,45 @@
 
 | File | Status |
 |------|--------|
-| Java/Core/Collections-Framework.md | ⬜ |
-| Java/Core/Stream-API.md | ⬜ |
-| Java/Core/Lambda-Expressions.md | ⬜ |
-| Java/Core/Functional-Interfaces.md | ⬜ |
-| Java/Core/IO-Streams.md | ⬜ |
+| Java/Core/Collections-Framework.md | ✅ |
+| Java/Core/Stream-API.md | ✅ |
+| Java/Core/Lambda-Expressions.md | ✅ |
+| Java/Core/Functional-Interfaces.md | ✅ |
+| Java/Core/IO-Streams.md | ✅ |
 
 ## Java — Concurrency
 
 | File | Status |
 |------|--------|
-| Java/Concurrency/Multithreading.md | ⬜ |
-| Java/Concurrency/Concurrency.md | ⬜ |
+| Java/Concurrency/Multithreading.md | ✅ |
+| Java/Concurrency/Concurrency.md | ✅ |
 
 ## Java — Spring Boot
 
 | File | Status |
 |------|--------|
-| Java/Spring-Boot/Spring-Core.md | ⬜ |
-| Java/Spring-Boot/Dependency-Injection.md | ⬜ |
-| Java/Spring-Boot/Bean-Lifecycle.md | ⬜ |
-| Java/Spring-Boot/Spring-MVC.md | ⬜ |
-| Java/Spring-Boot/Spring-Data-JPA.md | ⬜ |
-| Java/Spring-Boot/Transactions.md | ⬜ |
-| Java/Spring-Boot/Exception-Handling.md | ⬜ |
-| Java/Spring-Boot/Validation.md | ⬜ |
-| Java/Spring-Boot/Scheduling.md | ⬜ |
-| Java/Spring-Boot/Async-Processing.md | ⬜ |
-| Java/Spring-Boot/Caching.md | ⬜ |
-| Java/Spring-Boot/Spring-Security.md | ⬜ |
-| Java/Spring-Boot/Actuator.md | ⬜ |
-| Java/Spring-Boot/Performance-Optimization.md | ⬜ |
+| Java/Spring-Boot/Spring-Core.md | ✅ |
+| Java/Spring-Boot/Dependency-Injection.md | ✅ |
+| Java/Spring-Boot/Bean-Lifecycle.md | ✅ |
+| Java/Spring-Boot/Spring-MVC.md | ✅ |
+| Java/Spring-Boot/Spring-Data-JPA.md | ✅ |
+| Java/Spring-Boot/Transactions.md | ✅ |
+| Java/Spring-Boot/Exception-Handling.md | ✅ |
+| Java/Spring-Boot/Validation.md | ✅ |
+| Java/Spring-Boot/Scheduling.md | ✅ |
+| Java/Spring-Boot/Async-Processing.md | ✅ |
+| Java/Spring-Boot/Caching.md | ✅ |
+| Java/Spring-Boot/Spring-Security.md | ✅ |
+| Java/Spring-Boot/Actuator.md | ✅ |
+| Java/Spring-Boot/Performance-Optimization.md | ✅ |
 
 ## Java — Testing
 
 | File | Status |
 |------|--------|
-| Java/Testing/JUnit.md | ⬜ |
-| Java/Testing/Mockito.md | ⬜ |
-| Java/Testing/Testcontainers.md | ⬜ |
+| Java/Testing/JUnit.md | ✅ |
+| Java/Testing/Mockito.md | ✅ |
+| Java/Testing/Testcontainers.md | ✅ |
 
 ---
 
@@ -88,9 +88,9 @@
 
 | File | Status |
 |------|--------|
-| Backend-Concepts/API/REST-API.md | ⬜ |
-| Backend-Concepts/API/GraphQL.md | ⬜ |
-| Backend-Concepts/API/gRPC.md | ⬜ |
+| Backend-Concepts/API/REST-API.md | ✅ |
+| Backend-Concepts/API/GraphQL.md | ✅ |
+| Backend-Concepts/API/gRPC.md | ✅ |
 | Backend-Concepts/API/API-Versioning.md | ⬜ |
 | Backend-Concepts/API/API-Security.md | ⬜ |
 

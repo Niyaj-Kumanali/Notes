@@ -214,13 +214,13 @@ public class B {
 
 ## Common Mistakes
 
-- **Using field injection** — Dependencies are hidden, not final, and the class cannot be instantiated without Spring's container. Always prefer constructor injection for explicit, immutable dependency management.
-- **Too many constructor parameters** — More than 6-7 parameters indicates the class has too many responsibilities. Extract related dependencies into a single configuration or aggregate object to keep constructors clean and focused.
-- **Not using `@Qualifier` when needed** — Spring throws `NoUniqueBeanDefinitionException`. Always qualify when multiple beans of the same type exist, and consider creating custom qualifier annotations for clarity.
-- **Circular dependencies with constructor injection** — Cannot be resolved directly. Use `@Lazy`, switch to setter injection on one side, or restructure the code to eliminate the circular relationship entirely.
-- **Setting `@Autowired(required = false)` on a constructor** — Does not work the same way as on fields. Use `Optional<T>` for optional constructor dependencies, or use `@Autowired(required = false)` on individual setter methods.
-- **Injecting `ApplicationContext` directly** — While possible, it ties your code to the Spring container. Prefer injecting the specific dependency instead, which keeps your code decoupled and easier to test in isolation.
-- **Mixing injection types inconsistently** — Pick constructor injection as the standard and use it everywhere for consistency. Mixing field, setter, and constructor injection within the same codebase makes the dependency structure harder to understand and maintain.
+- **Using field injection** — Dependencies are hidden, not final, and the class cannot be instantiated without Spring's container. This *looks correct* because `@Autowired` on a field is concise, and the class works fine when tested via `@SpringBootTest` — the problem only surfaces in unit tests or when a bean fails to initialize silently. Always prefer constructor injection for explicit, immutable dependency management.
+- **Too many constructor parameters** — More than 6-7 parameters indicates the class has too many responsibilities. This *looks correct* because each parameter is a legitimate dependency, and the constructor compiles without errors — the design smell only becomes apparent when tests need to provide 10+ mocks or when a new dependency is added, requiring changes to 8 files. Extract related dependencies into a single configuration or aggregate object to keep constructors clean and focused.
+- **Not using `@Qualifier` when needed** — Spring throws `NoUniqueBeanDefinitionException`. This *looks correct* because adding a second implementation of an interface compiles and starts fine — the error only manifests when Spring tries to inject into a client that references the interface by type. Always qualify when multiple beans of the same type exist, and consider creating custom qualifier annotations for clarity.
+- **Circular dependencies with constructor injection** — Cannot be resolved directly. This *looks correct* because the circular dependency forms naturally (A calls B, B calls A) and the code reads as valid object-oriented design — the problem only appears at startup when the container tries to instantiate both beans. Use `@Lazy`, switch to setter injection on one side, or restructure the code to eliminate the circular relationship entirely.
+- **Setting `@Autowired(required = false)` on a constructor** — Does not work the same way as on fields. This *looks correct* because the annotation placement is syntactically valid and mirrors the field-injection pattern — but Spring rejects it at startup with an error because constructors cannot have optional parameters in this way. Use `Optional<T>` for optional constructor dependencies, or use `@Autowired(required = false)` on individual setter methods.
+- **Injecting `ApplicationContext` directly** — While possible, it ties your code to the Spring container. This *looks correct* because `context.getBean()` is a simple one-liner, and adding a direct injection parameter to every class seems like more work — the coupling cost only surfaces when migrating to a different DI framework or testing without Spring. Prefer injecting the specific dependency instead, which keeps your code decoupled and easier to test in isolation.
+- **Mixing injection types inconsistently** — Pick constructor injection as the standard and use it everywhere for consistency. This *looks correct* because each injection type works on its own — field injection for services, setter for optional deps, constructor for mandatory — and the application runs without errors. The inconsistency only causes confusion during code reviews, debugging, and onboarding new team members.
 
 ---
 
@@ -324,6 +324,8 @@ Adding a new channel (e.g., WhatsApp) requires only a new `@Component` class —
 1. **Q: Your team has 200+ Spring beans with field injection. A production outage occurs because a required bean was not injected (field stayed null) — but only on a specific server configuration. The issue passed unit tests because tests use `@InjectMocks`. How do you prevent this class of bugs?**
    A: Enforce constructor injection at the code review and tooling level. Use ArchUnit or a custom Checkstyle/PMD rule to ban `@Autowired` on fields. Enable Intellij IDEA's "Field injection is not recommended" inspection as an error. The root cause is that field injection uses reflection and bypasses the constructor — the class can be instantiated in an invalid state. Constructor injection guarantees that once the object exists, all dependencies are present and `final`.
 
+   > **Interview follow-up:** The candidate recommended banning field injection with ArchUnit. If the team has 200+ field-injected beans, rewriting them all at once is risky. How would you introduce constructor injection incrementally — migrating one service at a time — while preventing new field injection from being added during the transition?
+
 2. **Q: You have an `OrderService` that needs to send notifications. Depending on the order type (express, standard, international), a different `NotificationSender` implementation should be used. The choice depends on a runtime value, not on bean qualifiers. How do you design this?**
    A: Use the strategy pattern with injected implementations via a `Map<OrderType, NotificationSender>`:
    ```java
@@ -341,12 +343,16 @@ Adding a new channel (e.g., WhatsApp) requires only a new `@Component` class —
    ```
    Spring auto-populates the `List` with all `NotificationSender` beans. The strategy is decoupled from both the senders and the callers — adding a new order type requires only a new `@Component`.
 
+   > **Interview follow-up:** The candidate injected a `List<NotificationSender>` and built a map by `getType()`. If two `NotificationSender` beans return the same type value, the `Collectors.toMap()` throws `IllegalStateException` at startup. How would you handle duplicate type mappings gracefully?
+
 3. **Q: Your `@Configuration` class has 15 `@Bean` methods and 20 `@Value` injections. The class is hard to read and every change risks breaking the bean wiring. How do you refactor this?**
    A: Split the large `@Configuration` class into multiple focused configuration classes by concern (e.g., `DataSourceConfig`, `SecurityConfig`, `CacheConfig`, `MessagingConfig`). Group related `@Bean` methods and `@Value` fields together. Use `@ConfigurationProperties` with `@EnableConfigurationProperties` to move property bindings out of `@Configuration` classes entirely:
    ```java
    @ConfigurationProperties(prefix = "app.datasource")
    public record DataSourceProperties(String url, String username, String password, int poolSize) {}
    ```
+
+   > **Interview follow-up:** The candidate suggested splitting the config class by concern. After splitting, some beans in `SecurityConfig` depend on beans defined in `DataSourceConfig`, and Spring must resolve cross-config dependencies. Does Spring guarantee that beans from `DataSourceConfig` are created before `SecurityConfig` processes its `@Bean` methods? How would you enforce ordering between configuration classes?
 
 4. **Q: You need to inject `RestTemplate` into 20 different service classes. URL, timeouts, and interceptors differ for each external API. Creating 20 `@Bean` methods feels wrong. How do you handle this?**
    A: Create a `RestTemplateBuilder` factory or a custom qualifier per API:

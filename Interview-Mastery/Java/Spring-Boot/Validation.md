@@ -182,15 +182,15 @@
 
 ## Common Mistakes
 
-- **Not adding `@Valid` or `@Validated` to request body parameters** — Validation annotations on the DTO are ignored if the controller parameter is not annotated, and the method receives an invalid object without any error. Always annotate `@RequestBody` parameters with `@Valid` or `@Validated`.
+- **Not adding `@Valid` or `@Validated` to request body parameters** — Validation annotations on the DTO are ignored if the controller parameter is not annotated, and the method receives an invalid object without any error. This *looks correct* because the DTO has `@NotNull` and `@Size` annotations, and the code compiles — there is no warning indicating the validation is disabled. Always annotate `@RequestBody` parameters with `@Valid` or `@Validated`.
 
-- **Using entities as request/response DTOs** — JPA entities have lifecycle callbacks, lazy-loaded associations, and persistence constraints that are inappropriate for API boundaries. Always use separate DTOs or records to decouple the API contract from the database model.
+- **Using entities as request/response DTOs** — JPA entities have lifecycle callbacks, lazy-loaded associations, and persistence constraints that are inappropriate for API boundaries. This *looks correct* because entity fields match the API fields one-to-one — creating a separate DTO feels like duplicate work, and the application works correctly with small datasets. Always use separate DTOs or records to decouple the API contract from the database model.
 
-- **No global validation exception handler** — Without a handler for `MethodArgumentNotValidException`, Spring returns a generic 400 with a default error message. Add a `@RestControllerAdvice` with structured field-level error responses for consistent API error formatting.
+- **No global validation exception handler** — Without a handler for `MethodArgumentNotValidException`, Spring returns a generic 400 with a default error message. This *looks correct* because Spring Boot returns a valid 400 response — the error is conveyed, just without field-level detail. The missing field names only matter to API clients building rich error UIs. Add a `@RestControllerAdvice` with structured field-level error responses for consistent API error formatting.
 
-- **Not validating nested objects** — Nested objects in a request DTO are not validated unless the field is annotated with `@Valid`. Without this annotation, validation annotations on nested object fields are silently skipped.
+- **Not validating nested objects** — Nested objects in a request DTO are not validated unless the field is annotated with `@Valid`. This *looks correct* because the nested object has `@NotNull` annotations on its fields — developers expect cascading validation to happen automatically, but Jakarta Bean Validation requires explicit `@Valid` on the parent field. Without this annotation, validation annotations on nested object fields are silently skipped.
 
-- **Ignoring validation groups** — Without groups, the same validation rules apply to both create and update operations. Use groups to differentiate rules, such as ID being null on create but not null on update.
+- **Ignoring validation groups** — Without groups, the same validation rules apply to both create and update operations. This *looks correct* because a single set of validation rules works for both operations during development — the issue only appears when an ID field is required on update but must be null on create, or when optional fields on update are incorrectly required. Use groups to differentiate rules, such as ID being null on create but not null on update.
 
 ---
 
@@ -295,6 +295,8 @@ public class ValidationHandler {
 - **Q: Your REST endpoint accepts a JSON payload. You add `@Valid @RequestBody` but validation errors are silently ignored — the method executes with an invalid object. What's wrong?**
   A: Most likely you forgot to handle `MethodArgumentNotValidException` in your `@RestControllerAdvice`, or there is a `BindingResult` parameter after `@Valid` that stores errors and allows the method to execute. Always add explicit field-level error handling in a `@RestControllerAdvice` and remove any `BindingResult` parameter if you want automatic error responses.
 
+  > **Interview follow-up:** The candidate identified the `BindingResult` parameter as the cause. If the method signature is `create(@Valid @RequestBody UserRequest request, BindingResult result)` and 5 out of 10 fields fail validation, the method still executes with a partially valid object. The service layer persists the valid fields but silently ignores invalid ones. How would you detect this data integrity risk in code review or in CI?
+
 - **Q: Your DTO has 20 fields. Most are required for CREATE but optional for UPDATE. You don't want to create two separate DTOs. How do you handle this with a single class?**
   A: Use validation groups with marker interfaces `Create` and `Update`. Annotate fields with `groups = Create.class` for create-only rules, `groups = Update.class` for update-only rules, and `groups = {Create.class, Update.class}` for fields required in both operations. Use `@Validated(Create.class)` and `@Validated(Update.class)` at the controller methods.
 
@@ -315,6 +317,8 @@ public class ValidationHandler {
 
 - **Q: You have a DTO with 10 fields, each with multiple validation annotations. The error response is huge — every field has 3-4 error messages. You want Hibernate Validator to fail fast — stop validation at the first error. How?**
   A: Configure `FailFast` by creating a `Validator` bean with `Validation.byProvider(HibernateValidator.class).configure().failFast(true)`. Be aware this returns only the first error, which may frustrate API clients that want all errors at once, so consider your API contract carefully before enabling this.
+
+  > **Interview follow-up:** The candidate knows about `failFast`. If you enable `failFast`, the client fixes the first error and resubmits, only to discover the second error, then resubmits again to find the third. This round-trip cycle slows development. What alternative approach provides all errors in one response while still bounding the total number of error messages returned?
 
 - **Q: You need to validate a request parameter that is a complex object. The validation errors should trigger a 400 with field-level details, but the default Spring behavior returns 500. How do you handle this?**
   A: For `@RequestParam` validation of simple types, add `@Validated` at the controller class level and use validation annotations on method parameters. Handle `ConstraintViolationException` in `@RestControllerAdvice` separately from `MethodArgumentNotValidException` since they have different exception structures.
