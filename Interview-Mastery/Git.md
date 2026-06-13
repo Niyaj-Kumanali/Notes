@@ -71,6 +71,62 @@
 
 - **Interview follow-up:** How would you handle a long-running feature that genuinely cannot be split into shorter increments, such as a months-long database migration?
 
+
+**Q: A teammate accidentally pushed a commit containing a database password to a public GitHub repository. How do you remediate this?**
+
+- Immediately rotate the exposed password. Then run `git filter-branch --tree-filter` or use the BFG Repo-Cleaner tool to remove the file from all commits in the repository history. Force-push the rewritten history to all branches. Notify GitHub Support to invalidate any cached copies. Finally, instruct the team to rebase any local branches on the cleaned history. The password must still be considered compromised even after removal.
+
+- **Interview follow-up:** What are the limitations of git filter-branch, and when would you use BFG instead?
+
+
+**Q: You run git merge and get a conflict on every line of a file that only one developer modified. What is happening and how do you fix it?**
+
+- The file likely has different line endings (CRLF vs LF) or whitespace differences between the two branches. Git treats the entire file as changed even though only whitespace differs. Run `git merge --strategy-option=ignore-space-change` or `git merge -Xignore-all-space` to merge ignoring whitespace. After merging, normalize line endings by configuring `.gitattributes` with `* text=auto` and committing a line-ending normalization commit.
+
+- **Interview follow-up:** How would you configure a repository so that whitespace conflicts never happen again?
+
+
+**Q: You need to split a monorepo into multiple separate repositories while preserving the full commit history for each directory. How do you do it?**
+
+- Use `git filter-branch --subdirectory-filter` or `git subtree split` to extract a subdirectory into its own repository with complete history. The newer `git filter-repo` tool (recommended over filter-branch) can do this more efficiently. After extraction, push the new repository to a new remote. The original monorepo remains unchanged. Each extracted repo retains all commits that touched files in its directory.
+
+- **Interview follow-up:** How would you set up the new repositories so that future changes to shared code can be synchronized across them?
+
+
+**Q: A developer ran git reset --hard and lost an hour of unstaged work. Can you recover it?**
+
+- Yes, if the files were previously staged with `git add`, they can be recovered from the Git object store using `git fsck --lost-found`, which finds dangling blobs. If the files were never staged, recovery depends on the editor's local history or IDE local history feature. For future prevention, recommend `git stash` before risky operations, or use `git reset --soft` instead of `--hard` to preserve working tree changes.
+
+- **Interview follow-up:** What is the difference between dangling blobs and unreachable objects, and how does git gc affect recovery?
+
+
+**Q: Your CI pipeline runs tests on every push, but you want to skip CI for documentation-only commits. How do you configure this?**
+
+- Include `[skip ci]` or `[ci skip]` in the commit message to tell most CI systems (GitHub Actions, GitLab CI, Jenkins) to skip the pipeline. For more granular control, configure CI workflow rules to only trigger when certain file paths change (e.g., `paths-ignore: ['docs/**', '*.md']` in GitHub Actions). This reduces CI costs and speeds up documentation updates.
+
+- **Interview follow-up:** When is skipping CI dangerous, and what alternative approach would you recommend for ensuring documentation changes are still reviewed?
+
+
+**Q: You need to apply a hotfix from the main branch to a release branch, but the release branch has diverged significantly. Cherry-pick the commits or merge the branch?**
+
+- Use `git cherry-pick` for selective commit transfer. Identify the hotfix commits on main using `git log --oneline main --fixes=<ticket-id>` and cherry-pick them onto the release branch. Merging the entire main branch would pull in unrelated features not ready for release. After cherry-picking, run tests on the release branch to verify the fix works in that context. Cherry-pick creates new commit hashes, which is acceptable for release branches.
+
+- **Interview follow-up:** How would you handle a situation where the cherry-picked commit conflicts with changes already on the release branch?
+
+
+**Q: Multiple developers are working on the same file and merging frequently causes the same conflicts to appear repeatedly. What strategy reduces this pain?**
+
+- Use `git rerere` (Reuse Recorded Resolution) to automatically reapply previously resolved conflicts. Enable it with `git config --global rerere.enabled true`. Rerere records conflict resolutions during merge or rebase and replays them automatically when the same conflict pattern appears again. Additionally, encourage smaller, more frequent merges and using `git diff` and `git log` communication to coordinate edits to shared files.
+
+- **Interview follow-up:** How does git rerere store conflict resolutions, and can it be shared across the team?
+
+
+**Q: Your team wants to enforce a policy that every commit message follows a specific format (e.g., Conventional Commits). How do you implement this?**
+
+- Use a `commit-msg` Git hook that validates the commit message against a regex pattern. For team-wide enforcement without relying on each developer's hooks, use a CI check (e.g., GitHub Actions with a commit-lint action) that fails the build if the commit message format is invalid. For local enforcement, use tools like commitlint installed via husky. This ensures the commit history remains consistent and parseable for changelog generation.
+
+- **Interview follow-up:** How would you retroactively fix commit messages in a feature branch that did not follow the convention, before merging to main?
+
 ## Interview Questions
 
 - **What is the difference between git revert and git reset?**
@@ -84,6 +140,54 @@
 
 - **What is the staging area and why is it useful?**
   - The staging area (index) is an intermediate layer between the working tree and the repository. Files are added to the staging area with `git add` and committed with `git commit`. The staging area enables selective staging of file changes, crafting atomic commits that group related changes, and reviewing staged changes with `git diff --cached` before committing.
+
+- **What is the difference between git fetch and git pull?**
+  - `git fetch` downloads commits, objects, and refs from a remote repository without merging them into your local branch. It safely updates remote-tracking branches. `git pull` runs fetch then immediately merges the fetched changes into your current branch (or rebases with `--rebase`). Use fetch to inspect incoming changes before integrating; use pull only when you are ready to merge.
+
+- **How do you undo a commit that has already been pushed to a shared branch?**
+  - Use `git revert <hash>` to create a new commit that undoes the changes. This is safe because it does not rewrite history. If the commit introduced a security issue, revert it and notify the team. Never use `git reset` on pushed commits in shared branches. After reverting, push the revert commit normally and communicate with the team about the change.
+
+- **What is a detached HEAD state and how do you recover from it?**
+  - A detached HEAD occurs when you check out a specific commit instead of a branch (e.g., `git checkout <hash>` or `git checkout origin/main`). You are no longer on a named branch. Create a new branch from the current position with `git checkout -b new-branch-name`. If you made commits in detached HEAD, they can be found via `git reflog` and attached to a branch before they are garbage collected.
+
+- **Explain the purpose of git bisect and how you use it.**
+  - `git bisect` performs a binary search through the commit history to find the commit that introduced a bug. Start with `git bisect start`, mark the current commit as bad (`git bisect bad`) and a known good commit as good (`git bisect good <ref>`). Git checks out a midpoint commit. Test it, mark it good or bad, and repeat. When the single culprit commit is found, exit with `git bisect reset`. Automate with `git bisect run <script>`.
+
+- **What is the difference between a soft, mixed, and hard reset?**
+  - `git reset --soft HEAD~1` moves the branch pointer back one commit but keeps all changes in the staging area and working tree. `git reset --mixed HEAD~1` (default) moves the pointer and unstages changes but keeps them in the working tree. `git reset --hard HEAD~1` moves the pointer and discards all changes in both staging and working tree. Use soft to re-commit, mixed to re-stage, and hard only when you are certain.
+
+- **How does git handle binary files and how can you optimize repository size?**
+  - Git stores binary files as full blobs for each version since it cannot diff them efficiently. This bloats the repository. Store large binaries with Git LFS (Large File Storage), which replaces binaries in the repo with text pointers and stores the actual file on a remote server. Use `.gitattributes` patterns like `*.psd filter=lfs diff=lfs merge=lfs -text` to manage binaries. Regularly run `git gc` to optimize the local repository.
+
+- **What is a git submodule and what are its drawbacks?**
+  - A submodule is a reference to another Git repository embedded at a specific commit. It allows a project to include an external dependency pinned to an exact version. Drawbacks include complex update workflows (`git submodule update --init --recursive`), the need to commit the submodule pointer change separately, and the risk of the submodule URL becoming unavailable. Consider subtrees or package managers as alternatives.
+
+- **How do you squash multiple commits into one in Git?**
+  - Use `git rebase -i HEAD~N` to interactively rebase the last N commits. In the todo list, change `pick` to `squash` (or `s`) for all commits you want to merge into the previous commit. Save and close. Git will prompt for a combined commit message. Alternatively, use `git merge --squash` on a feature branch to produce a single commit. Squashing should only be done on local branches before pushing.
+
+- **What is git reflog and how do you use it for recovery?**
+  - `git reflog` shows a local log of every commit HEAD has pointed to, including commits lost after resets, rebases, or branch deletions. Each entry shows a HEAD@{N} reference. Recover lost commits by checking out the reflog reference or resetting to it. Reflog entries expire after 90 days by default. Reflog is local only — it cannot recover commits that were never fetched from a remote.
+
+- **Explain the difference between a bare repository and a non-bare repository.**
+  - A bare repository has no working tree and only stores Git data (objects, refs, HEAD). It is used as a server-side remote — you cannot directly edit files in it. A non-bare repository has a working tree where files are checked out for editing. `git init --bare` creates a bare repo. Central repositories and remote mirrors are typically bare. Developers work in non-bare repos.
+
+- **How do you set up a Git hook to run tests before every commit?**
+  - Create a `pre-commit` script in `.git/hooks/pre-commit` (executable) that runs the test suite. If the tests fail, the script exits with a non-zero status and the commit is aborted. For team-wide hooks, use tools like husky, lefthook, or `core.hooksPath` to point to a version-controlled hooks directory. Keep the hook fast to avoid developer frustration — run only a focused subset of tests.
+
+- **What is the difference between git tag and git branch?**
+  - A tag is a named reference to a specific commit that does not move. Tags are used for releases (v1.0, v2.3.1) and are lightweight (just a pointer) or annotated (with metadata and GPG signature). A branch is a movable pointer that advances with new commits. Tags are read-only once created; branches evolve. Push tags with `git push --tags` and check them out for production deployments.
+
+- **How do you resolve a merge conflict manually?**
+  - Git marks conflicts in the affected file with `<<<<<<< HEAD`, the current branch content, `=======`, the incoming branch content, and `>>>>>>> branch-name`. Edit the file to decide which content to keep or combine both. Remove the conflict markers. Stage the resolved file with `git add`. If merging, commit the merge. If rebasing, run `git rebase --continue`. Always test the resolved file before continuing.
+
+- **What is the purpose of git worktree and when would you use it?**
+  - `git worktree` allows you to check out multiple branches simultaneously in separate directories from a single repository. Use it when you need to work on a hotfix while keeping your current branch checked out, or to run tests on different branches without stashing. Add a worktree with `git worktree add ../path branch-name`. Each worktree shares the same Git objects but has its own working tree and index.
+
+- **How does git blame work and how can you use it for debugging?**
+  - `git blame <file>` annotates each line of a file with the commit hash, author, date, and commit message of the last change to that line. Use it to identify when a specific change was introduced, who made it, and in what context. Combine with `git log --oneline` on the blame commit to understand the full change. Blame is essential for tracking down regressions and understanding code evolution.
+
+- **What is the difference between git archive and git bundle, and when would you use each?**
+  - `git archive` creates a tar or zip archive of the repository at a specific commit without history. Useful for distributing source code releases. `git bundle` creates a binary file containing Git objects and refs that can be used as a remote repository. Useful for offline transfer — you can pull or fetch from a bundle file. Archive is for distribution; bundle is for synchronization between disconnected repositories.
 
 ## Developer Recommendations
 

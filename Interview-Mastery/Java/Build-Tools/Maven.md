@@ -72,6 +72,62 @@
 
 - **Interview follow-up:** How would you ensure that developers outside the corporate network can still build the project without modifying configuration files?
 
+
+**Q: You need to add a new library dependency that is only available from a private repository hosted by a vendor. How do you configure Maven to resolve this dependency?**
+
+- Add the private repository URL in the `<repositories>` section of pom.xml or in settings.xml with a unique ID. If the repository requires authentication, add server credentials in settings.xml under `<servers>`, referencing the same repository ID. Use `<repository>` and optionally `<snapshotRepository>` if the vendor publishes snapshots. Verify resolution with `mvn dependency:resolve`.
+
+- **Interview follow-up:** How would you configure this so that only specific modules in a multi-module project use the vendor repository?
+
+
+**Q: Your CI pipeline runs mvn clean test, but integration tests are not being executed even though you configured the maven-failsafe-plugin. What is the likely cause?**
+
+- The maven-failsafe-plugin binds to the `verify` phase, not the `test` phase. Running `mvn clean test` stops before the verify phase, so failsafe goals never execute. Change the CI command to `mvn clean verify` instead. The verify phase runs after package and includes both surefire (unit tests at test phase) and failsafe (integration tests at verify phase).
+
+- **Interview follow-up:** How would you configure the build so that integration tests run during the test phase for local development but still follow the standard lifecycle in CI?
+
+
+**Q: A developer accidentally committed a dependency with a -SNAPSHOT version to a release branch. How do you enforce that release builds never contain SNAPSHOT dependencies?**
+
+- Use the maven-enforcer-plugin with the `requireReleaseDeps` rule or the `bannedDependencies` rule to fail the build if any SNAPSHOT dependency is present. Bind the enforcer plugin to the `validate` phase so it fails early. Alternatively, use the Nexus Staging plugin or the maven-release-plugin, which automatically checks for SNAPSHOT dependencies before performing a release.
+
+- **Interview follow-up:** What if a transitive dependency pulls in a SNAPSHOT — how do you override it to a release version?
+
+
+**Q: Your multi-module project takes 15 minutes to build, but each module only changed slightly. What Maven features can you leverage to speed this up?**
+
+- Use `mvn -T <threads>` for parallel module building (e.g., `mvn -T 4` for 4 threads). Enable `-o` (offline mode) to skip remote metadata lookups if all dependencies are already cached. Use `mvn -pl <module-list> -am` to build only changed modules and their dependencies. Consider using a build cache tool like mvnd (Maven Daemon) which uses a long-lived JVM. Ensure `-U` is not used unnecessarily as it forces repository updates.
+
+- **Interview follow-up:** How does the Maven reactor determine the build order for multi-module projects, and how can you enforce a specific order?
+
+
+**Q: You push a pom.xml change to a shared repository, and suddenly downstream consumers report that their builds are failing because a new required dependency appeared. What happened?**
+
+- You likely changed a dependency from `<scope>test</scope>` or `<scope>provided</scope>` to `compile` scope without adding an exclusion. The compile-scope dependency now propagates transitively to consumers, forcing them to have it on their classpath. Alternatively, you removed an `<exclusion>` from a dependency. Inspect the diff of pom.xml and revert the unintended scope change, then use `mvn dependency:tree` to verify the transitive impact before committing.
+
+- **Interview follow-up:** How would you introduce a new compile-scope dependency to a common library module without affecting consumers?
+
+
+**Q: Your build fails on a CI server with "Could not resolve dependency" but works fine on your local machine. All dependencies are from Maven Central. What could be wrong?**
+
+- The CI server likely cannot reach Maven Central due to network restrictions or proxy configuration. Check if the CI environment requires a corporate mirror configured in settings.xml or CI-managed settings. The CI machine may also be using an older cached metadata — use `mvn -U` to force update snapshots. Additionally, verify the Maven version on CI matches your local version, as newer Maven may enforce stricter checksum validation.
+
+- **Interview follow-up:** How would you set up a local repository mirror on the CI server to improve build reliability and speed?
+
+
+**Q: Your team wants to ensure every commit produces a reproducible build — the exact same artifact bytes for the same source code. How do you configure Maven for this?**
+
+- Pin all plugin versions explicitly in `<pluginManagement>`. Set `maven.compiler.release` (or `source`/`target`) to fix the Java version. Use `<timestamp>false</timestamp>` in the maven-jar-plugin to disable timestamps in the manifest. Disable the maven-jar-plugin's digest algorithm randomization. Use the reproducible-build-maven-plugin which normalizes archive entries. Finally, pin the same Maven wrapper version across all environments.
+
+- **Interview follow-up:** What are the differences between Maven's approach to reproducible builds and Gradle's approach?
+
+
+**Q: You need to deploy different artifact versions for different environments (dev, staging, production) without modifying the pom.xml each time. How do you achieve this?**
+
+- Use Maven profiles in pom.xml activated by properties, environment variables, or JDK version. Each profile can override properties like `build.version` or the `<distributionManagement>` URL. Pass the active profile via `mvn deploy -P production`. For more complex cases, use `<activation><property>` blocks in settings.xml or the `-D` flag to dynamically set version qualifiers.
+
+- **Interview follow-up:** What are the risks of using too many profiles, and how would you simplify a project with dozens of profile combinations?
+
 ## Interview Questions
 
 - **Explain the Maven build lifecycle and how phases, goals, and plugins relate to each other.**
@@ -85,6 +141,54 @@
 
 - **What is a BOM (Bill of Materials) and when would you use it?**
   - A BOM is a specialized POM with only a `<dependencyManagement>` section and no dependencies of its own. It is imported using `<scope>import</scope>` and `<type>pom</type>` in the importing POM's `<dependencyManagement>`. BOMs centralize dependency versions for an entire library ecosystem, such as the Spring Boot BOM or the Jackson BOM, so consumers can declare dependencies without specifying versions.
+
+- **How does Maven resolve dependency conflicts and which version wins?**
+  - Maven uses a nearest-definition strategy: the dependency closest to the root in the dependency tree wins. If the same dependency appears at the same depth, the first declaration wins. This can lead to surprising results when transitive dependencies introduce different versions. Use `<dependencyManagement>` to take explicit control and `mvn dependency:tree` to inspect the resolved versions.
+
+- **What is the purpose of the maven-surefire-plugin and how do you customize test execution?**
+  - Maven-surefire-plugin runs unit tests during the test phase. It supports JUnit, TestNG, and other test frameworks. Customize it with `<includes>` and `<excludes>` patterns, `<forkCount>` for parallel execution, `<argLine>` for JVM arguments, and `<reportsDirectory>` for output location. It automatically picks up classes matching `*Test.java`, `Test*.java`, and `*TestCase.java`.
+
+- **Explain the difference between maven-shade-plugin and maven-assembly-plugin.**
+  - The maven-shade-plugin creates an uber-JAR by merging classes from all dependencies and provides relocation (renaming packages) to avoid classpath conflicts. The maven-assembly-plugin creates distribution archives (ZIP, TAR, JAR) with any desired format, including dependencies as separate JARs in a lib folder. Shade is preferred for executable JARs; assembly is preferred for full distribution packages.
+
+- **How do you handle optional dependencies in Maven?**
+  - Declare a dependency with `<optional>true</optional>` to indicate that it is not required by consumers. Optional dependencies are not propagated transitively — consumers must explicitly declare them if needed. This is useful for libraries that offer multiple features (e.g., a logging library that supports Logback and Log4j) where consumers choose one implementation.
+
+- **What is the difference between the clean lifecycle and the default lifecycle?**
+  - The clean lifecycle has three phases: pre-clean, clean, and post-clean. The clean phase deletes the build output directory (typically `target/`). The default lifecycle handles compilation, testing, packaging, and deployment. They are separate lifecycles, so `mvn clean install` runs clean's clean phase first, then the default lifecycle up to install.
+
+- **How does the Maven dependency mediator work for version conflict resolution?**
+  - Maven uses a nearest-wins strategy: it walks the dependency tree from the root and selects the first occurrence of each groupId:artifactId. If a dependency appears at multiple depths, the shallowest wins. At equal depth, the first declared dependency wins. This is why `<dependencyManagement>` in the parent POM is critical — it inserts entries at the root level to force specific versions.
+
+- **What is the purpose of the maven-enforcer-plugin and what are common rules?**
+  - The maven-enforcer-plugin enforces build rules during the validate phase. Common built-in rules include `requireJavaVersion`, `requireMavenVersion`, `requireReleaseDeps`, `bannedDependencies`, and `dependencyConvergence`. Custom rules can be written by extending `AbstractEnforcerRule`. Failures stop the build early, preventing deployment of non-conforming artifacts.
+
+- **How do you exclude unwanted files from a JAR built by Maven?**
+  - Configure the maven-jar-plugin with `<excludes>` inside `<configuration>` to exclude specific file patterns (e.g., `**/*.properties` for environment-specific configs). For more control, use the maven-resources-plugin with `<excludes>` to filter resources before they reach the build directory. Alternatively, configure the compiler plugin to exclude specific source files.
+
+- **Explain the concept of a Maven archetype and when you would create one.**
+  - A Maven archetype is a project template that generates a working project structure with preconfigured pom.xml, source directories, and sample code. Use the `mvn archetype:generate` goal. Teams create custom archetypes to standardize project layouts, enforce corporate conventions (logging, testing, reporting), and bootstrap microservices with consistent configurations.
+
+- **What is the difference between `mvn install` and `mvn deploy`?**
+  - `mvn install` copies the built artifact (JAR, WAR, etc.) into the local Maven repository (`~/.m2/repository`), making it available for local projects that depend on it. `mvn deploy` additionally uploads the artifact to a remote repository defined in `<distributionManagement>`, such as Nexus or Artifactory, making it available to all developers and CI systems.
+
+- **How do you configure Maven to use a specific Java version for compilation?**
+  - Use the maven-compiler-plugin with `<source>` and `<target>` tags, or the newer `<release>` tag which sets both source, target, and the API check level for the specified Java version. For example, `<release>11</release>` ensures compilation against the Java 11 API. Set these in `<properties>` as `maven.compiler.source`, `maven.compiler.target`, or `maven.compiler.release`.
+
+- **What is a Maven wrapper and why would you use it?**
+  - The Maven Wrapper (mvnw) is a script that downloads and runs a specific, pinned version of Maven. It ensures all developers and CI environments use the exact same Maven version, eliminating build inconsistencies caused by version differences. Generate it with `mvn -N wrapper:wrapper` and commit the mvnw script and the `.mvn` directory to version control.
+
+- **How do you skip tests in Maven and what are the different options?**
+  - Use `-DskipTests` to skip test execution but still compile test classes. Use `-Dmaven.test.skip=true` to skip both compilation and execution of tests. Use `-Dit.test=none` to skip integration tests with the failsafe plugin. For selective skipping, use `-Dtest=!SomeTest` to exclude specific test classes. Skipping tests should only be done in development, never in release builds.
+
+- **Explain how Maven's dependency scopes affect the classpath of a web application deployed to a servlet container.**
+  - For a WAR deployed to Tomcat, use `provided` scope for Servlet API and other container-provided libraries — they are on the container classpath but should not be bundled in WEB-INF/lib. Use `compile` for application libraries that must be packaged. Use `runtime` for JDBC drivers and similar libraries needed only at runtime. Use `test` for JUnit and test frameworks.
+
+- **What is the purpose of the dependency:tree goal and how do you interpret its output?**
+  - `mvn dependency:tree` prints a tree of all resolved dependencies showing transitive relationships, scopes, and versions. Each level indentation shows the dependency chain. Conflicts are marked with `(version managed from X)` or omitted when suppressed. It is the primary diagnostic tool for understanding why a specific library version was chosen or why duplicates appear on the classpath.
+
+- **How do you configure Maven to fail the build if test coverage drops below a threshold?**
+  - Use the maven-surefire-plugin with the JaCoCo Maven plugin for code coverage. Configure JaCoCo's `check` goal with `<rules><rule><limits><limit><counter>LINE</counter><value>COVEREDRATIO</value><minimum>0.80</minimum></limit></limits></rule></rules></rules>`. Bind the check goal to the `verify` phase so it runs after tests. The build fails if coverage falls below the configured threshold.
 
 ## Developer Recommendations
 

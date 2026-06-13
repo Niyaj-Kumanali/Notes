@@ -68,6 +68,62 @@
 
 - **Interview follow-up:** What is the difference between dependency constraints and direct dependencies, and when would you use each?
 
+
+**Q: Your Gradle build fails with "Could not resolve dependency" for a library that exists in Maven Central. Other developers can build successfully. What could be the issue?**
+
+- Check if the local Gradle cache is corrupted by deleting the cached version in `~/.gradle/caches/` or running `gradle clean build --refresh-dependencies`. Verify that `repositories { mavenCentral() }` is declared in the correct build script. Check for network proxy settings in `gradle.properties` with systemProp.http.proxyHost and systemProp.http.proxyPort. Ensure the Gradle version is the same as the team's — run `gradle --version`.
+
+- **Interview follow-up:** How would you configure a corporate Artifactory or Nexus repository as a Gradle repository replacement for Maven Central?
+
+
+**Q: You add a new library to your Java module using the api configuration, and suddenly all downstream modules fail to compile. What happened?**
+
+- The `api` configuration exposes the dependency to consumers, meaning any module that depends on your module now requires that library on its compile classpath. If the library's transitive dependencies conflict with the downstream module's dependencies, compilation fails. Change the configuration to `implementation` if the library's types are not part of your module's public API. Only use `api` when the dependency's types appear in your exposed interfaces or superclasses.
+
+- **Interview follow-up:** How would you identify which transitive dependency is causing the compilation failure in the downstream module?
+
+
+**Q: Your CI build times have doubled after upgrading Gradle. How do you identify and fix the regression?**
+
+- Generate a build scan with `gradle build --scan` to compare task durations before and after the upgrade. Look for tasks that lost cacheability due to input changes, or tasks that now run during configuration that previously ran during execution. Check if the new Gradle version changed default task inputs or outputs. Review the upgrade notes for deprecated features that might have changed behavior. Compare the build scan with a pre-upgrade scan to pinpoint the regression.
+
+- **Interview follow-up:** What Gradle properties would you tune (org.gradle.parallel, org.gradle.daemon, org.gradle.caching) for optimal CI performance, and why?
+
+
+**Q: Your multi-project build has subproject A depending on subproject B. When you change a file in B, A does not rebuild. How do you fix this?**
+
+- Ensure the dependency is declared correctly with `implementation(project(":B"))` or `api(project(":B"))` in A's build script. Verify that incremental compilation is enabled by default. Check if the build cache is returning stale cached outputs for A — run with `--no-build-cache` to test. Ensure the settings.gradle file includes both projects. If using composite builds, verify the substitution rules are correctly configured.
+
+- **Interview follow-up:** How does Gradle determine which tasks are out-of-date, and what are task inputs and outputs?
+
+
+**Q: Your team wants to enforce that no build ever uses a snapshot dependency in a release build. How do you configure Gradle for this?**
+
+- Configure resolution strategy to fail on dynamic versions. Use `resolutionStrategy { failOnDynamicVersions() }` or `resolutionStrategy { failOnChangingVersions() }` in the subprojects block. For more control, use the `dependencyLocking` plugin to pin exact versions and verify the lock file is up to date during release builds. Use CI pipeline validation that runs `gradle dependencies --write-locks` and fails if the lock file changed.
+
+- **Interview follow-up:** How would you allow snapshot dependencies in development builds while blocking them in release builds?
+
+
+**Q: A developer reports that a Gradle plugin they added works on their machine but the CI server says the plugin does not exist. What is likely wrong?**
+
+- The CI server may not have access to the plugin repository. If the plugin is from the Gradle Plugin Portal, ensure `pluginManagement { repositories { gradlePluginPortal() } }` is configured. If the plugin is from a custom repository or Artifactory, that repository URL must be accessible from CI. The Gradle version on CI may be too old to support the plugin's required API. Check the plugin's `buildscript` declaration versus `plugins` block — the `plugins` block is preferred.
+
+- **Interview follow-up:** How do you apply a plugin that is only needed for a specific subproject without affecting the others?
+
+
+**Q: Your Gradle build produces an uber-JAR with a FAT file system error when unzipping. How do you fix this?**
+
+- Duplicate files in the uber-JAR cause zip format issues. When multiple dependencies contain the same file path (e.g., META-INF/services, META-INF/LICENSE), the shadow plugin fails or produces a corrupted JAR. Use the shadow plugin's `mergeServiceFiles()` to merge service files, or use `exclude('META-INF/*.SF', 'META-INF/*.DSA')` to exclude signing files. For resources, use `append('META-INF/foo')` to concatenate files with the same name.
+
+- **Interview follow-up:** What is the difference between the Shadow plugin and the Spring Boot Gradle plugin for creating executable JARs?
+
+
+**Q: You need to publish a library to an internal Maven repository with signed artifacts. How do you configure Gradle for signing and publishing?**
+
+- Apply the `maven-publish` plugin and the `signing` plugin. Configure a publication block with `from(components.java)` and an artifact. Configure signing with `signing { sign(publishing.publications) }`. Store the signing key in a secure location (not in the build script) using environment variables or a CI secrets store. Use `signing.keyId`, `signing.password`, and `signing.secretKeyRingFile` configured in `gradle.properties` or passed as project properties.
+
+- **Interview follow-up:** How would you publish to different repositories (snapshots vs releases) based on the version string?
+
 ## Interview Questions
 
 - **What is the difference between Groovy DSL and Kotlin DSL in Gradle?**
@@ -81,6 +137,54 @@
 
 - **How does the Gradle build cache work, and what are its benefits?**
   - The build cache stores task outputs keyed by task inputs (source files, dependency versions, task configuration). When a task is invoked again with identical inputs, Gradle skips execution and retrieves the cached output. This dramatically reduces build times for incremental changes and CI pipelines where only a subset of modules change. The cache can be local or remote.
+
+- **What is a Gradle task and how do you create a custom one?**
+  - A task is the fundamental unit of work in Gradle. Create a custom task by defining a class extending `DefaultTask` in `buildSrc` or the build script. Add `@TaskAction` methods for execution logic and `@Input`/`@Output` annotations for cache key inputs. Register tasks with `tasks.register<MyTask>("myTask")` in Kotlin DSL or `tasks.register('myTask', MyTask)` in Groovy DSL. Wire dependencies using `dependsOn` and configure with typed extensions.
+
+- **Explain the difference between plugins applied in the plugins block versus the buildscript block.**
+  - The `plugins` block (DSL-first) resolves plugins from the Gradle Plugin Portal or a custom pluginManagement repository. It provides type-safe accessors and automatic classpath management. The `buildscript` block (legacy) manually manages the plugin's classpath dependency and applies it with `apply plugin:`. The `plugins` block is preferred for new projects. Buildscript is still needed for some older or complex plugin configurations.
+
+- **How do you configure Gradle to run tasks in parallel?**
+  - Set `org.gradle.parallel=true` in gradle.properties to enable parallel project execution. Use `--max-workers` or `org.gradle.workers.max` to control the number of parallel threads (default is number of CPU cores). For test parallelism, configure `maxParallelForks` in the test task. Individual tasks can also control parallelism, such as `compileJava.options.fork = true` for parallel compilation.
+
+- **What is the difference between gradle.properties and local.properties files?**
+  - `gradle.properties` is a standard Gradle configuration file that sets JVM args, system properties, project properties, and build behavior (like `org.gradle.daemon`, `org.gradle.parallel`). It is typically committed to version control with safe defaults. `local.properties` is Android-specific (but can be used in any project) for machine-specific settings like SDK paths, and should not be committed to version control.
+
+- **How do you exclude a transitive dependency in Gradle?**
+  - Use the `exclude` keyword inside the dependency declaration block. For example: `implementation("com.example:lib:1.0") { exclude(group = "com.unwanted", module = "unwanted-lib") }`. For project-wide exclusions, use `configurations.all { exclude(group = "com.unwanted") }`. For more control, use dependency constraints or resolution strategy to force a specific version or substitute one dependency for another.
+
+- **What is the purpose of the settings.gradle file?**
+  - The settings.gradle (or settings.gradle.kts) file configures the project structure. It declares which subprojects exist via `include(":moduleA", ":moduleB")`, configures plugin management repositories, defines project names, and includes convention plugins from `buildSrc`. It runs before any build.gradle script and is required for multi-project builds.
+
+- **How do you create a fat JAR (uber-JAR) in Gradle?**
+  - Use the Shadow plugin (`com.github.johnrengelman.shadow`), the Gradle built-in `jar` task with `from(configurations.runtimeClasspath.map { ... })`, or the Spring Boot plugin's `bootJar` task. The Shadow plugin is most common — it merges service files, relocates packages to avoid conflicts, and creates a single executable JAR with all dependencies. Configure it with `shadowJar { mergeServiceFiles() }`.
+
+- **What is a Gradle init script and when would you use one?**
+  - An init script (init.gradle or .gradle/init.gradle.kts) runs before any project build script. It is used for environment-wide configuration like setting up corporate artifact repositories, applying plugins to all projects on a machine, configuring proxy settings, or enforcing global build policies. Init scripts are not committed to the project — they are placed in the Gradle user home directory or specified via the `-I` flag.
+
+- **How does Gradle handle incremental compilation?**
+  - Gradle's incremental Java compilation tracks source file changes at the class level rather than recompiling all sources. When a source file changes, only its class and dependent classes are recompiled. The compiler plugin analyzes the dependency graph of types within the module. Enable it with `options.incremental = true` in the compile task (enabled by default in modern Gradle versions). Incremental compilation significantly reduces build times during development.
+
+- **Explain the difference between `gradle assemble` and `gradle build`.**
+  - `gradle assemble` runs tasks that produce artifacts (JAR, WAR, classes) without running tests. `gradle build` runs the full lifecycle including compilation, testing, and packaging. Use `assemble` for quick artifact generation when tests are not needed. Use `build` for CI pipelines and release verification. `build` depends on `check` (test tasks) and `assemble` (packaging tasks).
+
+- **How do you manage credentials for a private Maven repository in Gradle?**
+  - Store credentials in `gradle.properties` with properties like `myRepoUsername=user` and `myRepoPassword=pass`, then reference them in the repository block: `maven { url = uri("..."); credentials { username = properties["myRepoUsername"]; password = properties["myRepoPassword"] } }`. Never hard-code credentials in build scripts. For CI, use environment variables or CI secrets injected via `-P` or system properties.
+
+- **What is a Gradle configuration and how is it different from a dependency?**
+  - A configuration is a named set of dependencies and artifacts that serves a specific classpath purpose (compile, runtime, test). Configurations are buckets — `implementation`, `api`, `compileOnly`, `testImplementation` are all configurations. Dependencies are libraries placed inside these buckets. Configurations extend each other (e.g., `testImplementation` extends `implementation`), and you can create custom configurations for custom classpaths.
+
+- **How do you test a Gradle plugin?**
+  - Use the `java-gradle-plugin` development plugin along with `gradleTestKit()` for integration testing. Write Spock or JUnit tests that apply the plugin to a temporary project, run Gradle tasks programmatically, and assert on build results. Test plugin extension configuration, task registration, and error handling. Use `@TempDir` for isolated test project directories. Run tests with `gradle check` as part of the normal build.
+
+- **What is the purpose of the buildSrc directory?**
+  - `buildSrc` is a precompiled build script directory that contains shared build logic (custom plugins, task types, extension classes) written in Kotlin DSL or Groovy. It is automatically compiled and added to the classpath of all project build scripts. Use it to avoid duplicating build logic across modules. Convention plugins in `buildSrc/src/main/kotlin` are the idiomatic way to share configuration in multi-project builds.
+
+- **How does Gradle's dependency locking work?**
+  - Dependency locking generates a lock file (`gradle.lockfile` or per-configuration lock files) that pins exact transitive versions. Enable it with `dependencyLocking { lockAllConfigurations() }`. Run `gradle dependencies --write-locks` to create or update lock files. Gradle then enforces these exact versions until the lock file is regenerated. This ensures reproducible builds and prevents unexpected dependency upgrades.
+
+- **How do you configure Gradle to fail the build if a specific dependency version is used?**
+  - Use resolution strategy with `failOnVersionConflict()` or define custom rules using `resolutionStrategy.eachDependency { if (it.target.name == "unwanted-lib") it.useVersion("2.0") }`. To ban a dependency entirely, use `resolutionStrategy.eachDependency { if (it.target.group == "com.unwanted") throw new DependencyRejection() }`. Configure this in the subprojects block for project-wide enforcement.
 
 ## Developer Recommendations
 
