@@ -4,7 +4,8 @@
 
 ## What is Normalization?
 
-**Normalization** is the process of organizing relational database tables to reduce data redundancy and improve data integrity. It involves decomposing tables into smaller, related tables according to defined **normal forms**. Normalization eliminates **update anomalies**, **insertion anomalies**, and **deletion anomalies**. While strict normalization (3NF/BCNF) is the theoretical ideal, production databases typically stop at 3NF and selectively denormalize for performance.
+- **Definition**
+  - **Normalization** is the process of organizing relational database tables to reduce data redundancy and improve data integrity. It involves decomposing tables into smaller, related tables according to defined **normal forms**. Normalization eliminates **update anomalies**, **insertion anomalies**, and **deletion anomalies**. While strict normalization (3NF/BCNF) is the theoretical ideal, production databases typically stop at 3NF and selectively denormalize for performance.
 
 ### Goals of Normalization
 
@@ -24,9 +25,9 @@
 
 ### Functional Dependency
 
-Attribute Y is **functionally dependent** on X (X → Y) if each X value determines exactly one Y value:
-- `employee_id → employee_name` — each employee ID has exactly one name.
-- `order_id → customer_id` — each order has exactly one customer.
+- Attribute Y is **functionally dependent** on X (X → Y) if each X value determines exactly one Y value:
+  - `employee_id → employee_name` — each employee ID has exactly one name.
+  - `order_id → customer_id` — each order has exactly one customer.
 
 ### Anomalies Normalization Fixes
 
@@ -40,9 +41,9 @@ Attribute Y is **functionally dependent** on X (X → Y) if each X value determi
 
 ### First Normal Form (1NF)
 
-**Rule**: Each column contains atomic values. No repeating groups.
+- **Rule**: Each column contains atomic values. No repeating groups.
+- **Violation**:
 
-**Violation**:
 ```sql
 -- BAD: Multiple phone numbers in one column
 CREATE TABLE employee (
@@ -52,7 +53,8 @@ CREATE TABLE employee (
 );
 ```
 
-**Fix**:
+- **Fix**:
+
 ```sql
 CREATE TABLE employee (
     id INT PRIMARY KEY,
@@ -68,9 +70,9 @@ CREATE TABLE employee_phone (
 
 ### Second Normal Form (2NF)
 
-**Rule**: 1NF + every non-key column depends on the **entire** primary key (not just part of a composite key).
+- **Rule**: 1NF + every non-key column depends on the **entire** primary key (not just part of a composite key).
+- **Violation**:
 
-**Violation**:
 ```sql
 CREATE TABLE order_items (
     order_id INT,
@@ -81,7 +83,8 @@ CREATE TABLE order_items (
 );
 ```
 
-**Fix**:
+- **Fix**:
+
 ```sql
 CREATE TABLE products (id INT PRIMARY KEY, name VARCHAR(100));
 CREATE TABLE order_items (
@@ -94,9 +97,9 @@ CREATE TABLE order_items (
 
 ### Third Normal Form (3NF)
 
-**Rule**: 2NF + no transitive dependency — non-key columns cannot depend on other non-key columns.
+- **Rule**: 2NF + no transitive dependency — non-key columns cannot depend on other non-key columns.
+- **Violation**:
 
-**Violation**:
 ```sql
 CREATE TABLE orders (
     id INT PRIMARY KEY,
@@ -107,7 +110,8 @@ CREATE TABLE orders (
 );
 ```
 
-**Fix**:
+- **Fix**:
+
 ```sql
 CREATE TABLE customers (id INT PRIMARY KEY, name VARCHAR(100), city VARCHAR(100));
 CREATE TABLE orders (
@@ -119,9 +123,9 @@ CREATE TABLE orders (
 
 ### Boyce-Codd Normal Form (BCNF)
 
-**Rule**: For every functional dependency X → Y, X must be a candidate key.
+- **Rule**: For every functional dependency X → Y, X must be a candidate key.
+- **Violation**: Each student has one advisor, each advisor advises multiple students, each advisor belongs to one department. `advisor_id → department_id` but `advisor_id` is not a key:
 
-**Violation**: Each student has one advisor, each advisor advises multiple students, each advisor belongs to one department. `advisor_id → department_id` but `advisor_id` is not a key:
 ```sql
 CREATE TABLE student_advisor (
     student_id INT PRIMARY KEY,
@@ -130,7 +134,8 @@ CREATE TABLE student_advisor (
 );
 ```
 
-**Fix**:
+- **Fix**:
+
 ```sql
 CREATE TABLE student_advisor (student_id INT PRIMARY KEY, advisor_id INT);
 CREATE TABLE advisor_department (advisor_id INT PRIMARY KEY, department_id INT);
@@ -138,9 +143,9 @@ CREATE TABLE advisor_department (advisor_id INT PRIMARY KEY, department_id INT);
 
 ### Fourth Normal Form (4NF)
 
-**Rule**: No multi-valued dependencies. If an employee can have multiple skills AND multiple degrees, these are independent facts that must be stored separately.
+- **Rule**: No multi-valued dependencies. If an employee can have multiple skills AND multiple degrees, these are independent facts that must be stored separately.
+- **Violation**:
 
-**Violation**:
 ```sql
 CREATE TABLE employee_skills_degrees (
     employee_id INT,
@@ -151,7 +156,8 @@ CREATE TABLE employee_skills_degrees (
 -- Inserting a new skill requires repeating all degree values
 ```
 
-**Fix**:
+- **Fix**:
+
 ```sql
 CREATE TABLE employee_skill (employee_id INT, skill VARCHAR(50), PRIMARY KEY (employee_id, skill));
 CREATE TABLE employee_degree (employee_id INT, degree VARCHAR(50), PRIMARY KEY (employee_id, degree));
@@ -242,25 +248,44 @@ public class OrderItem {
 
 ## Common Mistakes
 
-- **Premature over-normalization** — Breaking everything to 5NF or 6NF when 3NF suffices for most applications adds unnecessary complexity and query overhead.
+- **Premature over-normalization**
+  - Breaking everything to 5NF or 6NF when 3NF suffices for most applications adds unnecessary complexity and query overhead.
   - **Why it looks correct:** "More normalized = better design" is drilled into developers during database coursework; the diminishing returns from normal forms beyond 3NF are rarely taught.
-- **Ignoring performance** — A normalized schema requiring 15-join queries for a simple report can be a performance disaster without proper indexing or materialized views.
+
+- **Ignoring performance**
+  - A normalized schema requiring 15-join queries for a simple report can be a performance disaster without proper indexing or materialized views.
   - **Why it looks correct:** The schema is academically perfect, and the query cost is invisible until the data grows large enough that join overhead becomes the bottleneck.
-- **Not recognizing multi-valued dependencies** — Storing independent 1:N relationships in the same table produces cross-product anomalies (4NF violation).
+
+- **Not recognizing multi-valued dependencies**
+  - Storing independent 1:N relationships in the same table produces cross-product anomalies (4NF violation).
   - **Why it looks correct:** Putting all related data in one table reduces the number of tables, and the cross-product duplication only becomes visible when you examine row counts for individual employees.
-- **Treating normalization as binary** — Normalized versus denormalized is a spectrum, not a binary choice. The right level depends on the workload.
+
+- **Treating normalization as binary**
+  - Normalized versus denormalized is a spectrum, not a binary choice. The right level depends on the workload.
   - **Why it looks correct:** Textbooks present normal forms as discrete levels to pass, making it seem like you must choose one level and apply it uniformly to all tables.
-- **Creating too many tables** — Excessive table decomposition leads to complex queries and increased maintenance burden with diminishing returns.
+
+- **Creating too many tables**
+  - Excessive table decomposition leads to complex queries and increased maintenance burden with diminishing returns.
   - **Why it looks correct:** Each decomposition step removes redundancy, and each new table seems justified in isolation; the cumulative complexity is only apparent when you need to join 8 tables for a basic listing query.
-- **Mixing OLTP and OLAP schemas** — OLTP benefits from normalization for fast writes; OLAP benefits from denormalization for fast reads. Use different schemas for different workloads.
+
+- **Mixing OLTP and OLAP schemas**
+  - OLTP benefits from normalization for fast writes; OLAP benefits from denormalization for fast reads. Use different schemas for different workloads.
   - **Why it looks correct:** Using one schema for everything is simpler to maintain, and the performance divergence only becomes apparent when reporting queries start blocking transactional writes at scale.
-- **Forgetting that denormalization is a legitimate optimization** — Denormalization after measurement is engineering; denormalization by default is premature optimization.
+
+- **Forgetting that denormalization is a legitimate optimization**
+  - Denormalization after measurement is engineering; denormalization by default is premature optimization.
   - **Why it looks correct:** Normalization is taught as the "correct" way to design databases, and any deviation feels like a violation of best practices.
-- **Using synthetic keys without understanding natural keys** — Natural keys provide business meaning and can improve query performance when used as indexes.
+
+- **Using synthetic keys without understanding natural keys**
+  - Natural keys provide business meaning and can improve query performance when used as indexes.
   - **Why it looks correct:** Synthetic keys (auto-increment, UUID) are universally recommended as the default, and the query performance benefits of natural keys are not obvious from the table definition.
-- **Ignoring partial dependencies with composite keys** — Composite primary keys require verifying that every non-key column depends on the entire key, not just part of it.
+
+- **Ignoring partial dependencies with composite keys**
+  - Composite primary keys require verifying that every non-key column depends on the entire key, not just part of it.
   - **Why it looks correct:** A column seems naturally placed in the table, and the partial dependency is only visible when you explicitly map which columns depend on which parts of the composite key.
-- **Denormalizing too early** — Optimize only when measurements show a real performance problem, not before.
+
+- **Denormalizing too early**
+  - Optimize only when measurements show a real performance problem, not before.
   - **Why it looks correct:** Anticipating performance issues seems proactive; the cost is invisible until the denormalized data drifts out of sync and causes a data integrity incident.
 
 ---
@@ -269,7 +294,7 @@ public class OrderItem {
 
 ### E-Commerce Schema Normalization to 3NF
 
-An orders table stores `customer_name` and `customer_email` alongside `customer_id`. When a customer changes their email, all their order rows must be updated. Normalizing to 3NF eliminates the redundancy:
+- An orders table stores `customer_name` and `customer_email` alongside `customer_id`. When a customer changes their email, all their order rows must be updated. Normalizing to 3NF eliminates the redundancy:
 
 ```sql
 CREATE TABLE customers (
@@ -288,7 +313,7 @@ CREATE TABLE order_items (
 
 ### Hospital System with 4NF
 
-A hospital database stores doctor specializations and hospital affiliations. Storing both in one table creates multi-valued dependencies. Splitting into separate tables (4NF) fixes this:
+- A hospital database stores doctor specializations and hospital affiliations. Storing both in one table creates multi-valued dependencies. Splitting into separate tables (4NF) fixes this:
 
 ```sql
 CREATE TABLE doctor_specialties (
@@ -301,7 +326,7 @@ CREATE TABLE doctor_affiliations (
 
 ### Partial Dependency in Order Items
 
-An `order_items` table stores `product_name` alongside `(order_id, product_id)`. Changing a product name requires updating every order item — a 2NF violation:
+- An `order_items` table stores `product_name` alongside `(order_id, product_id)`. Changing a product name requires updating every order item — a 2NF violation:
 
 ```sql
 -- Before (2NF violation): product_name depends only on product_id
@@ -313,61 +338,120 @@ CREATE TABLE order_items (order_id INT, product_id INT REFERENCES products(id), 
 
 ## Scenario-Based Questions
 
-- **Q:** You are designing the schema for a multi-tenant SaaS platform. Each tenant has customers, products, and orders. How do you design tables to avoid data duplication across tenants while maintaining query performance?
-  - **A:** Normalize to 3NF with a `tenant_id` column on every table as part of the PK or partitioning key. Use partial indexes per tenant for common queries. For multi-tenant reads, `tenant_id` is highly selective. For cross-tenant admin queries, use a separate analytics database.
-  - **Interview follow-up:** With `tenant_id` as the leading column in every composite index, your cross-tenant admin queries that scan all tenants cannot use these indexes efficiently. How do you index for both per-tenant and cross-tenant queries?
-- **Q:** Your team inherited a database where one table has 200 columns — customer info, order info, and product info all in one table. Queries are slow and the table is 500GB. How do you normalize it without downtime?
-  - **A:** Plan a phased migration. Phase 1: create normalized tables alongside the denormalized one. Phase 2: set up triggers or dual-writes to keep both in sync. Phase 3: backfill historical data in batches. Phase 4: migrate read queries to the normalized schema. Phase 5: drop the old table. Use Flyway or Liquibase for each step.
-  - **Interview follow-up:** During Phase 3 backfill, you discover 15% of rows violate the new foreign key constraints because the denormalized legacy data has orphaned references. How do you handle this without blocking the migration?
-- **Q:** An employee table has `phone1`, `phone2`, `phone3` columns. Employees now need unlimited phone numbers. What normal form is violated and how do you fix it with minimal application changes?
-  - **A:** 1NF violation — repeating groups. Create `employee_phones` (employee_id, phone, phone_type, is_primary). For backward compatibility, create a view that aggregates primary phones. Add a trigger to manage the primary phone.
-  - **Interview follow-up:** The trigger managing the primary phone fires on every INSERT and UPDATE to ensure exactly one primary phone. Under high-frequency phone updates, this trigger causes deadlocks. How do you redesign this?
-- **Q:** A `student_courses` table has `student_id`, `course_id`, `instructor_name`, `instructor_office`. Each course has one instructor, each instructor teaches multiple courses. What normal form is violated?
-  - **A:** BCNF violation. `instructor_name → instructor_office` but `instructor_name` is not a candidate key. Split into `courses` (course_id, instructor_id) and `instructors` (instructor_id, name, office).
-- **Q:** Your normalized schema has 40 tables. A reporting query joins 12 tables and takes 15 seconds. The CEO wants a dashboard in 3 seconds. Your schema is in BCNF. How do you reconcile normalization with business requirements?
-  - **A:** Create a materialized view denormalizing the 12-table join into a flat reporting table. Refresh periodically (every 5-15 minutes). This is a reporting optimization that doesn't compromise the normalized write schema. Document it as intentional denormalization.
-- **Q:** A project table has `(project_id, employee_id)` as PK with a `role` column. An employee can have multiple roles on the same project. How does this design handle multiple roles?
-  - **A:** It violates 1NF if `role` is a single column. An employee with two roles needs two rows, making the PK work but creating redundancy. Use `(project_id, employee_id, role)` as PK, or create a separate `project_employee_roles` table. This is a multi-valued dependency that 4NF addresses.
-- **Q:** You're designing a content management system. Posts have multiple tags, authors, and categories. How do you design this to satisfy 4NF?
-  - **A:** Create separate junction tables: `post_tags` (post_id, tag_id), `post_authors` (post_id, author_id), `post_categories` (post_id, category_id). Storing all three in one table creates cross-product redundancy — adding a tag requires duplicating all author and category entries.
-- **Q:** A products table has composite PK `(supplier_id, product_code)` and stores `supplier_name` and `supplier_address`. Is this normalized?
-  - **A:** No — this is a 2NF violation. `supplier_name` and `supplier_address` depend on `supplier_id`, not the full composite key. Extract a `suppliers` table with `supplier_id` as PK and reference it from products.
-- **Q:** Your app needs to show customer name on the order history page. In a normalized schema this requires a JOIN. The page loads 50 orders and the JOIN takes 2ms. The team wants to denormalize. What do you advise?
-  - **A:** Keep it normalized. A 2ms JOIN is negligible. Denormalizing introduces update anomalies — changing a customer name requires updating every historical order. Denormalize only when the join is on a critical 1000+ QPS path and you've measured the bottleneck.
-- **Q:** A data warehouse fact table has 20 dimension keys. Queries always join the same 5 dimensions. Do you normalize the star schema further?
-  - **A:** In data warehousing, star schemas are intentionally denormalized. Adding more normalization (snowflake schema) adds joins without significant storage savings for DW workloads. Keep the star schema. Normalization applies more strictly to OLTP than OLAP.
+**Q: You are designing the schema for a multi-tenant SaaS platform. Each tenant has customers, products, and orders. How do you design tables to avoid data duplication across tenants while maintaining query performance?**
+
+- Normalize to 3NF with a `tenant_id` column on every table as part of the PK or partitioning key. Use partial indexes per tenant for common queries. For multi-tenant reads, `tenant_id` is highly selective. For cross-tenant admin queries, use a separate analytics database.
+- **Interview follow-up:** With `tenant_id` as the leading column in every composite index, your cross-tenant admin queries that scan all tenants cannot use these indexes efficiently. How do you index for both per-tenant and cross-tenant queries?
+
+---
+
+**Q: Your team inherited a database where one table has 200 columns — customer info, order info, and product info all in one table. Queries are slow and the table is 500GB. How do you normalize it without downtime?**
+
+- Plan a phased migration. Phase 1: create normalized tables alongside the denormalized one. Phase 2: set up triggers or dual-writes to keep both in sync. Phase 3: backfill historical data in batches. Phase 4: migrate read queries to the normalized schema. Phase 5: drop the old table. Use Flyway or Liquibase for each step.
+- **Interview follow-up:** During Phase 3 backfill, you discover 15% of rows violate the new foreign key constraints because the denormalized legacy data has orphaned references. How do you handle this without blocking the migration?
+
+---
+
+**Q: An employee table has `phone1`, `phone2`, `phone3` columns. Employees now need unlimited phone numbers. What normal form is violated and how do you fix it with minimal application changes?**
+
+- 1NF violation — repeating groups. Create `employee_phones` (employee_id, phone, phone_type, is_primary). For backward compatibility, create a view that aggregates primary phones. Add a trigger to manage the primary phone.
+- **Interview follow-up:** The trigger managing the primary phone fires on every INSERT and UPDATE to ensure exactly one primary phone. Under high-frequency phone updates, this trigger causes deadlocks. How do you redesign this?
+
+---
+
+**Q: A `student_courses` table has `student_id`, `course_id`, `instructor_name`, `instructor_office`. Each course has one instructor, each instructor teaches multiple courses. What normal form is violated?**
+
+- BCNF violation. `instructor_name → instructor_office` but `instructor_name` is not a candidate key. Split into `courses` (course_id, instructor_id) and `instructors` (instructor_id, name, office).
+
+---
+
+**Q: Your normalized schema has 40 tables. A reporting query joins 12 tables and takes 15 seconds. The CEO wants a dashboard in 3 seconds. Your schema is in BCNF. How do you reconcile normalization with business requirements?**
+
+- Create a materialized view denormalizing the 12-table join into a flat reporting table. Refresh periodically (every 5-15 minutes). This is a reporting optimization that doesn't compromise the normalized write schema. Document it as intentional denormalization.
+
+---
+
+**Q: A project table has `(project_id, employee_id)` as PK with a `role` column. An employee can have multiple roles on the same project. How does this design handle multiple roles?**
+
+- It violates 1NF if `role` is a single column. An employee with two roles needs two rows, making the PK work but creating redundancy. Use `(project_id, employee_id, role)` as PK, or create a separate `project_employee_roles` table. This is a multi-valued dependency that 4NF addresses.
+
+---
+
+**Q: You're designing a content management system. Posts have multiple tags, authors, and categories. How do you design this to satisfy 4NF?**
+
+- Create separate junction tables: `post_tags` (post_id, tag_id), `post_authors` (post_id, author_id), `post_categories` (post_id, category_id). Storing all three in one table creates cross-product redundancy — adding a tag requires duplicating all author and category entries.
+
+---
+
+**Q: A products table has composite PK `(supplier_id, product_code)` and stores `supplier_name` and `supplier_address`. Is this normalized?**
+
+- No — this is a 2NF violation. `supplier_name` and `supplier_address` depend on `supplier_id`, not the full composite key. Extract a `suppliers` table with `supplier_id` as PK and reference it from products.
+
+---
+
+**Q: Your app needs to show customer name on the order history page. In a normalized schema this requires a JOIN. The page loads 50 orders and the JOIN takes 2ms. The team wants to denormalize. What do you advise?**
+
+- Keep it normalized. A 2ms JOIN is negligible. Denormalizing introduces update anomalies — changing a customer name requires updating every historical order. Denormalize only when the join is on a critical 1000+ QPS path and you've measured the bottleneck.
+
+---
+
+**Q: A data warehouse fact table has 20 dimension keys. Queries always join the same 5 dimensions. Do you normalize the star schema further?**
+
+- In data warehousing, star schemas are intentionally denormalized. Adding more normalization (snowflake schema) adds joins without significant storage savings for DW workloads. Keep the star schema. Normalization applies more strictly to OLTP than OLAP.
 
 ## Interview Questions
 
 - **What is normalization and why is it important?**
-  - **A:** Organizing tables to reduce redundancy and improve data integrity. Eliminates update, insert, and delete anomalies by storing each fact in one place.
+  - Organizing tables to reduce redundancy and improve data integrity. Eliminates update, insert, and delete anomalies by storing each fact in one place.
+
 - **What is 1NF?**
-  - **A:** Atomic columns (no repeating groups), no multi-valued attributes. Each column contains a single value, each row is unique.
+  - Atomic columns (no repeating groups), no multi-valued attributes. Each column contains a single value, each row is unique.
+
 - **What is 2NF?**
-  - **A:** 1NF plus no partial dependencies — every non-key column must depend on the entire primary key, not just part of it.
+  - 1NF plus no partial dependencies — every non-key column must depend on the entire primary key, not just part of it.
+
 - **What is 3NF?**
-  - **A:** 2NF plus no transitive dependencies — non-key columns cannot depend on other non-key columns. Every non-key column depends only on the primary key.
+  - 2NF plus no transitive dependencies — non-key columns cannot depend on other non-key columns. Every non-key column depends only on the primary key.
+
 - **What is the difference between 3NF and BCNF?**
-  - **A:** BCNF is stricter: every determinant must be a candidate key. A table in 3NF with overlapping candidate keys may violate BCNF.
+  - BCNF is stricter: every determinant must be a candidate key. A table in 3NF with overlapping candidate keys may violate BCNF.
+
 - **What is a functional dependency?**
-  - **A:** Y is functionally dependent on X (X → Y) if each X value determines exactly one Y value. Example: `employee_id → employee_name`.
+  - Y is functionally dependent on X (X → Y) if each X value determines exactly one Y value. Example: `employee_id → employee_name`.
+
 - **What is an update anomaly?**
-  - **A:** A data change must be made in multiple places. Example: changing a customer name requires updating every order row referencing that customer.
+  - A data change must be made in multiple places. Example: changing a customer name requires updating every order row referencing that customer.
+
 - **What is 4NF?**
-  - **A:** 3NF or BCNF plus no multi-valued dependencies. Independent 1:N relationships must be stored in separate tables.
+  - 3NF or BCNF plus no multi-valued dependencies. Independent 1:N relationships must be stored in separate tables.
+
 - **When would you intentionally stop at 2NF?**
-  - **A:** Rarely, when partial dependencies involve small static lookup data and the join overhead is significant. Document this decision explicitly.
+  - Rarely, when partial dependencies involve small static lookup data and the join overhead is significant. Document this decision explicitly.
+
 - **How does normalization affect write vs read performance?**
-  - **A:** Normalization improves write performance (one fact updated once) but degrades read performance (more JOINs). Denormalization is the opposite.
+  - Normalization improves write performance (one fact updated once) but degrades read performance (more JOINs). Denormalization is the opposite.
 
 ## Developer Recommendations
 
-- **Normalize to 3NF by default, denormalize only after measurement** — Starting with 3NF gives clean data integrity. Premature denormalization adds technical debt. Measure actual performance before adding redundancy.
+- **Normalize to 3NF by default, denormalize only after measurement**
+  - Starting with 3NF gives clean data integrity. Premature denormalization adds technical debt. Measure actual performance before adding redundancy.
   - **Production story:** A team denormalized customer email into every order table "for performance." When the email provider changed and 50K customers had multiple email formats, the team spent 3 weeks writing reconciliation scripts to fix the 2M inconsistent copies across the orders table.
-- **Use separate junction tables for independent many-to-many relationships** — Storing skills and languages in one table creates cross-product redundancy (4NF violation). Split into separate tables.
+
+- **Use separate junction tables for independent many-to-many relationships**
+  - Storing skills and languages in one table creates cross-product redundancy (4NF violation). Split into separate tables.
   - **Production story:** A team stored employee skills and certifications in a single junction table with a composite PK `(employee_id, skill, certification)`. Adding a new skill required inserting a row for every existing certification combination, causing 50-row inserts for a single skill addition. Splitting into two tables eliminated the cross-product explosion.
-- **Create views for normalized query convenience** — If normalizing adds JOINs, create views that pre-join commonly accessed tables. Provides convenience without storage redundancy.
-- **Document all intentional denormalizations** — Add comments explaining why the redundancy exists, what trade-off was made, and how consistency is maintained.
-- **Use synthetic PKs but index natural keys** — Synthetic BIGSERIAL or UUID keys are stable and efficient for joins. Add UNIQUE indexes on natural keys (email, SSN) to enforce business uniqueness.
-- **Consider partial dependencies in composite key design** — Verify every non-key column depends on the FULL composite key. Move partial dependency columns to separate tables.
-- **Don't over-normalize OLTP** — Going beyond 3NF or BCNF to 5NF or 6NF adds complexity with minimal benefit for most OLTP workloads.
+
+- **Create views for normalized query convenience**
+  - If normalizing adds JOINs, create views that pre-join commonly accessed tables. Provides convenience without storage redundancy.
+
+- **Document all intentional denormalizations**
+  - Add comments explaining why the redundancy exists, what trade-off was made, and how consistency is maintained.
+
+- **Use synthetic PKs but index natural keys**
+  - Synthetic BIGSERIAL or UUID keys are stable and efficient for joins. Add UNIQUE indexes on natural keys (email, SSN) to enforce business uniqueness.
+
+- **Consider partial dependencies in composite key design**
+  - Verify every non-key column depends on the FULL composite key. Move partial dependency columns to separate tables.
+
+- **Don't over-normalize OLTP**
+  - Going beyond 3NF or BCNF to 5NF or 6NF adds complexity with minimal benefit for most OLTP workloads.

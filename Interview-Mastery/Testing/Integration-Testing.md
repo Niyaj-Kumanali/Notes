@@ -184,84 +184,84 @@ describe('OrderService -> PaymentService contract', () => {
 ## Real-World Scenarios
 
 ### Scenario 1: Microservice Dependency Chaos
-Service A calls Service B, which calls Service C, which calls Service D. To test Service A, the team starts all 4 services locally. Tests take 30 seconds to start and are flaky because any service can be down. **Fix:** Split into focused component integration tests. Test Service A + a real database + mocked Service B (using WireMock). Test Service B + real database + mocked C. Use contract tests (Pact) to ensure A→B and B→C contracts are correct. Result: tests run in 2 seconds, are deterministic, and catch interface mismatches through contract tests.
+- Service A calls Service B, which calls Service C, which calls Service D. To test Service A, the team starts all 4 services locally. Tests take 30 seconds to start and are flaky because any service can be down. **Fix:** Split into focused component integration tests. Test Service A + a real database + mocked Service B (using WireMock). Test Service B + real database + mocked C. Use contract tests (Pact) to ensure A→B and B→C contracts are correct. Result: tests run in 2 seconds, are deterministic, and catch interface mismatches through contract tests.
 
 ### Scenario 2: Database Migration Gone Wrong
-A team adds a `NOT NULL` column to a table with 10M rows. The migration passes in CI (which has 100 rows of test data) but fails in production (timeout on backfilling 10M rows, and existing null values violate the constraint). **Fix:** Test migrations against a realistic data volume. Use a subset of production data (anonymized) in a staging environment. Test the migration with `LOCK_TIMEOUT` and verify it completes within the maintenance window. Also test rollback: if the migration fails midway, can you restore?
+- A team adds a `NOT NULL` column to a table with 10M rows. The migration passes in CI (which has 100 rows of test data) but fails in production (timeout on backfilling 10M rows, and existing null values violate the constraint). **Fix:** Test migrations against a realistic data volume. Use a subset of production data (anonymized) in a staging environment. Test the migration with `LOCK_TIMEOUT` and verify it completes within the maintenance window. Also test rollback: if the migration fails midway, can you restore?
 
 ### Scenario 3: Third-Party API Contract Break
-Your e-commerce app integrates with Stripe for payments. Stripe releases a new API version that changes the `charge` response format. Your integration tests mock Stripe and still pass, but production starts failing. **Fix:** Don't mock Stripe in integration tests — use Stripe's test mode (real sandbox). Better: use consumer-driven contract tests where your app (consumer) publishes its expectations. When Stripe changes their API, your contract tests fail before deployment. Additionally, pin your Stripe API version and upgrade on your schedule, not Stripe's.
+- Your e-commerce app integrates with Stripe for payments. Stripe releases a new API version that changes the `charge` response format. Your integration tests mock Stripe and still pass, but production starts failing. **Fix:** Don't mock Stripe in integration tests — use Stripe's test mode (real sandbox). Better: use consumer-driven contract tests where your app (consumer) publishes its expectations. When Stripe changes their API, your contract tests fail before deployment. Additionally, pin your Stripe API version and upgrade on your schedule, not Stripe's.
 
 ---
 
 ## Scenario-Based Questions
 
-1. **Q: You are building an order processing system. The `OrderService` calls `PaymentService`, which calls `InventoryService`, which calls `ShippingService`. All unit tests pass, but end-to-end orders fail with data corruption. Where is the gap?**
+- **Q: You are building an order processing system. The `OrderService` calls `PaymentService`, which calls `InventoryService`, which calls `ShippingService`. All unit tests pass, but end-to-end orders fail with data corruption. Where is the gap?**
    - **A:** Missing integration tests at each service boundary. Unit tests verify each service in isolation but not the data flow between them. Fix: write component integration tests — test `OrderService` + real database + mocked downstream. Add contract tests between each pair (Order↔Payment, Payment↔Inventory). Test with real serialization (JSON/Protobuf) to catch format mismatches.
 
-2. **Q: Your team uses H2 in-memory database for integration tests because it's fast. Tests pass perfectly. In production with PostgreSQL, unique constraint violations and deadlocks appear. What went wrong?**
+- **Q: Your team uses H2 in-memory database for integration tests because it's fast. Tests pass perfectly. In production with PostgreSQL, unique constraint violations and deadlocks appear. What went wrong?**
    - **A:** H2 is not PostgreSQL-compatible. It doesn't support PostgreSQL-specific features (partial indexes, JSONB operators, `RETURNING`, locking semantics, MVCC behavior). Fix: use Testcontainers to spin up a real PostgreSQL container per test suite. The trade-off: tests are slower (container startup takes 5-10s) but catch real database issues. Alternative: use `testcontainers-java` or `testcontainers-node` with module-level lifecycle (start once per file, not per test).
    - **Interview follow-up:** If Testcontainers is too slow for your CI budget, what alternative approaches still catch PostgreSQL-specific bugs without running a real container per test suite?
 
-3. **Q: An integration test for a background job processor is flaky — it sometimes completes before the job starts, sometimes not. The team wants to add a sleep(). How do you fix this properly?**
+- **Q: An integration test for a background job processor is flaky — it sometimes completes before the job starts, sometimes not. The team wants to add a sleep(). How do you fix this properly?**
    - **A:** Never use sleep() — it makes tests slow and still flaky. Use a test-specific fake job queue where job completion is deterministic. Instead of: (1) submit job, (2) wait, (3) assert — use: (1) submit job, (2) invoke the job handler directly with the same data, (3) assert. For timing-sensitive tests, use a `CountDownLatch` or `Promise` that resolves when the job handler completes.
 
-4. **Q: A microservice integration test requires 6 running containers (DB, Redis, 3 other services, message queue). It takes 30 seconds to start and never runs locally. How do you make integration testing practical?**
+- **Q: A microservice integration test requires 6 running containers (DB, Redis, 3 other services, message queue). It takes 30 seconds to start and never runs locally. How do you make integration testing practical?**
    - **A:** This test is too broad — it's an E2E test, not an integration test. Split into component integration tests: each service tests with its own database + mocked downstream services using WireMock or similar. Use contract tests (Pact) to verify service-to-service contracts. Keep only 1-2 critical-paths as full E2E tests. Result: 50 fast component tests (seconds) + 2 slow E2E tests (run in CI only).
    - **Interview follow-up:** How do contract tests between services differ from what a WireMock stub would verify — and what bug does one catch that the other misses?
 
-5. **Q: Your CI pipeline adds a new database column. An unrelated microservice's API starts returning 500s in production. How could contract testing have prevented this?**
+- **Q: Your CI pipeline adds a new database column. An unrelated microservice's API starts returning 500s in production. How could contract testing have prevented this?**
    - **A:** The new column likely changed the API response shape (e.g., serializing the new column in a response that the consumer doesn't expect). Consumer-driven contract tests (Pact) would catch this: the consumer publishes its expectations (response schema), and the provider verifies against all consumer contracts before deploying. Fix: implement Pact tests at each service boundary. When the API changes, contract tests fail before deployment.
 
-6. **Q: A team mocks the database in all integration tests. Tests run fast but miss N+1 queries, wrong JOINs, and missing indexes. The team argues mocks are "good enough." How do you convince them otherwise?**
+- **Q: A team mocks the database in all integration tests. Tests run fast but miss N+1 queries, wrong JOINs, and missing indexes. The team argues mocks are "good enough." How do you convince them otherwise?**
    - **A:** Run a comparison: the mocked tests pass 100% of the time, but the team spends 20% of each sprint debugging database issues in production. Implement one real database integration test for the critical path (e.g., order checkout) and measure the bugs caught. Show the data: "3 production incidents this quarter were SQL-related bugs that the mocked tests would never catch." Propose a hybrid: 80% mocked for speed, 20% real for correctness.
 
-7. **Q: An integration test for a file upload feature uses a real filesystem but doesn't clean up between tests. Tests pass locally but fail in CI because of accumulated test files. How do you fix this?**
+- **Q: An integration test for a file upload feature uses a real filesystem but doesn't clean up between tests. Tests pass locally but fail in CI because of accumulated test files. How do you fix this?**
    - **A:** Use a temporary directory per test. Create a temp folder in `beforeEach`, delete it in `afterEach`. Use `fs.mkdtempSync()` (Node.js) or `java.nio.file.Files.createTempDirectory()`. For tests that must use a specific path, use dependency injection — inject a `FileStorage` interface, and in tests, inject a `TempFileStorage` implementation that cleans up automatically.
 
-8. **Q: A database migration test passes in CI with 100 rows of test data but fails in production with 10M rows. The column backfill takes 45 minutes in production. What testing approach would catch this?**
+- **Q: A database migration test passes in CI with 100 rows of test data but fails in production with 10M rows. The column backfill takes 45 minutes in production. What testing approach would catch this?**
    - **A:** Test migrations against realistic data volumes. Create a "performance migration test" suite that runs against a database with production-scale data (anonymized subset). Assert that migrations complete within the maintenance window. Test both forward and rollback migrations. Use `EXPLAIN ANALYZE` in tests to verify query plans use indexes. Also test with concurrent reads/writes to verify locking doesn't block production traffic.
    - **Interview follow-up:** How would you write an automated test that verifies a migration completes within a specific time budget, rather than just checking that it does not error?
 
-9. **Q: You have two services communicating through a message queue. Service A publishes an event, Service B consumes it. A schema change in the event payload causes Service B to deserialize incorrectly. How do you test this?**
+- **Q: You have two services communicating through a message queue. Service A publishes an event, Service B consumes it. A schema change in the event payload causes Service B to deserialize incorrectly. How do you test this?**
    - **A:** Use schema registry (Avro/Protobuf) with compatibility validation. In integration tests: (1) Publish an event with the new schema, (2) Start a consumer with the old schema — verify it still works (backward compatible), (3) Publish an event with the old schema, start a consumer with the new schema — verify it still works (forward compatible). Use contract tests where the consumer defines the expected schema.
 
-10. **Q: You need to test that a service correctly handles a downstream service returning 503 Service Unavailable. Your current tests mock this, but the mock doesn't simulate real network behavior (connection reset, slow response, partial data). How do you test resilience properly?**
-    - **A:** Use a fault-injection proxy like Toxiproxy or Chaos Monkey. Set up a real test scenario: (1) Downstream service is healthy — test normal flow. (2) Inject network latency (2s delay) — verify timeout handling. (3) Inject connection reset — verify retry logic. (4) Inject 503 — verify circuit breaker opens. (5) Restore service — verify circuit breaker closes after health check succeeds. Don't mock network behavior; test with real network conditions.
+- **Q: You need to test that a service correctly handles a downstream service returning 503 Service Unavailable. Your current tests mock this, but the mock doesn't simulate real network behavior (connection reset, slow response, partial data). How do you test resilience properly?**
+   - **A:** Use a fault-injection proxy like Toxiproxy or Chaos Monkey. Set up a real test scenario: (1) Downstream service is healthy — test normal flow. (2) Inject network latency (2s delay) — verify timeout handling. (3) Inject connection reset — verify retry logic. (4) Inject 503 — verify circuit breaker opens. (5) Restore service — verify circuit breaker closes after health check succeeds. Don't mock network behavior; test with real network conditions.
 
 ---
 
 ## Interview Questions
 
-1. **What is integration testing?**
+- **What is integration testing?**
    - **A:** Verifying that different components, modules, or services work together correctly. Tests the interactions at boundaries, not the units themselves.
 
-2. **What is the difference between unit testing and integration testing?**
+- **What is the difference between unit testing and integration testing?**
    - **A:** Unit tests test a single unit in isolation (mocked dependencies). Integration tests test the interaction between real components (real DB, real filesystem, real network).
 
-3. **What is Testcontainers?**
+- **What is Testcontainers?**
    - **A:** A library that spins up real Docker containers (PostgreSQL, Redis, etc.) for integration tests. Provides more realistic testing than embedded/in-memory databases.
 
-4. **What is contract testing?**
+- **What is contract testing?**
    - **A:** Testing that an API provider meets the expectations of its consumers. Each consumer defines its expected contract; the provider must satisfy all contracts before deploying. Tools: Pact, Spring Cloud Contract.
 
-5. **What is the N+1 query problem and how do you catch it in integration tests?**
+- **What is the N+1 query problem and how do you catch it in integration tests?**
    - **A:** When an ORM executes N additional queries for N items after the initial query. Catch it with a query counter in integration tests — assert query count is below a threshold.
 
-6. **What is a test double? Give examples.**
+- **What is a test double? Give examples.**
    - **A:** A replacement for a real dependency. Types: dummy (passes data), fake (working but simplified), stub (returns canned answers), spy (records calls), mock (expects specific calls).
 
-7. **Why is H2 a bad choice for testing PostgreSQL-specific features?**
+- **Why is H2 a bad choice for testing PostgreSQL-specific features?**
    - **A:** H2 lacks PostgreSQL features: JSONB operators, partial indexes, `RETURNING`, `ON CONFLICT`, MVCC semantics, and locking behavior. Tests pass on H2 but fail on PostgreSQL.
 
-8. **What is the difference between a mock and a fake?**
+- **What is the difference between a mock and a fake?**
    - **A:** A mock verifies interactions (was `save()` called with the right argument?). A fake is a lightweight working implementation (in-memory database). Use mocks for behavior verification, fakes for state verification.
 
-9. **What is the purpose of a smoke test in integration testing?**
+- **What is the purpose of a smoke test in integration testing?**
    - **A:** A quick check that the critical path of the system works. Runs after deployment to verify the system is alive before running the full test suite. Examples: health check endpoint, database ping.
 
-10. **How do you test database migrations?**
-    - **A:** (1) Apply migration A, verify schema matches expected. (2) Seed test data. (3) Apply migration B (the one under test). (4) Assert data integrity, no null constraints violated. (5) Roll back migration B. (6) Assert the schema reverts correctly. Test against realistic data volumes.
+- **How do you test database migrations?**
+   - **A:** (1) Apply migration A, verify schema matches expected. (2) Seed test data. (3) Apply migration B (the one under test). (4) Assert data integrity, no null constraints violated. (5) Roll back migration B. (6) Assert the schema reverts correctly. Test against realistic data volumes.
 
 ---
 

@@ -28,10 +28,21 @@
 | File | Status |
 |------|--------|
 | Java/Core/Collections-Framework.md | ✅ |
-| Java/Core/Stream-API.md | ✅ |
-| Java/Core/Lambda-Expressions.md | ✅ |
-| Java/Core/Functional-Interfaces.md | ✅ |
 | Java/Core/IO-Streams.md | ✅ |
+
+## Java — Java 8 Features
+
+| File | Status |
+|------|--------|
+| Java/Java-8-Features/Lambda-Expressions.md | ✅ |
+| Java/Java-8-Features/Method-References.md | ✅ |
+| Java/Java-8-Features/Functional-Interfaces.md | ✅ |
+| Java/Java-8-Features/Stream-API.md | ✅ |
+| Java/Java-8-Features/Collectors.md | ✅ |
+| Java/Java-8-Features/Optional.md | ✅ |
+| Java/Java-8-Features/Default-Methods.md | ✅ |
+| Java/Java-8-Features/DateTime-API.md | ✅ |
+| Java/Java-8-Features/CompletableFuture.md | ✅ |
 
 ## Java — Concurrency
 

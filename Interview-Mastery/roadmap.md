@@ -21,15 +21,31 @@ These concepts underpin every other topic. Master them first.
 
 ---
 
-## Phase 2: Language Deep-Dive — Java Core (6 files)
+## Phase 2: Language Deep-Dive — Java Core (2 files)
 
 Build Java fundamentals before touching frameworks.
 
 - [ ] `Java/Core/Collections-Framework.md`
-- [ ] `Java/Core/Lambda-Expressions.md`
-- [ ] `Java/Core/Stream-API.md`
-- [ ] `Java/Core/Functional-Interfaces.md`
 - [ ] `Java/Core/IO-Streams.md`
+
+## Phase 2b: Java 8 Features (9 files)
+
+Lambda expressions, streams, optionals, and the modern Java API that transformed the language.
+
+- [ ] `Java/Java-8-Features/Lambda-Expressions.md`
+- [ ] `Java/Java-8-Features/Method-References.md`
+- [ ] `Java/Java-8-Features/Functional-Interfaces.md`
+- [ ] `Java/Java-8-Features/Stream-API.md`
+- [ ] `Java/Java-8-Features/Collectors.md`
+- [ ] `Java/Java-8-Features/Optional.md`
+- [ ] `Java/Java-8-Features/Default-Methods.md`
+- [ ] `Java/Java-8-Features/DateTime-API.md`
+- [ ] `Java/Java-8-Features/CompletableFuture.md`
+
+---
+
+## Phase 2c: Java Concurrency (2 files)
+
 - [ ] `Java/Concurrency/Multithreading.md`
 - [ ] `Java/Concurrency/Concurrency.md`
 

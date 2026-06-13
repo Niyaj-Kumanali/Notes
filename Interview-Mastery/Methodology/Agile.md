@@ -14,25 +14,25 @@
 
 ### Agile Manifesto — Four Values
 
-1. **Individuals and interactions** over processes and tools
-2. **Working software** over comprehensive documentation
-3. **Customer collaboration** over contract negotiation
-4. **Responding to change** over following a plan
+- **Individuals and interactions** over processes and tools
+- **Working software** over comprehensive documentation
+- **Customer collaboration** over contract negotiation
+- **Responding to change** over following a plan
 
 ### 12 Agile Principles
 
-1. Satisfy customer through early/continuous delivery
-2. Welcome changing requirements, even late in development
-3. Deliver working software frequently (weeks, not months)
-4. Business people and developers work together daily
-5. Build projects around motivated individuals, trust them
-6. Face-to-face conversation is most efficient
-7. Working software is primary measure of progress
-8. Sustainable development, constant pace
-9. Continuous attention to technical excellence
-10. Simplicity — maximizing work not done
-11. Self-organizing teams produce best architectures
-12. Regularly reflect and tune behavior
+- Satisfy customer through early/continuous delivery
+- Welcome changing requirements, even late in development
+- Deliver working software frequently (weeks, not months)
+- Business people and developers work together daily
+- Build projects around motivated individuals, trust them
+- Face-to-face conversation is most efficient
+- Working software is primary measure of progress
+- Sustainable development, constant pace
+- Continuous attention to technical excellence
+- Simplicity — maximizing work not done
+- Self-organizing teams produce best architectures
+- Regularly reflect and tune behavior
 
 ### Agile Methodologies
 
@@ -103,87 +103,87 @@
 ## Real-World Scenarios
 
 ### Scenario 1: Startup Transitioning from Waterfall to Agile
-A 50-person startup with 6-month release cycles realizes they ship features users don't want. Competitors ship weekly. **Transition:** Start with 2-week sprints, a PO from product, and an SM from engineering. The first 3 sprints are chaotic — estimates are off, the PO is overwhelmed, and standups are status reports. **Fix:** Reduce sprint to 1 week for faster feedback, add backlog refinement twice per week, train the PO on story writing, and enforce 15-min standup timeboxing. After 4 sprints, velocity stabilizes and predictability improves.
+- A 50-person startup with 6-month release cycles realizes they ship features users don't want. Competitors ship weekly. **Transition:** Start with 2-week sprints, a PO from product, and an SM from engineering. The first 3 sprints are chaotic — estimates are off, the PO is overwhelmed, and standups are status reports. **Fix:** Reduce sprint to 1 week for faster feedback, add backlog refinement twice per week, train the PO on story writing, and enforce 15-min standup timeboxing. After 4 sprints, velocity stabilizes and predictability improves.
 
 ### Scenario 2: Distributed Team Across 4 Timezones
-A team has members in San Francisco (UTC-8), London (UTC+1), Bangalore (UTC+5:30), and Sydney (UTC+11). Standups at 9 AM SF time are at 2:30 AM for Sydney. **Fix:** Establish 4-hour overlapping core hours (14:00-18:00 UTC). Rotate standup times weekly so each region shares the early/late pain half the time. Use async daily updates via Slack for non-overlap hours. Record sprint reviews and retros for those who can't attend live. Quarterly face-to-face for relationship building.
+- A team has members in San Francisco (UTC-8), London (UTC+1), Bangalore (UTC+5:30), and Sydney (UTC+11). Standups at 9 AM SF time are at 2:30 AM for Sydney. **Fix:** Establish 4-hour overlapping core hours (14:00-18:00 UTC). Rotate standup times weekly so each region shares the early/late pain half the time. Use async daily updates via Slack for non-overlap hours. Record sprint reviews and retros for those who can't attend live. Quarterly face-to-face for relationship building.
 
 ### Scenario 3: Velocity Drop After Microservices Migration
-A team's velocity dropped 50% after migrating from a monolith to microservices. Sprints used to deliver 30 story points; now they deliver 12. **Diagnosis:** The team underestimated the learning curve for new tech (Docker, Kubernetes, event-driven patterns). DevOps overhead (CI/CD pipelines, service discovery, monitoring) was not accounted for. **Fix:** Dedicate one sprint to infrastructure (observability, deployment automation, developer experience). Reduce Definition of Done temporarily. Track velocity trend over 4 sprints — it should recover as the team gains proficiency.
+- A team's velocity dropped 50% after migrating from a monolith to microservices. Sprints used to deliver 30 story points; now they deliver 12. **Diagnosis:** The team underestimated the learning curve for new tech (Docker, Kubernetes, event-driven patterns). DevOps overhead (CI/CD pipelines, service discovery, monitoring) was not accounted for. **Fix:** Dedicate one sprint to infrastructure (observability, deployment automation, developer experience). Reduce Definition of Done temporarily. Track velocity trend over 4 sprints — it should recover as the team gains proficiency.
 
 ---
 
 ## Scenario-Based Questions
 
-1. **Q: You are the SM for a team where the PO keeps adding stories mid-sprint because "the CEO needs it by Friday." The team is demoralized. How do you handle this?**
+- **Q: You are the SM for a team where the PO keeps adding stories mid-sprint because "the CEO needs it by Friday." The team is demoralized. How do you handle this?**
    - **A:** Protect the sprint goal as non-negotiable. Have a private conversation with the PO explaining that mid-sprint changes undermine the team's autonomy and focus. Propose: the PO brings urgent items to the SM; if truly critical, the team swaps equal-sized stories (not adds). Escalate to management only after repeated violations. Track and report how many mid-sprint changes happen to build the case.
 
-2. **Q: You join a team that's been doing agile for 2 years, but every retrospective comes up with the same action items and nothing changes. How do you break the cycle?**
+- **Q: You join a team that's been doing agile for 2 years, but every retrospective comes up with the same action items and nothing changes. How do you break the cycle?**
    - **A:** Stop the retro on talk — move to action. Use the "Start/Stop/Continue" format with one binding action per person for the next sprint. Track actions in a visible board. Start each retro reviewing previous actions: "Did we do it? If not, why?" If organizational blockers prevent change, escalate with data (velocity impact, team satisfaction scores).
 
-3. **Q: Management wants to measure developer productivity using story points per person. How do you respond?**
+- **Q: Management wants to measure developer productivity using story points per person. How do you respond?**
    - **A:** Story points are a team-relative estimate, not an individual productivity metric. Comparing points across individuals creates perverse incentives: (1) people inflate estimates, (2) people avoid complex work, (3) collaboration drops. Propose alternative metrics: cycle time, deployment frequency, team happiness, customer satisfaction. Point out that individual velocity doesn't exist in agile frameworks.
 
    - **Interview follow-up:** Management accepts your arguments against per-person velocity but responds: "Fine, we'll just measure team velocity and compare teams to each other." How do you respond? What makes velocity incomparable even between teams working on the same product?
 
-4. **Q: Your team uses 2-week sprints but consistently finishes all work by day 8, then sits idle waiting for the sprint to end. What's happening and how do you fix it?**
+- **Q: Your team uses 2-week sprints but consistently finishes all work by day 8, then sits idle waiting for the sprint to end. What's happening and how do you fix it?**
    - **A:** The team is under-committing (sandbagging) or the PO isn't filling the backlog with enough refined items. Fix: (1) During sprint planning, use historical velocity as a guide, not a ceiling. (2) If work finishes early, pull the next item from the backlog (after PO confirms). (3) Consider shortening the sprint to 1 week to better match capacity. (4) Validate estimation — maybe the team has improved but estimates haven't adjusted.
 
-5. **Q: A regulated fintech company wants to adopt agile but auditors demand requirements traceability, sign-offs, and documentation. How do you reconcile?**
+- **Q: A regulated fintech company wants to adopt agile but auditors demand requirements traceability, sign-offs, and documentation. How do you reconcile?**
    - **A:** Agile doesn't mean no documentation — it means the right documentation. Trace user stories → acceptance tests → test results. Use BDD (Gherkin scenarios) as living documentation. Automated CI/CD pipelines provide audit trails. Regulatory sign-offs become acceptance criteria in the Definition of Done. The key: documentation should be a byproduct of development, not a separate activity.
 
    - **Interview follow-up:** A production incident reveals that a critical compliance rule was never captured as an acceptance criterion in any story — it was "tribal knowledge" the senior dev always handled. The auditor flags this as a traceability gap. Who owns the fix — PO, SM, or the team? How would you redesign the process so tribal knowledge is systematically encoded without creating a documentation treadmill?
 
-6. **Q: Your product owner is excellent at writing stories but terrible at prioritizing. The team builds perfect features that nobody uses. What do you recommend?**
+- **Q: Your product owner is excellent at writing stories but terrible at prioritizing. The team builds perfect features that nobody uses. What do you recommend?**
    - **A:** Train the PO on value-based prioritization using Weighted Shortest Job First (WSJF) or Opportunity Scoring. Introduce outcome-based metrics (user adoption, task completion rate) instead of output-based (features shipped). Run user research sessions where the team observes real users. If the PO still can't prioritize, escalate — an incapable PO is a systemic risk.
 
-7. **Q: A team of senior developers insists they don't need agile because "we already communicate well." They've been doing waterfall with 6-month releases. How do you convince them?**
+- **Q: A team of senior developers insists they don't need agile because "we already communicate well." They've been doing waterfall with 6-month releases. How do you convince them?**
    - **A:** Don't sell agile — sell outcomes. Ask: "How long does it take from idea to deployed software?" "When was the last time you pivoted based on user feedback?" "How much rework happens?" Run a 1-month pilot with a single product feature: 2-week sprint delivery vs their usual timeline. When they see user feedback after 2 weeks instead of 6 months, the value becomes self-evident.
 
-8. **Q: Your 3 teams share one product backlog. Every sprint, the same high-priority items appear but nobody finishes them because each team picks partial work. How do you fix this?**
+- **Q: Your 3 teams share one product backlog. Every sprint, the same high-priority items appear but nobody finishes them because each team picks partial work. How do you fix this?**
    - **A:** Split into team-specific backlogs organized by feature area or subsystem. Each team owns end-to-end delivery of items in their area. Use a shared Product Goal that aligns the teams. Have a weekly alignment meeting where teams negotiate dependencies. For items that cross teams, have one team own the item and the other team contributes as a dependency.
 
-9. **Q: The organization has a "blameless culture" but retro action items never name specific people. The same problems recur. How do you make retros effective without violating psychological safety?**
+- **Q: The organization has a "blameless culture" but retro action items never name specific people. The same problems recur. How do you make retros effective without violating psychological safety?**
    - **A:** Retros should focus on systems and processes, not individuals. Ask: "What in our process allowed this to happen?" instead of "Who made the mistake?" If naming is needed, use the "I" statement: "I feel we need clearer criteria for the Definition of Done." Assign action items to roles (SM, PO, Dev Team) rather than individuals. If issues persist, the SM should take system-level actions.
 
-10. **Q: Your team adopted agile but the rest of the organization is still waterfall. The team delivers working software every 2 weeks, but it sits in QA for 4 weeks before release. What do you do?**
-    - **A:** This is Water-Scrum-Fall. Fix: (1) Include QA in the sprint — shift testing left. (2) Automate regression tests so QA focuses on exploratory testing. (3) Create a release train — every sprint end triggers a deployment to a staging environment. (4) Negotiate with operations to allow continuous deployment or at least bi-weekly releases. (5) Make the case to management: the team delivers value in 2 weeks, but the organization delivers in 6 — the bottleneck is not the team.
+- **Q: Your team adopted agile but the rest of the organization is still waterfall. The team delivers working software every 2 weeks, but it sits in QA for 4 weeks before release. What do you do?**
+   - **A:** This is Water-Scrum-Fall. Fix: (1) Include QA in the sprint — shift testing left. (2) Automate regression tests so QA focuses on exploratory testing. (3) Create a release train — every sprint end triggers a deployment to a staging environment. (4) Negotiate with operations to allow continuous deployment or at least bi-weekly releases. (5) Make the case to management: the team delivers value in 2 weeks, but the organization delivers in 6 — the bottleneck is not the team.
 
-    - **Interview follow-up:** Operations agrees to bi-weekly releases but the Change Advisory Board (CAB) requires 2 weeks of pre-approval for every production deployment. Your bi-weekly release still has a 2-week lead time before it. How do you work within this constraint without violating the CAB mandate, and what data would you gather to eventually challenge the 2-week pre-approval rule?
+   - **Interview follow-up:** Operations agrees to bi-weekly releases but the Change Advisory Board (CAB) requires 2 weeks of pre-approval for every production deployment. Your bi-weekly release still has a 2-week lead time before it. How do you work within this constraint without violating the CAB mandate, and what data would you gather to eventually challenge the 2-week pre-approval rule?
 
 ---
 
 ## Interview Questions
 
-1. **What is the Agile Manifesto?**
+- **What is the Agile Manifesto?**
    - **A:** Four values: individuals and interactions over processes and tools, working software over comprehensive documentation, customer collaboration over contract negotiation, responding to change over following a plan.
 
-2. **What are the 3 key roles in Scrum?**
+- **What are the 3 key roles in Scrum?**
    - **A:** Product Owner (maximizes value), Scrum Master (coaches/coaches process), Development Team (self-organizing, builds the product).
 
-3. **What is the difference between velocity and capacity?**
+- **What is the difference between velocity and capacity?**
    - **A:** Velocity is historical — points delivered per sprint (past). Capacity is forecast — how much the team can do in the upcoming sprint considering leave, ceremonies, etc. (future).
 
-4. **What is a user story? What is INVEST?**
+- **What is a user story? What is INVEST?**
    - **A:** A user story describes a feature from the user's perspective: "As a [user], I want [goal] so that [reason]." INVEST: Independent, Negotiable, Valuable, Estimable, Small, Testable.
 
-5. **What is the purpose of a sprint retrospective?**
+- **What is the purpose of a sprint retrospective?**
    - **A:** Inspect the team's process and adapt. The team discusses what went well, what could improve, and commits to concrete action items for the next sprint.
 
-6. **What is technical debt and how does agile address it?**
+- **What is technical debt and how does agile address it?**
    - **A:** Technical debt is the implied cost of future rework caused by taking shortcuts. Agile addresses it with continuous refactoring, Definition of Done, and allocating time in each sprint for quality improvements.
 
-7. **What is the difference between Kanban and Scrum?**
+- **What is the difference between Kanban and Scrum?**
    - **A:** Scrum uses fixed-length sprints with commitments. Kanban uses continuous flow with WIP limits. Scrum prescribes roles and ceremonies; Kanban is more flexible. Scrum is better for product development; Kanban for support/maintenance.
 
-8. **What is a "Definition of Done" and why is it important?**
+- **What is a "Definition of Done" and why is it important?**
    - **A:** A checklist of criteria that must be met for a product increment to be considered done (e.g., code reviewed, tested, documented, deployed to staging). It ensures quality and transparency.
 
-9. **What is the difference between a burndown and a burnup chart?**
+- **What is the difference between a burndown and a burnup chart?**
    - **A:** Burndown shows remaining work vs time (does it trend to zero?). Burnup shows completed work vs total work (can show scope changes). Burndown is more common but burnup better communicates scope growth.
 
-10. **What is the role of a Scrum Master?**
-    - **A:** A servant leader who coaches the team on Scrum, removes impediments, facilitates ceremonies, protects the team from external disruptions, and helps the organization adopt agile values.
+- **What is the role of a Scrum Master?**
+   - **A:** A servant leader who coaches the team on Scrum, removes impediments, facilitates ceremonies, protects the team from external disruptions, and helps the organization adopt agile values.
 
 ---
 

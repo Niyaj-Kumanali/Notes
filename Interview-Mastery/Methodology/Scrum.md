@@ -118,87 +118,87 @@ Dev Team (3-9) — self-organizing, cross-functional
 ## Real-World Scenarios
 
 ### Scenario 1: ScrumBut — Skipping Retros, No PO Availability
-A team claims to use Scrum but the PO is never available for backlog refinement, the SM is also a developer, and retros were cancelled 6 months ago. Sprint goals are rarely met, and the team feels like they're in a "feature factory." **Diagnosis:** This is Zombie Scrum — going through ceremonies without the mindset. **Fix:** Dedicated SM (no development work), PO must attend planning/refinement/review weekly, reinstate retros with a strict action-item tracking system. Coach the team on the "why" behind each Scrum event.
+- A team claims to use Scrum but the PO is never available for backlog refinement, the SM is also a developer, and retros were cancelled 6 months ago. Sprint goals are rarely met, and the team feels like they're in a "feature factory." **Diagnosis:** This is Zombie Scrum — going through ceremonies without the mindset. **Fix:** Dedicated SM (no development work), PO must attend planning/refinement/review weekly, reinstate retros with a strict action-item tracking system. Coach the team on the "why" behind each Scrum event.
 
 ### Scenario 2: Twenty-Person Scrum Team
-Twenty developers are in a single Scrum team. Standups take 45 minutes, sprint planning takes 8 hours, and communication overhead is crippling. **Fix:** Split into three feature-aligned Scrum teams (6-7 members each). Each team has its own backlog and sprint goal but shares a common Product Goal. Use a Scrum-of-Scrums for cross-team coordination (3 representatives, 3 times a week, 15 minutes). One PO works with three APIOs (Associate POs) per team.
+- Twenty developers are in a single Scrum team. Standups take 45 minutes, sprint planning takes 8 hours, and communication overhead is crippling. **Fix:** Split into three feature-aligned Scrum teams (6-7 members each). Each team has its own backlog and sprint goal but shares a common Product Goal. Use a Scrum-of-Scrums for cross-team coordination (3 representatives, 3 times a week, 15 minutes). One PO works with three APIOs (Associate POs) per team.
 
 ### Scenario 3: Sprint Reviews Nobody Attends
-The team holds sprint reviews on Friday at 4 PM. Stakeholders rarely attend. When they do, they give vague feedback ("looks good"). The team feels demotivated. **Fix:** Move the review to Tuesday at 10 AM. Invite stakeholders individually (not a blanket calendar invite). Prepare a structured demo: show one working feature, share metrics (velocity, quality, customer feedback), then ask specific questions ("Would this feature solve your problem? What's missing?"). Record sessions for absent stakeholders.
+- The team holds sprint reviews on Friday at 4 PM. Stakeholders rarely attend. When they do, they give vague feedback ("looks good"). The team feels demotivated. **Fix:** Move the review to Tuesday at 10 AM. Invite stakeholders individually (not a blanket calendar invite). Prepare a structured demo: show one working feature, share metrics (velocity, quality, customer feedback), then ask specific questions ("Would this feature solve your problem? What's missing?"). Record sessions for absent stakeholders.
 
 ---
 
 ## Scenario-Based Questions
 
-1. **Q: You are a Scrum Master for a team where the PO treats the team as "resources" and assigns individual tasks. The team is demotivated and self-organization is dead. How do you restore Scrum?**
+- **Q: You are a Scrum Master for a team where the PO treats the team as "resources" and assigns individual tasks. The team is demotivated and self-organization is dead. How do you restore Scrum?**
    - **A:** Coach the PO on the difference between "commanded" and "self-organizing" teams. Explain that the Dev Team commits to the Sprint Goal, not individual tasks. Introduce swarm-based commitment: the team collectively owns all items. If coaching fails, facilitate a retro where the team shares how the assignment model affects them. Escalate to management with data: task-assigned teams have 30% lower velocity and 50% higher turnover.
 
    - **Interview follow-up:** The PO pushes back: "I'm accountable for delivery. If I don't assign tasks, how do I know the right people are working on the right things?" How do you convince them that self-organization does not mean chaos, and what mechanism replaces individual task assignment?
 
-2. **Q: Your team's sprint reviews are poorly attended (2 of 10 stakeholders show up). Those who attend give vague feedback. The team feels they're demoing to an empty room. How do you fix this?**
+- **Q: Your team's sprint reviews are poorly attended (2 of 10 stakeholders show up). Those who attend give vague feedback. The team feels they're demoing to an empty room. How do you fix this?**
    - **A:** Change the format and timing. (1) Move reviews to Tuesday/Wednesday at 10 AM — avoid Monday/Friday. (2) Send personalized invitations with a 1-line teaser of what will be demoed. (3) Shorten the demo to 15 minutes — show one working feature end-to-end. (4) Ask specific questions: "Does this solve your problem? What's missing?" (5) Record and share a 5-min video for absent stakeholders, asking for async feedback by Thursday.
 
-3. **Q: The team's velocity has been flat for 8 sprints despite the team growing from 5 to 8 members. What's happening and how do you diagnose?**
+- **Q: The team's velocity has been flat for 8 sprints despite the team growing from 5 to 8 members. What's happening and how do you diagnose?**
    - **A:** Brooks' Law — adding people to a late project makes it later. The new members need onboarding, create communication overhead, and the existing team spends time ramping them up. Diagnose: (1) Check sprint-by-sprint story completion. (2) Survey the team on productivity blockers. (3) Look at cycle time — it may have increased. Fix: improve onboarding, pair new members, ensure clear interfaces between work areas. Consider splitting into two teams.
 
-4. **Q: Management wants 2-week sprints, but the team works on a safety-critical medical device where every change requires regulatory review. Sprints end but releases take 3 months. How do you adapt Scrum?**
+- **Q: Management wants 2-week sprints, but the team works on a safety-critical medical device where every change requires regulatory review. Sprints end but releases take 3 months. How do you adapt Scrum?**
    - **A:** Use Scrum for development (2-week sprints for building features) but accept that releases follow a separate regulatory cadence. Create a "release train" — accumulated increments are submitted for regulatory review together. The Definition of Done includes all regulatory documentation and verification. Track "lead time" (idea to patient) separately from sprint delivery. This is not Water-Scrum-Fall — it's Scrum in a regulated context.
 
    - **Interview follow-up:** A critical patient-safety bug is discovered in an increment that already passed regulatory review and is awaiting release. Fixing it triggers a new regulatory review cycle, adding 3 months to the fix reaching patients. How would you design the release train to handle emergency fixes without breaking the regulatory process?
 
-5. **Q: A senior stakeholder often attends the Daily Scrum and asks detailed technical questions, turning it into a 30-minute status meeting. The team is afraid to ask her to leave. What do you do as SM?**
+- **Q: A senior stakeholder often attends the Daily Scrum and asks detailed technical questions, turning it into a 30-minute status meeting. The team is afraid to ask her to leave. What do you do as SM?**
    - **A:** First, talk to the stakeholder privately: "The Daily Scrum is for the team to synchronize, not for status updates. Your attendance makes the team feel they're reporting to you." Offer an alternative: a 15-min weekly sync where you brief her. If she insists on attending, establish a ground rule: stakeholders listen only, speak only after the 15-min timebox. Put a timer visibly on the table. If necessary, physically move the standup to a location the stakeholder can't easily access.
 
-6. **Q: The team uses Scrum but the Sprint Backlog is never updated after planning. Stories stay "To Do" the whole sprint and on the last day they all move to "Done." What's missing?**
+- **Q: The team uses Scrum but the Sprint Backlog is never updated after planning. Stories stay "To Do" the whole sprint and on the last day they all move to "Done." What's missing?**
    - **A:** The team isn't using the Sprint Backlog as a living plan. Fix: (1) Visualize work with a physical or digital board updated daily. (2) Break stories into tasks (hours or smaller units). (3) In the Daily Scrum, reference the board — "I'm working on task X in story Y." (4) Use a burn-down chart visible to the team. (5) The SM should ask "what changed on the board today?" not "what did you do?"
 
-7. **Q: Two Scrum teams on the same product keep stepping on each other — modifying the same files, causing merge conflicts, and breaking each other's features. How do you coordinate?**
+- **Q: Two Scrum teams on the same product keep stepping on each other — modifying the same files, causing merge conflicts, and breaking each other's features. How do you coordinate?**
    - **A:** The teams lack architectural boundaries. Fix: (1) Define clear module ownership — each team owns specific components. (2) Establish API contracts between modules. (3) Implement CI that runs both teams' tests. (4) Have a weekly cross-team alignment meeting (Scrum-of-Scrums). (5) If conflict persists, merge into one team or restructure teams by feature vertical (not technical layer).
 
-8. **Q: A team member consistently delivers low-quality work — no tests, no documentation, frequent production bugs. The team is frustrated but avoids confrontation. How does the SM handle this?**
+- **Q: A team member consistently delivers low-quality work — no tests, no documentation, frequent production bugs. The team is frustrated but avoids confrontation. How does the SM handle this?**
    - **A:** Privately coach the individual first: "I noticed some issues with the last few stories. Let's pair on the next one to see how we can improve." If no improvement, make quality a team conversation in retro, not personal criticism: "Our escaped defect rate went up. What can we change in our process?" Enforce the Definition of Done strictly — the team should not accept stories that don't meet DoD. If all fails, escalate to management with specific evidence (failed builds, production incidents).
 
-9. **Q: The product has 10 microservices. The team has 5 developers, and each sprint they must touch all 10 services to ship a feature. Sprints are chaotic. How do you structure the work?**
+- **Q: The product has 10 microservices. The team has 5 developers, and each sprint they must touch all 10 services to ship a feature. Sprints are chaotic. How do you structure the work?**
    - **A:** The team is a "feature team" touching too many surfaces. Fix: (1) Reduce scope — each sprint, focus changes to at most 3 services. (2) Create release trains for multi-service features across sprints. (3) If the product truly requires touching all 10 services per feature, the architecture is wrong — consolidate services. (4) Consider monorepo with shared CI to reduce cross-service overhead. (5) The PO should break features into smaller MVPs that affect fewer services.
 
-10. **Q: The team consistently over-commits and under-delivers. They're optimistic but demoralized when they fail the sprint goal every sprint. How do you improve forecasting?**
-    - **A:** This is the "planning fallacy" — humans underestimate effort. Fix: (1) Use historical velocity as a hard ceiling for commitment, not a target. (2) Apply "reference class forecasting" — compare new work to similar past work. (3) Add a 30% buffer for unknowns. (4) Break large stories (< 8 points) into smaller ones. (5) After the sprint, do a "commitment vs delivery" analysis in retro. Celebrate when the team commits less but delivers fully — it builds confidence, not cynicism.
+- **Q: The team consistently over-commits and under-delivers. They're optimistic but demoralized when they fail the sprint goal every sprint. How do you improve forecasting?**
+   - **A:** This is the "planning fallacy" — humans underestimate effort. Fix: (1) Use historical velocity as a hard ceiling for commitment, not a target. (2) Apply "reference class forecasting" — compare new work to similar past work. (3) Add a 30% buffer for unknowns. (4) Break large stories (< 8 points) into smaller ones. (5) After the sprint, do a "commitment vs delivery" analysis in retro. Celebrate when the team commits less but delivers fully — it builds confidence, not cynicism.
 
-    - **Interview follow-up:** The team tries reference class forecasting, but every story is "unique" — they have no past work that resembles the current feature. Without historical analogues, how do you still produce a reliable forecast, and what data would you start collecting today to make future forecasts more accurate?
+   - **Interview follow-up:** The team tries reference class forecasting, but every story is "unique" — they have no past work that resembles the current feature. Without historical analogues, how do you still produce a reliable forecast, and what data would you start collecting today to make future forecasts more accurate?
 
 ---
 
 ## Interview Questions
 
-1. **What are the three pillars of Scrum?**
+- **What are the three pillars of Scrum?**
    - **A:** Transparency (process visible), Inspection (artifacts inspected often), Adaptation (process adjusted when needed).
 
-2. **What are the five Scrum events?**
+- **What are the five Scrum events?**
    - **A:** Sprint, Sprint Planning, Daily Scrum, Sprint Review, Sprint Retrospective. The Sprint is a container for all others.
 
-3. **What is the product backlog and who owns it?**
+- **What is the product backlog and who owns it?**
    - **A:** An ordered list of everything needed for the product. Owned by the Product Owner, who prioritizes and refines it continuously.
 
-4. **What is the Sprint Goal?**
+- **What is the Sprint Goal?**
    - **A:** A single objective for the sprint that unifies the selected backlog items. It answers "why are we doing this sprint?" and guides decision-making when priorities shift.
 
-5. **What is the difference between the Sprint Review and the Sprint Retrospective?**
+- **What is the difference between the Sprint Review and the Sprint Retrospective?**
    - **A:** Sprint Review inspects the product (what was built) with stakeholders. Sprint Retrospective inspects the process (how the team works) — team only.
 
-6. **What is a product increment?**
+- **What is a product increment?**
    - **A:** A usable, potentially releasable product at the end of each sprint. Each increment is additive to all previous increments.
 
-7. **What happens if a developer is blocked during a sprint?**
+- **What happens if a developer is blocked during a sprint?**
    - **A:** They raise it in the Daily Scrum. The SM removes impediments. If the impediment can't be resolved quickly, the team swarms to help or the blocked story is swapped out.
 
-8. **Who estimates work in Scrum?**
+- **Who estimates work in Scrum?**
    - **A:** The Development Team — they will do the work, so they estimate. The PO provides context; the SM facilitates.
 
-9. **What is the Definition of Done?**
+- **What is the Definition of Done?**
    - **A:** A checklist of criteria that must be met for work to be considered complete. It ensures quality and is agreed upon by the team, not imposed externally.
 
-10. **What is the recommended size of a Scrum team?**
-    - **A:** 3-9 development team members. Smaller teams may lack cross-functionality; larger teams suffer from communication overhead and reduced collaboration.
+- **What is the recommended size of a Scrum team?**
+   - **A:** 3-9 development team members. Smaller teams may lack cross-functionality; larger teams suffer from communication overhead and reduced collaboration.
 
 ---
 
