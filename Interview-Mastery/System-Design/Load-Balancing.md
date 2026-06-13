@@ -93,6 +93,62 @@
 - Use passive health checks to supplement or replace active probes
 - **Interview follow-up:** How do you distinguish between a truly dead server and one that is simply slow due to a temporary GC pause?
 
+**Q: A new backend server added to the pool instantly gets overloaded while existing servers are idle. What is the cause and how do you fix it?**
+
+- The load balancer may be using weighted distribution where the new server has a disproportionately high weight
+- DNS caching may be directing old clients only to the new server if DNS-based load balancing is also in use
+- Check if health checks are failing on existing servers, causing the load balancer to route all traffic to the new server as the only healthy target
+- **Interview follow-up:** How would you implement a "slow start" mode where a new server gradually receives traffic to warm its caches?
+
+**Q: During a traffic spike, your load balancer's connection pool fills up and new connections are refused. How do you handle this?**
+
+- Increase the maximum connection limit on the load balancer and set per-backend connection limits to avoid overwhelming downstream servers
+- Implement connection queuing with a bounded queue — excess connections wait briefly rather than being immediately rejected
+- Use auto-scaling on backend servers triggered by load balancer connection depth
+- **Interview follow-up:** How do you distinguish between a legitimate traffic spike and a DDoS attack at the load balancer level?
+
+**Q: Your WebSocket connections are dropped intermittently when traffic shifts between backend servers. How do you fix this?**
+
+- Ensure session affinity (sticky sessions) for WebSocket routes so all messages in a session go to the same backend
+- Use a dedicated WebSocket load balancer (HAProxy in TCP mode) that forwards the raw TCP stream without HTTP inspection
+- Implement WebSocket reconnection on the client side with exponential backoff and session ID restoration
+- **Interview follow-up:** How does L4 load balancing differ from L7 load balancing for WebSocket traffic?
+
+**Q: One downstream microservice becomes slow, causing all requests to that service through the API gateway to time out. How do you prevent this from affecting other services?**
+
+- Implement circuit breakers per service — if error rate exceeds a threshold, stop sending requests and return a fallback response
+- Set per-service connection and read timeouts individually so a slow service does not hold gateway threads
+- Use bulkhead isolation: dedicate a separate thread pool per downstream service
+- **Interview follow-up:** How do you determine the optimal timeout values for each service?
+
+**Q: You use round-robin DNS with multiple IPs for a web service. Some users report intermittent failures. What is the cause and fix?**
+
+- DNS load balancing does not perform health checks — a dead server still receives traffic until DNS TTL expires
+- Client DNS caching varies — some clients cache stale records beyond TTL, hitting removed servers
+- Fix: use a dedicated load balancer with health checks as the sole DNS target
+- **Interview follow-up:** How do you minimize downtime during DNS TTL propagation when switching load balancer IPs?
+
+**Q: Write-heavy requests through your load balancer are starving read requests. How do you separate them?**
+
+- Use L7 routing to split read and write traffic to separate backend pools that scale independently
+- Implement weighted fair queuing so read requests always get a minimum bandwidth share
+- Use separate load balancers or ports for read and write traffic with dedicated backend instances
+- **Interview follow-up:** How would you handle read replicas that lag — should reads go to the master if freshness is required?
+
+**Q: During a blue-green deployment with sticky sessions, users are unexpectedly logged out. What happened?**
+
+- The sticky session cookie points to blue servers, but those servers are now draining — the session was stored locally and is unavailable on green servers
+- Fix: store sessions externally (Redis, database) so any server in any environment can serve any user
+- Use gradual traffic shifting (canary deployment) rather than instant cutover
+- **Interview follow-up:** How do you drain existing connections on the blue environment without dropping active users?
+
+**Q: Your load balancer's TLS termination is causing high CPU usage. How do you reduce overhead without compromising security?**
+
+- Offload TLS to dedicated hardware or use cloud-managed TLS termination (AWS ALB, CloudFront)
+- Use ECDHE instead of DHE for forward secrecy — ECDHE is ~10x faster on modern CPUs
+- Enable TLS session resumption (session IDs or tickets) so repeated connections skip the full handshake
+- **Interview follow-up:** What security risks are introduced by terminating TLS at the load balancer instead of the application server?
+
 ## Interview Questions
 
 - **What is the difference between L4 and L7 load balancing?**
@@ -103,6 +159,38 @@
   - Store session state externally in Redis, Memcached, or a database with a session ID cookie. Every backend server reads session data from the shared store, making the system fully stateless.
 - **What are the tradeoffs between DNS load balancing and a dedicated load balancer?**
   - DNS LB is simple, free, and works globally, but it cannot detect server health and relies on client DNS caching. A dedicated LB provides health checks, smart routing, TLS termination, and circuit breaking at the cost of infrastructure complexity.
+- **How do you implement canary deployments using a load balancer?**
+  - Route a small percentage of traffic (e.g., 5%) to the new version using weighted distribution. Monitor error rates, latency, and business metrics. Gradually increase the weight until 100% goes to the new version. If metrics degrade, route all traffic back to the old version instantly.
+- **Explain the role of a health check endpoint design.**
+  - A health endpoint should be lightweight, checking DB connectivity and essential dependencies without warming caches or running complex queries. Liveness probes check if the process is alive; readiness probes check if the server can accept traffic.
+- **What is the difference between a reverse proxy and a load balancer?**
+  - A reverse proxy forwards client requests to backends, providing caching, TLS termination, and compression. A load balancer distributes traffic across servers for scalability and fault tolerance. Many tools (Nginx, HAProxy, Envoy) serve as both.
+- **How does the least-connections algorithm work and when would you use it?**
+  - The load balancer tracks active connections per backend and forwards each request to the server with the fewest active connections. This is ideal when request processing times vary significantly — faster servers naturally receive more requests.
+- **What is connection draining and why is it important?**
+  - Connection draining allows existing in-flight requests to complete on a server being taken out of rotation. The LB stops sending new requests but keeps existing connections open until they finish or a timeout expires. This prevents abrupt termination during deployments or scale-in events.
+- **Explain how a circuit breaker pattern integrates with load balancing.**
+  - The circuit breaker monitors error rate from a backend. When errors exceed a threshold, the breaker opens and traffic stops. After a cooldown, it half-opens to test a few requests. If they succeed, the breaker closes; if not, it stays open.
+- **How do you handle load balancing for database connections?**
+  - Use a protocol-aware LB (HAProxy, ProxySQL) to distribute read queries across replicas via least-connections. Route all writes to the primary. Health checks should verify DB connectivity and that replication lag is within bounds.
+- **What is geo-routing and how does it differ from latency-based routing?**
+  - Geo-routing directs traffic based on the client's geographic location. Latency-based routing directs traffic to the data center with the lowest measured latency for that client. Geo-routing is simpler; latency-based routing requires continuous measurements.
+- **How does a load balancer handle WebSocket upgrades?**
+  - L7 LBs detect the HTTP Upgrade header and either forward in TCP mode or proxy WebSocket natively. Once upgraded, the LB maintains the persistent connection to the same backend (session affinity). L4 LBs handle WebSocket transparently.
+- **What are the tradeoffs of software vs hardware load balancers?**
+  - Software LBs (HAProxy, Nginx, Envoy) are cost-effective, dynamically configurable, and integrate with container orchestration. Hardware LBs (F5, Citrix) offer dedicated ASIC processing and higher raw throughput but are expensive and less flexible.
+- **How do you implement rate limiting at the load balancer level?**
+  - Configure per-IP or per-connection rate limits. L7 LBs can apply finer limits per URL path or API key. Excess requests get 429. For distributed limiting, the LB coordinates via a shared Redis instance.
+- **What is the difference between a VIP and a real server?**
+  - The VIP is the public-facing IP clients connect to. The LB forwards traffic to real servers. The VIP provides a single entry point, abstracting backend topology — if a real server fails, traffic shifts to healthy ones transparently.
+- **How do you test if a load balancer is working correctly?**
+  - Verify traffic distribution matches the configured algorithm. Test failover by stopping a backend and confirming traffic shifts. Test health check accuracy by introducing dependency failures. Measure latency added by the LB vs baseline.
+- **Explain exponential backoff for client retries in a load-balanced environment.**
+  - The client waits 1s before retrying, then 2s, 4s, 8s up to a maximum. This prevents retry storms. Jitter (random variation) prevents synchronized retries from multiple clients.
+- **What is head-of-line blocking in load balancing and how do you prevent it?**
+  - One slow request blocks subsequent requests on the same connection. In HTTP/1.1, requests on one connection are serialized. Prevention: use HTTP/2 multiplexing, enable connection pooling with parallel connections, or use separate backend connections per request.
+- **How does a load balancer handle SSL/TLS termination?**
+  - The load balancer decrypts incoming HTTPS requests and forwards plain HTTP to backend servers. This offloads the CPU-intensive encryption work from backends. The LB manages TLS certificates and can support multiple domains via SNI. Backend communication should still be encrypted if traversing untrusted networks.
 
 ## Developer Recommendations
 

@@ -104,6 +104,62 @@
 - Implement data compression for large values (Snappy, LZ4)
 - **Interview follow-up:** How do you distinguish between a cache that needs more memory and one that has a memory leak from unscoped caching?
 
+**Q: Your cache-aside implementation causes high latency on cache misses because every miss queries the database synchronously. How do you improve this?**
+
+- Use a read-through cache that automatically loads data from the database on miss, reducing application complexity
+- Pre-warm the cache with popular data before traffic arrives, so misses are rare during peak hours
+- Implement batch loading: when a miss occurs, check if other nearby keys are also missing and load them together
+- **Interview follow-up:** How do you determine which keys to pre-warm without prior knowledge of access patterns?
+
+**Q: Your write-through cache adds 10ms latency to every write because it synchronously writes to both cache and database. How do you reduce write latency?**
+
+- Switch to write-behind: write to cache immediately, and asynchronously flush to the database in batches
+- If immediate consistency is required, use a distributed transaction with a commit log that replicates asynchronously
+- Consider whether write-through is actually needed — if reads tolerate staleness, use cache-aside with TTL instead
+- **Interview follow-up:** How do you handle data loss risk with write-behind if the cache node fails before the async write completes?
+
+**Q: Your Redis cache stores user sessions. When a cache node fails, all users assigned to that node are logged out. How do you improve resilience?**
+
+- Enable Redis replication: each master has one or more replicas. If the master fails, a replica is promoted automatically
+- Use Redis Cluster with replication factor 2 — each hash slot is replicated to a replica node in a different availability zone
+- Implement client-side session fallback: if Redis is unavailable, fall back to a database-backed session store with a warning
+- **Interview follow-up:** How do you handle the case where the promoted replica has stale data because replication lag was high?
+
+**Q: Your cache eviction policy is LRU, but some keys that are accessed rarely but are expensive to compute keep getting evicted. How do you fix this?**
+
+- Use LFU instead of LRU — LFU tracks access frequency, so expensive-but-rarely-accessed keys are not evicted quickly
+- Assign a higher "cost" value to expensive keys and use a custom eviction policy that considers both access recency and recomputation cost
+- Add a "protected" segment to the cache — a small portion of memory where keys are never evicted (pinned cache)
+- **Interview follow-up:** How do you identify which keys are expensive to recompute without manual annotation?
+
+**Q:** Your cache stores JSON objects that are 100KB each. Serialization and deserialization overhead adds 50ms to each cache operation. How do you optimize this?**
+
+- Switch to a binary serialization format like Protobuf or MessagePack — these are faster and produce smaller payloads
+- Compress large values using Snappy or LZ4 before storing in Redis — decompression is fast and reduces memory usage
+- Consider splitting large objects into smaller, frequently accessed fields and cache them separately
+- **Interview follow-up:** How does compression affect Redis memory fragmentation and what metrics should you monitor?
+
+**Q: Your distributed cache cluster has 10 nodes. When you add an 11th node, you expect 10% fewer keys per node, but instead see 30% of keys redistributed. Why?**
+
+- You are likely using a simple mod-based sharding (hash(key) % 10 → hash(key) % 11), which changes the mapping for almost all keys
+- Fix: use consistent hashing so that adding a node redistributes only K/N keys (K = total keys, N = number of nodes)
+- If consistent hashing is already in use, check the number of virtual nodes — too few vnodes can cause uneven redistribution
+- **Interview follow-up:** How does client-side consistent hashing handle the transitional period when some clients still use the old node list?
+
+**Q: Your cache hit rate dropped from 90% to 60% after a deployment. What could have caused this and how do you investigate?**
+
+- The deployment may have changed the cache key format — if keys are constructed differently, existing cache entries are not found
+- Application code changes may have altered query patterns, accessing different data than before
+- Check if the deployment restarted cache nodes (e.g., if cache is embedded in the application process rather than external Redis)
+- **Interview follow-up:** How do you implement a cache key schema versioning strategy to prevent key changes from invalidating the entire cache?
+
+**Q: Your application uses Redis for distributed locking with SETNX. During a network partition, two nodes acquire the same lock simultaneously. How do you fix split-brain locks?**
+
+- Use Redlock algorithm: acquire the lock from a majority of Redis nodes (N/2 + 1) rather than a single node
+- Add a unique token to each lock acquisition attempt so the resource owner can verify the lock is valid
+- Use a fencing token: a monotonically increasing number that allows the resource to reject stale lock holders
+- **Interview follow-up:** How does Redlock handle the case where a client acquires a lock but pauses (GC pause) long enough for the lock to expire?
+
 ## Interview Questions
 
 - **Explain cache-aside vs read-through vs write-through vs write-behind.**
@@ -114,6 +170,38 @@
   - LRU: removes least recently accessed — good for temporal locality. LFU: removes least frequently accessed — good for stable popularity. TTL: removes by time regardless of access — ensures freshness. Many systems combine TTL (for freshness) with LRU/LFU (for memory management).
 - **What are the tradeoffs between Redis Cluster and Memcached?**
   - Redis Cluster offers sharding, replication, failover, data structures (lists, sets, sorted sets), and persistence. Memcached is simpler, multithreaded, with lower per-request overhead for simple key-value operations. Redis is better for feature-rich caching; Memcached is better for high-throughput, simple caching with minimal operational complexity.
+- **Explain the difference between "cache hit" and "cache miss" and why each matters.**
+  - Cache hit: requested data is found in cache — fast response (sub-millisecond). Cache miss: data must be fetched from origin — slow response (10–100ms). The hit rate (ratio of hits to total requests) is the primary metric for cache effectiveness. High hit rates reduce database load and improve response times.
+- **How do you handle cache invalidation when the underlying data changes?**
+  - Strategies: TTL-based (data expires after a fixed time), event-driven (publish invalidation event when data changes), write-through (update cache on every write). For relational data, use a change data capture (CDC) pipeline to invalidate affected cache keys when the database changes.
+- **What is "thundering herd" and how does it differ from "cache stampede"?**
+  - Thundering herd: many clients simultaneously detect a cache miss and attempt to reload from the database. Cache stampede: a broader system failure caused by the thundering herd overwhelming the database. Thundering herd is the cause; cache stampede is the effect. Both terms are often used interchangeably.
+- **How does Redis handle memory pressure when all memory is used?**
+  - Redis uses eviction policies configured by maxmemory-policy: noeviction (returns errors on writes), allkeys-lru (evicts least recently used keys), volatile-lru (evicts LRU keys with TTL), allkeys-lfu (least frequently used), volatile-ttl (shortest TTL first). Choose based on whether you want Redis to manage memory or error.
+- **How do you monitor cache health in production?**
+  - Key metrics: hit rate, miss rate, eviction count, memory usage, latency (p50/p99/p999), number of connected clients, CPU usage. Alert on sudden drops in hit rate or spikes in evictions. Use Redis INFO, MONITOR, and SLOWLOG commands for deep diagnostics.
+- **What is the "cache-aside" pattern and when would you choose it over "read-through"?**
+  - Cache-aside: application code checks cache, loads from DB on miss, and populates cache. Read-through: the cache library handles miss loading automatically. Cache-aside gives the application more control (custom serialization, business logic on miss). Read-through simplifies code and centralizes loading logic.
+- **Explain the concept of "write-behind" caching and its risk.**
+  - Write-behind: application writes to cache immediately; the cache asynchronously writes to the database. Risk: if the cache node fails before the async write, the data is lost. Mitigations: replicate cache writes, enable Redis persistence (AOF), or accept the risk for non-critical data only.
+- **How do you implement a cache warming strategy?**
+  - Before going live with a new deployment, replay recent traffic logs against the cache to populate hot keys. Alternatively, seed the cache from the database with the most frequently accessed records (based on access logs). Warm gradually to avoid overwhelming the database.
+- **What is the role of "TTL jittering" in distributed caching?**
+  - If many keys expire at the same time, the reload traffic creates a thundering herd. TTL jittering adds random variation (e.g., TTL = 300s + random(0, 60)s) so expires are spread over time. This prevents synchronized cache misses and reduces database load spikes.
+- **How does Redis handle key expiration?**
+  - Redis uses two mechanisms: passive (key is checked on access — if expired, it is removed) and active (Redis periodically samples a subset of keys with TTL and removes expired ones). The active expiration runs every 100ms and removes up to 20 keys per sampling cycle.
+- **What is the difference between cache "invalidation" and cache "eviction"?**
+  - Invalidation: proactively removing or updating cached data because the source data changed (application-initiated). Eviction: automatically removing data when the cache runs out of memory (system-initiated). Invalidation ensures freshness; eviction manages memory.
+- **How do you handle caching of partial data (e.g., user profile without email field)?**
+  - Cache the full object and mask sensitive fields at the application layer, or cache only the non-sensitive subset. For GDPR compliance, ensure that cached user data can be purged on request. Consider using separate caches for public and private data with different TTLs.
+- **Explain the "client-side caching" pattern and when to use it.**
+  - Store frequently accessed, rarely changed data in the application's local memory (e.g., configuration, feature flags). The client polls or subscribes to change notifications. Benefits: zero network latency for reads. Risk: stale data if notifications are missed or delayed.
+- **How does Redis Cluster handle resharding without downtime?**
+  - Redis Cluster supports online resharding: it moves hash slots from source nodes to target nodes while the cluster serves traffic. During migration, a slot's keys exist on both old and new nodes. The cluster tracks the migration state and redirects clients as needed (ASK redirect).
+- **What is "cache concurrency" and how do you prevent race conditions on cache updates?**
+  - When two requests simultaneously miss the cache and both try to populate it, they may write different values. Use a mutex: only one request loads from DB and writes to cache; others wait briefly or serve stale data. Use Redis SET NX with a lock key to coordinate concurrent cache population.
+- **How does Redis persistence (RDB vs AOF) affect cache performance?**
+  - RDB snapshots periodically dump the entire dataset to disk, causing potential latency spikes during snapshotting. AOF logs every write operation, providing better durability but higher disk I/O. For cache-only workloads, disable persistence entirely — rely on replication for failover. For mixed use, AOF with every-second fsync balances performance and durability.
 
 ## Developer Recommendations
 

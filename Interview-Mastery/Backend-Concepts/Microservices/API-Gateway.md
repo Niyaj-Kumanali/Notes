@@ -103,6 +103,41 @@
 - The rate limiter was likely configured at the application level (after request parsing) rather than at the network level. A DDoS attack can overwhelm the gateway before it reaches the rate-limiting logic. The fix involves adding network-level rate limiting (AWS WAF, Cloudflare, Nginx limit_req) in front of the gateway, and ensuring the gateway's rate limiter uses a fast, distributed store (e.g., Redis) with minimal overhead.
 - **Interview follow-up:** How would you distinguish between a legitimate traffic surge from a flash sale and a DDoS attack?
 
+**Q: Your API Gateway is configured with per-route rate limiting, but during a promotion event, users across multiple routes are throttled even though individual route limits are not exceeded. Why?**
+
+- Rate limits are applied per route, but a single user's requests span multiple routes. The user exceeds the global limit without exceeding any single route limit. The fix is to implement global rate limiting (per user across all routes) in addition to per-route limits, using a distributed counter (Redis) keyed by user ID or API key.
+- **Interview follow-up:** How would you design a rate-limiting scheme that allows burst traffic for authenticated users while still protecting the system from abuse?
+
+**Q: A team deploys a GraphQL endpoint behind the API Gateway. The gateway is configured for REST and fails to handle GraphQL requests properly. What needs to change?**
+
+- GraphQL typically uses a single POST endpoint (`/graphql`) where all queries are sent. The API Gateway must route all GraphQL requests to the same backend service regardless of the query content. Caching at the gateway level is ineffective for GraphQL since queries vary. The gateway should skip request/response transformation for GraphQL traffic and pass the request body through unchanged. Consider deploying a separate GraphQL gateway or BFF for GraphQL traffic.
+- **Interview follow-up:** How would you implement rate limiting for a GraphQL endpoint where a single request can trigger expensive or cheap queries?
+
+**Q: During a regional cloud outage, your API Gateway's upstream services are unavailable, but the gateway keeps accepting requests and timing out, exhausting resources. How do you protect the gateway?**
+
+- Implement a "circuit breaker per upstream service" that opens when the upstream is unhealthy and returns a cached or fallback response. Configure the gateway with a global "degraded mode" flag that, when activated, serves static responses for non-critical routes. Use a health check endpoint on each upstream and stop routing to unhealthy services at the gateway level.
+- **Interview follow-up:** How would you design a fallback response strategy that provides meaningful data to users even when upstream services are down?
+
+**Q: Your team uses an API Gateway for authentication, but the monolithic auth service is becoming a bottleneck — every request goes through it. How do you scale authentication without replacing the auth service?**
+
+- Move token validation to the gateway by caching the auth service's public keys (JWKS) locally. The gateway validates JWT tokens without calling the auth service on every request. For token revocation, use a distributed revocation list (Redis) that the gateway checks with minimal overhead. This reduces auth service load from O(N) requests to O(1) per gateway instance.
+- **Interview follow-up:** How do you handle token revocation when the user's permissions change while they hold a valid JWT that is cached in the gateway?
+
+**Q: A mobile app connects to the API Gateway via WebSocket. After a gateway deployment, all WebSocket connections drop and the app must reconnect. How do you prevent this?**
+
+- WebSocket connections are stateful and tied to a specific gateway instance. Use a gateway that supports WebSocket sticky sessions (session affinity via a cookie or source IP hash). For zero-downtime deployments, implement a graceful shutdown procedure where the gateway stops accepting new WebSocket connections, waits for existing connections to drain, and sends a close frame to remaining connections before shutting down.
+- **Interview follow-up:** How would you implement WebSocket connection migration between gateway instances without requiring client reconnection?
+
+**Q: Your API Gateway is deployed behind a CDN (CloudFront, Cloudflare). Some client requests are being cached at the CDN level, causing users to see stale data. What configuration is needed?**
+
+- Configure the CDN to respect cache-control headers from the gateway or backend services. For dynamic APIs, set `Cache-Control: no-cache, no-store` or use short TTLs (e.g., 1-5 seconds). Use the CDN's cache key customization to include relevant headers (e.g., `Accept-Language`, `Authorization`) so different users get different cached responses. For authenticated APIs, consider bypassing CDN caching entirely.
+- **Interview follow-up:** Some of your APIs are intentionally cacheable (product listings, static content) but others are not (user balances, order status). How do you design a caching strategy at the CDN and gateway layers that correctly handles both types?
+
+**Q: A startup uses a single API Gateway instance with 2GB of memory. As traffic grows, the gateway's memory usage reaches 90% and requests are frequently dropped. How do you scale the gateway?**
+
+- Horizontal scaling: deploy multiple gateway instances behind a load balancer. Make the gateway stateless (store rate limit counters, auth caches in Redis) so any instance can handle any request. Configure auto-scaling based on CPU and memory metrics. If the gateway is stateful (WebSocket connections), use sticky sessions to route clients to the same instance.
+- **Interview follow-up:** How would you decide between scaling the gateway vertically (larger instance) versus horizontally (more instances) in terms of cost, complexity, and latency?
+
 ## Interview Questions
 
 - **Compare Spring Cloud Gateway and Zuul 2.x. When would you choose one over the other?**
@@ -119,6 +154,66 @@
 
 - **How does an API gateway handle WebSocket connections differently from REST?**
   - WebSocket connections are long-lived and bidirectional; the gateway must maintain a persistent connection to both the client and the backend (or route messages via a pub/sub channel). AWS API Gateway uses a `$connect` route to authenticate the WebSocket upgrade and a `$disconnect` route for cleanup; messages are routed to registered integrations. Kong and Spring Cloud Gateway support WebSocket proxying but do not offer the same managed connection state as AWS.
+
+- **What is the role of the API Gateway in a microservices architecture?**
+  - The API Gateway is the single entry point for all client requests. It handles routing, authentication, rate limiting, request/response transformation, API composition, and cross-cutting concerns like logging and circuit breaking.
+  - It shields clients from the complexity of multiple service endpoints and centralizes edge concerns.
+
+- **How does Spring Cloud Gateway handle requests asynchronously?**
+  - Spring Cloud Gateway is built on Spring WebFlux and Project Reactor. It uses a non-blocking, event-driven model with a small number of threads handling many concurrent connections via Netty.
+  - This contrasts with Zuul 1.x (Servlet-based, thread-per-request) and provides better resource utilization under high concurrency.
+
+- **What is the difference between a Gateway filter and a Global filter?**
+  - Gateway filters are applied to specific routes (e.g., `AddRequestHeader`, `CircuitBreaker`). Global filters are applied to all routes automatically (e.g., `LoadBalancerClientFilter`, `NettyRoutingFilter`).
+  - In Spring Cloud Gateway, global filters handle cross-cutting concerns for every request.
+
+- **How do you implement rate limiting in Kong?**
+  - Kong provides a built-in `rate-limiting` plugin that supports local (in-memory) and distributed (Redis) rate limiting. It can limit by consumer, credential, IP, or service.
+  - Configuration includes `second`, `minute`, `hour`, `day`, `month`, `policy` (local/cluster/redis), `fault_tolerant`, and `hide_client_headers`.
+
+- **What is the purpose of API Gateway caching?**
+  - Caching at the gateway level reduces load on backend services and improves response latency for frequently accessed endpoints. AWS API Gateway supports caching with configurable TTL and cache key parameters.
+  - Use caching for read-heavy, infrequently changing data (product listings, reference data). Disable caching for authenticated or dynamic responses.
+
+- **How do you handle CORS at the API Gateway level?**
+  - Configure CORS headers (Access-Control-Allow-Origin, Access-Control-Allow-Methods, Access-Control-Allow-Headers) at the gateway so that browser-based clients can make cross-origin requests.
+  - In Spring Cloud Gateway, use a `CorsGlobalConfiguration` bean or per-route CORS configuration. In Kong, use the `cors` plugin.
+
+- **What is the role of the API Gateway in authentication and authorization?**
+  - The gateway authenticates requests by validating JWT tokens, API keys, or calling an external auth service. It extracts user identity and passes it to downstream services via headers (e.g., `X-User-ID`, `X-User-Roles`).
+  - Authorization (checking permissions for specific resources) is typically delegated to the backend services, though coarse-grained authorization can be done at the gateway level.
+
+- **How do you implement canary deployments with an API Gateway?**
+  - Use a weight-based routing mechanism where a percentage of traffic is routed to the canary (new) version. Spring Cloud Gateway supports weight predicates (`Weight=canary-v2,10`). Kong supports canary via blue-green or weighted upstreams.
+  - The gateway can also route based on headers (e.g., `X-Canary: true`) for internal testing before rolling out to production traffic.
+
+- **What is the difference between synchronous and asynchronous API Gateways?**
+  - Synchronous gateways (Spring Cloud Gateway, Kong) process requests in a request-response cycle, blocking the connection until the backend responds. Asynchronous gateways (message-based) receive requests, publish them to a queue, and return responses via a callback or polling mechanism.
+  - Synchronous gateways are simpler for most use cases; asynchronous gateways are useful for long-running operations or when backends have variable latency.
+
+- **How does the API Gateway handle gRPC traffic?**
+  - gRPC uses HTTP/2 and binary Protocol Buffers. Some gateways support gRPC natively (Envoy, Kong with gRPC plugin, AWS API Gateway with gRPC proxy). Spring Cloud Gateway does not natively support gRPC — use a separate Envoy proxy for gRPC traffic.
+  - For gRPC, the gateway typically performs TLS termination, routing based on the gRPC service/method, and load balancing across gRPC backends.
+
+- **What is the difference between API Gateway composition and BFF?**
+  - API Gateway composition aggregates responses from multiple services into a single client response. BFF (Backend for Frontend) is a dedicated backend per client type that handles composition, data shaping, and client-specific logic.
+  - BFF is preferred when different clients need different data shapes; API Gateway composition is suitable when the same data shape is needed by multiple clients.
+
+- **How do you secure the API Gateway itself?**
+  - Deploy behind a WAF (AWS WAF, Cloudflare). Use TLS termination at the gateway. Implement IP allowlisting/blocklisting. Run the gateway in a private subnet with only necessary ports open. Use a CDN or DDoS protection service in front of the gateway.
+  - Regularly update the gateway software, apply security patches, and audit access logs for suspicious activity.
+
+- **What is the role of the API Gateway in observability?**
+  - The gateway generates request-level metrics (latency, error rate, request count) per route and per client. It propagates distributed tracing headers (trace ID, span ID) to downstream services. It can generate access logs with detailed request/response metadata.
+  - Centralized gateway observability provides a holistic view of all north-south traffic, making it easier to detect client-side issues.
+
+- **How do you handle API Gateway failure?**
+  - Deploy multiple gateway instances behind a load balancer in an active-active configuration. Use health checks at the load balancer level to detect and remove failed gateway instances. Implement a fallback mechanism: if all gateways are down, serve static error pages from the CDN or load balancer.
+  - Design clients to handle gateway failures gracefully (retry, fallback to cached data).
+
+- **What is the difference between a reverse proxy and an API Gateway?**
+  - A reverse proxy (Nginx, HAProxy) operates at layers 4/7 and handles simple routing, SSL termination, and basic load balancing. An API Gateway builds on this with application-layer features: authentication, rate limiting, request/response transformation, API composition, and circuit breaking.
+  - The API Gateway is the richer, more feature-complete evolution of a reverse proxy for microservices architectures.
 
 ## Developer Recommendations
 

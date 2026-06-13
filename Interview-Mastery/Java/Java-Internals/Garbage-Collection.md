@@ -127,6 +127,41 @@
 - ZGC typically achieves sub-1ms pauses, but 10ms pauses can arise from: the operating system's page fault handling (ZGC touches memory from multiple threads causing TLB shootdowns), concurrent thread root scanning if safepoint cleanup is slow, or `System.gc()` calls from libraries. Check GC logs for root scanning times, verify `-XX:+UseZGC` is correctly set, ensure `-XX:ConcGCThreads` is adequate, and check the OS for transparent huge pages or NUMA settings. Adding `-XX:+ZUncommit` may help if memory uncommit overhead is high.
 - **Interview follow-up:** How does ZGC's colored-pointer approach differ from Shenandoah's forwarding-pointer approach in terms of CPU overhead and memory footprint?
 
+**Q: A data processing application allocates millions of small `Map.Entry` objects per second. GC logs show frequent young GC and high CPU usage. What design changes reduce GC pressure?**
+
+- The allocation rate of `Map.Entry` objects is causing frequent minor GCs. Solutions: (1) Use a primitive collection library (e.g., Eclipse Collections, fastutil) that stores entries as arrays of primitives, reducing object overhead. (2) Pool and reuse mutable entry objects. (3) Use `java.util.HashMap` with a reasonable initial capacity to avoid rehashing and reallocation. (4) Increase young generation size to reduce GC frequency. (5) Switch to G1 or ZGC if pauses are still a problem.
+- **Interview follow-up:** How would you measure allocation rate in production, and how does it correlate with GC frequency?
+
+**Q: A Java 11 application uses G1 GC with a 200ms pause target. Under load, actual pauses reach 800ms. What factors could cause G1 to miss its pause target?**
+
+- G1 may miss its pause target due to: (1) String deduplication or reference processing taking too long. (2) Humongous allocations (objects > 50% of region size) directly allocated in old gen, causing concurrent marking to stall. (3) RSet (remembered set) coarsening — when regions have too many incoming references, RSets degrade to bitmaps. (4) `System.gc()` calls from libraries triggering full GC. (5) Insufficient `-XX:ConcGCThreads` causing concurrent marking to fall behind. Check GC logs for "to-space overflow" or "Evacuation Failure" messages.
+- **Interview follow-up:** How does G1's RSet coarsening work, and what are the performance implications of each coarsening level?
+
+**Q: A team uses `-Xmx10g` on a machine with 8 GB RAM. The application runs but occasionally becomes unresponsive for seconds at a time. What is happening?**
+
+- The JVM has configured a 10 GB heap but the machine has only 8 GB physical RAM. When the heap grows beyond available physical memory, the OS starts swapping memory to disk. Full GC in a swapped-out heap causes the JVM to page in all referenced objects from disk, resulting in multi-second pauses. Additionally, GC threads compete for I/O with the swapping subsystem. Fix: set `-Xmx` to a value that fits within physical RAM minus OS, metaspace, thread stacks, and off-heap buffers.
+- **Interview follow-up:** How can you monitor swap usage and GC pause correlation using operating system tools?
+
+**Q: A web application has a memory leak that causes `OutOfMemoryError: Java heap space` after several days. The heap dump shows millions of `java.util.HashMap$Node` objects referenced by a single `HashMap`. How do you find the root cause?**
+
+- Use a heap dump analyzer (Eclipse MAT, JProfiler) to find the path from GC roots to the large `HashMap`. The dominator tree will show which thread and which field holds the reference. Common causes: (1) A cache without eviction. (2) A session map that grows unboundedly. (3) A listener registration that is never removed. (4) An `ArrayList` from a streaming API that is never cleared. After identifying the retaining path, add eviction logic, use `WeakHashMap`, or clear the structure at appropriate points.
+- **Interview follow-up:** How would you distinguish between a heap leak (unintentional retention) and a native memory leak when the JVM crashes with a different OOM error?
+
+**Q: A developer observes that after a major GC, the old gen occupancy drops by only 20%. They expected more. What could cause most objects to survive major GC?**
+
+- Several factors: (1) Long-lived application caches or static collections that maintain strong references. (2) Thread-local storage — objects stored in `ThreadLocal` variables are considered reachable as long as the thread is alive. (3) Classloaders — in application servers, undeployed web apps may not release their classloaders, holding all loaded classes and static fields. (4) Direct buffers or JNI global references that prevent GC from reclaiming the associated Java objects. Use a heap dump to identify what is retaining the majority of the old generation.
+- **Interview follow-up:** How would you use `jmap -histo:live` vs a full heap dump to diagnose high survivor rates?
+
+**Q: A real-time system uses ZGC with a 64 GB heap. Every few hours, a single pause of 50ms appears in the GC logs. The team expected sub-1ms. What is the likely cause?**
+
+- ZGC's sub-1ms guarantee applies to the concurrent phases, but certain operations still cause STW pauses: (1) The initial mark pause (STW) — usually brief but can stretch if application threads are slow to reach safepoints. (2) The final mark pause — processing reference queues and weak roots. (3) The relocation start pause — preparing relocation sets. (4) OS-level issues like TLB shootdowns on large machines or transparent huge pages causing allocation stalls. Check the GC log for the phase name of the 50ms pause and examine safepoint cleanup times.
+- **Interview follow-up:** How does ZGC handle concurrent relocation, and what happens if the application's allocation rate exceeds ZGC's reclamation rate?
+
+**Q: A team using Parallel GC observes that after tuning, application throughput improved but 99th percentile latency worsened. Explain how GC tuning can trade throughput for latency.**
+
+- Parallel GC is throughput-oriented — it maximizes application time over GC time by running fewer but longer STW pauses. Tuning for throughput (e.g., increasing heap, reducing GC threads) reduces GC frequency but increases per-pause duration because more objects accumulate between collections. This directly impacts tail latency. To improve latency, switch to G1, ZGC, or Shenandoah, which trade some throughput for shorter, more frequent pauses. Measure both throughput and latency percentiles before and after tuning.
+- **Interview follow-up:** How would you set up a JMH benchmark to measure the throughput-versus-latency tradeoff of different GC configurations?
+
 ## Interview Questions
 
 - **What is the difference between minor, major, and full GC?**
@@ -143,6 +178,51 @@
 
 - **Compare ZGC and Shenandoah.**
   - Both are low-latency concurrent collectors targeting sub-1ms pauses. ZGC uses colored pointers (bits in the 64-bit reference) to encode marking state; Shenandoah uses a Brooks forwarding pointer (extra pointer field in object header). ZGC relies on load-barriers (executed on every object reference read), while Shenandoah uses a SATB (snapshot-at-beginning) algorithm with a similar barrier. ZGC currently supports more platforms (Linux x64, aarch64, Windows) while Shenandoah is in OpenJDK builds. ZGC handles larger heaps (up to 16 TB) more efficiently.
+
+- **What is the difference between a copying collector and a mark-compact collector?**
+  - A copying collector divides the heap into two semi-spaces and copies live objects from one space to the other, leaving the entire source space free. Allocation is fast (bump-pointer) but requires double the space. Mark-compact has a mark phase that identifies live objects, then a compact phase that slides them together in place, eliminating fragmentation without extra space overhead. Copying is used for young gen; mark-compact is used for old gen in Parallel GC.
+
+- **What is an allocation failure and how does it trigger GC?**
+  - An allocation failure occurs when a thread cannot allocate an object in Eden (or TLAB) because there is insufficient free space. The thread triggers a minor GC to reclaim space in the young generation. If promotion fails (old gen does not have space for surviving objects from young gen), a full GC is triggered. Allocation failures are the primary event that drives GC — the rate of allocation failures determines GC frequency.
+
+- **What is the difference between concurrent and parallel GC?**
+  - Parallel GC uses multiple threads for GC work but stops application threads (STW) during the operation. Concurrent GC performs most of its work while application threads continue running, reducing pause times. Parallel GC maximizes throughput (more CPU time for application). Concurrent GC minimizes latency (shorter pauses). G1 uses parallel STW for young collections and concurrent marking; ZGC and Shenandoah are almost fully concurrent.
+
+- **What is a safepoint and how does it affect GC pauses?**
+  - A safepoint is a point where all application threads have stopped, allowing the JVM to examine their state. Threads must reach a safepoint before a STW GC can begin. If a thread is blocked in a system call, in a long loop without safepoint polls, or executing a native method, it delays the safepoint and extends the GC pause. Use `-XX:+PrintSafepointStatistics` and `-XX:+SafepointTimeout` to detect slow safepoint reaches.
+
+- **What is the role of card tables in generational GC?**
+  - A card table (or remembered set) tracks which memory regions in the old generation contain references to young generation objects. During a minor GC, the collector scans only the dirty cards instead of the entire old gen to find cross-generational references. This optimization makes minor GCs faster by avoiding a full old gen scan. Cards are marked dirty when a store instruction writes a reference from old to young.
+
+- **How does G1's SATB (Snapshot-at-the-Beginning) marking work?**
+  - SATB takes a logical snapshot of the object graph at the start of the concurrent marking cycle. During concurrent marking, objects that were live at the snapshot time are marked even if they become unreachable later. This ensures no live object is missed but can cause floating garbage (objects that died after the snapshot are not reclaimed until the next cycle). G1 uses a SATB barrier that records all reference overwrites during marking.
+
+- **What is the difference between G1's young-only and mixed GC phases?**
+  - Young-only GC collects only the Eden and Survivor regions. After concurrent marking identifies regions with high garbage content, G1 transitions to mixed GC phases that collect both young and selected old gen regions. The number of mixed phases depends on how many old gen regions need collection. Once the old gen occupancy drops below the IHOP (Initiating Heap Occupancy Percent) threshold, G1 returns to young-only cycles.
+
+- **What is a concurrent mode failure in CMS?**
+  - Concurrent mode failure occurs when CMS's concurrent marking cannot complete before the old generation fills up. When this happens, CMS falls back to the Serial Old collector (STW mark-sweep-compact), causing a long pause. Mitigations: increase heap size, start CMS earlier (`-XX:CMSInitiatingOccupancyFraction`), or increase concurrent marking threads. CMS was deprecated in Java 9 and removed in Java 14.
+
+- **How does ZGC's colored pointer technique work?**
+  - ZGC uses 42-bit address space with 4 metadata bits in the object reference (colored pointers). The bits encode the marking state: Finalizable, Remapped, Marked1, Marked0. These bits are manipulated by load barriers to track whether an object needs relocation. When a load barrier detects a bad color, it fixes the reference on the fly. This avoids the need for a forwarding pointer in the object header.
+
+- **How does Shenandoah's Brooks pointer differ from ZGC's colored pointers?**
+  - Shenandoah stores a forwarding pointer (Brooks pointer) directly in the object header rather than encoding metadata in the reference bits. Every object has an extra word that points either to itself (not forwarded) or to the new copy (forwarded). The load barrier checks this pointer on every read. Brooks pointers add object header overhead but do not consume address bits, making them architecture-independent. ZGC's colored pointer approach requires 64-bit references and specific OS support.
+
+- **What is a humongous allocation in G1 and why is it special?**
+  - A humongous allocation is an object larger than 50% of the G1 region size. These objects are allocated directly in the old gen in a series of contiguous regions. Humongous objects are expensive: they cannot be moved (no compaction during evacuation), they complicate region accounting, and allocation can be slow because contiguous free regions must be found. G1 attempts to free humongous objects during concurrent marking. Avoid humongous allocations by sizing regions appropriately or breaking large objects into arrays of smaller references.
+
+- **What is adaptive tenuring and how does it work?**
+  - Adaptive tenuring automatically adjusts the tenuring threshold (the number of minor GCs an object survives before promotion to old gen) based on observed behavior. The JVM tracks the amount of data promoted and the Survivor space occupancy. If Survivor space is underutilized, the threshold is lowered (objects promote earlier). If Survivor is overflowing, the threshold is raised. The goal is to keep Survivor space efficiently used while avoiding premature promotion.
+
+- **What is the difference between `System.gc()` with and without `-XX:+ExplicitGCInvokesConcurrent`?**
+  - Without the flag, `System.gc()` triggers a full STW GC (Parallel full GC or Serial full GC depending on collector). With the flag, `System.gc()` triggers a concurrent cycle (e.g., G1 concurrent marking or CMS concurrent collection), reducing pause time. However, a concurrent cycle may not free as much memory as a full GC. For G1, this flag causes `System.gc()` to trigger a concurrent cycle rather than a full STW compact.
+
+- **What is GC ergonomics and how does it auto-tune the JVM?**
+  - GC ergonomics is the JVM's automatic tuning system that adjusts heap sizes, generation ratios, collector selection, and GC threads based on application behavior and hardware. It monitors allocation rates, pause times, throughput, and footprint. For example, the JVM can auto-size the young generation, adjust tenuring thresholds, and set TLAB sizes. Ergonomics can be controlled via `-XX:+UseAdaptiveSizePolicy`, `-XX:GCTimeRatio`, and `-XX:MaxGCPauseMillis`.
+
+- **How do you detect and diagnose a metaspace leak?**
+  - A metaspace leak occurs when classloaders cannot be garbage collected, causing class metadata to accumulate. Symptoms: gradual growth in metaspace usage, eventual `OutOfMemoryError: Metaspace`. Diagnose with: `-XX:+TraceClassLoading -XX:+TraceClassUnloading` to see which classes are loaded and unloaded. Use `jmap -clstats <pid>` to inspect classloader statistics. Enable `-Xlog:gc+metaspace*` in Java 9+). Common causes: cached classloaders, AOP-generated classes, and JDK proxy classes held by long-lived containers.
 
 ## Developer Recommendations
 

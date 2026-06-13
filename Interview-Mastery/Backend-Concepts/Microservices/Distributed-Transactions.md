@@ -144,4 +144,85 @@
 
 - **Avoid distributed transactions where possible by redesigning the workflow**
   - Most business workflows can be redesigned to avoid distributed transactions. If a workflow spans services, ask: can this be done asynchronously? Can the data be owned by one service?
-  - Implementation: Analyse the transaction rate, latency requirements, and consistency needs. If latency tolerance is > 1 second and eventual consistency is acceptable, use Sagas or async events. Only reach for 2PC when strong atomicity is truly non-negotiable.
+   - Implementation: Analyse the transaction rate, latency requirements, and consistency needs. If latency tolerance is > 1 second and eventual consistency is acceptable, use Sagas or async events. Only reach for 2PC when strong atomicity is truly non-negotiable.
+
+## Scenario-Based Questions
+
+**Q: Your team implements 2PC for a transaction involving three services: Inventory, Payment, and Shipping. The coordinator sends "prepare" to all three. Inventory and Payment vote "yes", but Shipping votes "abort" because its database is overloaded. What happens?**
+
+- The coordinator sends "abort" to all participants. Inventory and Payment roll back their prepared transactions and release locks. Shipping already aborted, so no action needed. The transaction is fully rolled back.
+- **Interview follow-up:** What happens if the coordinator's abort message to Inventory is lost due to a network partition — how does Inventory eventually learn about the abort?
+
+**Q: You're designing an order placement flow using the Outbox pattern. The service writes the order to the `orders` table and an event to the `outbox` table in the same local transaction. A CDC pipeline crashes before publishing the outbox event. What happens?**
+
+- Nothing permanent — the outbox event is already persisted in the database. When the CDC pipeline restarts, it resumes reading from the last committed WAL position and publishes the event. This is a key advantage of CDC-based outbox: the event is never lost because it's stored durably in the database transaction log.
+- **Interview follow-up:** How does Debezium track its position in the WAL so that a crash doesn't cause it to skip or duplicate events?
+
+**Q: In a TCC implementation for booking a hotel room, the Try phase reserves the room, but before the Confirm phase executes, the customer's credit card expires. How does your system handle this?**
+
+- The Confirm phase should validate all preconditions before finalizing. If the card is expired, Confirm should fail and trigger the Cancel phase, which releases the room reservation. TCC assumes the Confirm phase can still fail (though it should be rare). The key is that the Try phase only reserves, so releasing via Cancel has no financial impact.
+- **Interview follow-up:** What if the Cancel phase itself fails because the hotel inventory service is down — how do you prevent a permanently reserved room?
+
+**Q: Your system uses both 2PC for financial settlements and Sagas for order workflows. An operator accidentally configures a Saga as a 2PC transaction. What problems would you expect to see?**
+
+- The Saga would block participants because 2PC holds locks during the prepare phase. Long-running Saga steps would exacerbate blocking intervals, causing deadlocks and reduced throughput. The transaction coordinator would become a bottleneck. Eventually, participants would timeout and abort, causing frequent rollbacks.
+- **Interview follow-up:** How would you detect such a misconfiguration in production before users report issues?
+
+**Q: A microservice uses the Outbox pattern with a polling-based relay (not CDC). The relay polls every 100ms and publishes to Kafka. During a traffic spike, the outbox table grows to 100,000 rows before the relay catches up. What issues arise?**
+
+- The relay may be overwhelmed by the backlog, causing increasing lag. If the relay crashes, it would need to paginate through 100,000+ rows on restart, potentially causing duplicate publication if it uses non-transactional offsets. The outbox table also grows the database, potentially impacting query performance on the main tables if they share the same storage.
+- **Interview follow-up:** How would you modify the polling relay to handle a large backlog more efficiently without losing events?
+
+**Q: You're implementing a distributed transaction across a relational database and a message queue (e.g., JMS). The database votes "yes" but the message queue cannot prepare because it's full. What does 2PC do?**
+
+- The coordinator receives the abort vote from the message queue and sends an abort to all participants, including the database. The database rolls back its prepared transaction and releases locks. The transaction is fully aborted. This demonstrates 2PC's atomicity guarantee even when the decision is driven by a capacity issue in one participant.
+- **Interview follow-up:** How would you instrument the system to alert operators that the message queue capacity was the root cause of the frequent transaction aborts?
+
+**Q: Your team is building a payment reconciliation system that must have strong consistency. A senior engineer proposes using 2PC. The transaction involves a PostgreSQL database and an external REST API. Why is this problematic?**
+
+- External REST APIs typically do not support 2PC's prepare/commit protocol (they have no transaction coordinator interface). The REST API would be treated as a "last resource" in a Last Resource Commit (LRC) optimization, which can lead to heuristic outcomes if the coordinator crashes after committing the database but before calling the REST API. This violates atomicity.
+- **Interview follow-up:** What alternatives would you propose that still provide strong consistency guarantees for this scenario?
+
+## Interview Questions
+
+- **What is the difference between 2PC and TCC?**
+  - 2PC uses a two-phase protocol (prepare, commit) with physical locks held during the prepare phase. TCC uses three phases (Try, Confirm, Cancel) where Try reserves logical resources without physical locks. TCC is non-blocking and more performant, but requires participants to implement reservation logic. 2PC provides stronger atomicity guarantees but reduces availability due to blocking.
+
+- **What is the "dual-write problem" in microservices?**
+  - The dual-write problem occurs when a service must write to its database and send a message/event in two separate operations. If the database write succeeds but the message send fails (or vice versa), the system becomes inconsistent. The Outbox pattern solves this by writing the event to a database table in the same local transaction as the domain entity.
+
+- **How does the Outbox pattern differ from CDC?**
+  - The Outbox pattern is a design approach: write events to a database table within the same transaction as the domain change. CDC is an implementation mechanism: read database transaction logs to capture changes. CDC can be used to implement the Outbox pattern (streaming outbox events from the WAL), but CDC is also useful for other use cases like data replication and audit logging.
+
+- **What is idempotency and why is it critical in distributed transactions?**
+  - Idempotency means that executing an operation multiple times produces the same result as executing it once. In distributed transactions, network failures, retries, and timeouts mean any operation may be executed multiple times. Idempotent operations (using unique keys, conditional updates, or dedup tables) ensure that retries do not cause unintended side effects like double charges or duplicate inventory releases.
+
+- **What is the role of a transaction coordinator in 2PC?**
+  - The transaction coordinator manages the lifecycle of a 2PC transaction. It sends prepare requests to all participants, collects votes, makes the commit/abort decision, and sends the final decision. It persists the transaction log to survive crashes. If the coordinator fails, participants remain blocked until it recovers and resolves in-doubt transactions.
+
+- **What are heuristic decisions in distributed transactions?**
+  - Heuristic decisions occur when a participant independently decides to commit or abort an in-doubt transaction without waiting for the coordinator's decision (usually due to a timeout or administrator intervention). Heuristic outcomes can violate atomicity if different participants make different heuristic decisions. Heuristic commits are particularly dangerous because they can leave the system in an inconsistent state.
+
+- **What is the Last Resource Commit (LRC) optimization?**
+  - LRC is an optimization for 2PC where one participant (typically a non-XA resource like a REST API or message queue) is treated as the "last resource". The coordinator commits all XA resources in phase 1, then commits the last resource. If the coordinator crashes between these steps, a heuristic outcome is possible. LRC improves performance but sacrifices some atomicity guarantees.
+
+- **What is the "phantom inventory" problem in Sagas?**
+  - Phantom inventory occurs when an inventory item is reserved by a Saga step, then released by a compensating transaction, but during the window between release and notification, another customer sees the item as available and places an order. The released inventory can appear as phantom stock to concurrent operations. Solutions include optimistic concurrency control, versioned inventory records, and the "pending" state pattern.
+
+- **How do you handle timeouts in distributed transactions?**
+  - In 2PC, each participant configures a transaction timeout. If the prepare or commit phase exceeds the timeout, the participant aborts unilaterally (heuristic abort). In Sagas, each step has a timeout; if a step doesn't complete within the timeout, the orchestrator triggers compensation for all completed steps. Both approaches require monitoring and alerting for timeout events.
+
+- **What is the "outbox relay" and how does it ensure reliable delivery?**
+  - The outbox relay is a process that reads events from the outbox table and publishes them to a message broker. It can be implemented as a polling process (periodically querying the outbox table) or a CDC pipeline (streaming from the WAL). The relay ensures at-least-once delivery by tracking its position (offset) and retrying failed publications. Consumers must be idempotent to handle duplicate deliveries.
+
+- **What is the difference between at-least-once and exactly-once delivery?**
+  - At-least-once delivery guarantees that every message is delivered at least once, but duplicates may occur. Exactly-once delivery guarantees no duplicates and no lost messages. In practice, exactly-once is extremely difficult to achieve in distributed systems. Most systems use at-least-once delivery combined with idempotent consumers to achieve exactly-once processing semantics.
+
+- **How does database transaction log (WAL) replication relate to distributed transactions?**
+  - WAL replication captures every change made to a database and can be used to replicate data to followers or stream changes to downstream systems. In the context of distributed transactions, WAL-based CDC enables the Outbox pattern without polling. However, WAL replication does not by itself solve distributed transaction coordination — it only propagates changes from a single database.
+
+- **What is the "scheduling" approach as an alternative to distributed transactions?**
+  - The scheduling approach breaks a distributed operation into small, idempotent tasks that are executed by a reliable scheduler (e.g., Quartz, Temporal, or a simple cron job). Each task is retried until success. This avoids distributed transactions entirely by relying on deterministic retry rather than atomic coordination. It works well for batch-oriented workflows but adds latency for real-time operations.
+
+- **Can you use 2PC with NoSQL databases?**
+  - Most NoSQL databases (MongoDB, Cassandra, DynamoDB) do not support XA/2PC. Some provide alternatives: MongoDB offers multi-document ACID transactions within a replica set (not across shards), Cassandra offers lightweight transactions and batch operations (not full 2PC), DynamoDB offers transactions within a single account/region. For cross-database coordination, Sagas are typically the only viable option with NoSQL stores.

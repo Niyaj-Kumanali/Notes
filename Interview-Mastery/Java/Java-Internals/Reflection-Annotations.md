@@ -191,6 +191,41 @@
 - In Java 9+, `Package.getPackage()` may return `null` for packages in named modules because the method only searches the caller's class loader for packages. The module system no longer automatically exposes all packages. Fix: use `Class.forName("com.example.SomeKnownClass").getPackage()` to get the `Package` object via a known class, then check the annotation. Better: avoid package-level annotations altogether.
 - **Interview follow-up:** What other reflection APIs changed behavior in the Java 9+ module system?
 
+**Q: A developer uses `Field.setAccessible(true)` to modify a private static final field in a Java 8 library class at runtime. After migrating to Java 17, the call throws `InaccessibleObjectException`. What changed and how do you fix it?**
+
+- Java 9 introduced the module system (JPMS). By default, named modules encapsulate their packages, preventing reflective access to private members of classes in other modules. `setAccessible(true)` fails because the module `java.base` (or the library's module) does not open the affected package. Fixes: (1) Add JVM flags `--add-opens <module>/<package>=<accessing-module>`. (2) If you control the library, add an `open` or `opens` directive in `module-info.java`. (3) Consider whether the design can avoid reflective modification of private final fields.
+- **Interview follow-up:** How does `--illegal-access=permit` (Java 9–16) differ from the Java 17+ behavior?
+
+**Q: A developer creates a dynamic proxy for a `List<String>` interface and the `add(String)` method appears to work, but calling `addAll(Collection<? extends String>)` throws `ClassCastException`. Why?**
+
+- The `InvocationHandler` is likely passing the arguments directly to the target method via `method.invoke(target, args)`. For `addAll`, the varargs argument might be passed as an `Object[]` containing a single `Collection` instead of the `Collection` itself due to incorrect argument forwarding. The fix: ensure the handler correctly forwards the method arguments array without wrapping. Also verify that `Proxy.isProxyClass()` and correct casting are used.
+- **Interview follow-up:** How does the `InvocationHandler` receive arguments for methods with varargs versus methods with array parameters?
+
+**Q: An annotation processor generates code at compile time using `AbstractProcessor`. The generated code references a type that exists at compile time but is removed from the classpath at runtime. What happens and how do you prevent this?**
+
+- If the generated code imports a type that is absent at runtime, the JVM throws `NoClassDefFoundError` when the generated code is loaded. The annotation processor should ensure that all referenced types are either part of the standard library, provided as compile-only dependencies, or inlined as constants during code generation. Use the `Filer` API to create the generated source file with fully qualified imports, and validate availability via `Elements.getTypeElement()` during processing.
+- **Interview follow-up:** How would you design an annotation processor to fail gracefully when its required types are missing?
+
+**Q: A testing framework uses `MethodHandles.lookup()` to find and invoke `@BeforeEach` and `@AfterEach` lifecycle methods. On Java 9+, the lookup for a method in a nested class fails with `IllegalAccessException`. Why?**
+
+- In Java 9+, `Lookup` has restricted access. A `Lookup` object obtained from one class cannot access private members of another class unless the lookup class is in the same module and has the appropriate access. For nested classes, the JVM treats them as separate classes. The fix: use `MethodHandles.privateLookupIn(targetClass, lookup)` (Java 9+) which produces a lookup with full access to `targetClass`. Alternatively, use `MethodHandles.lookup().in(nestedClass)` for access to protected/public members.
+- **Interview follow-up:** How does `privateLookupIn` differ from calling `MethodHandles.lookup()` directly in each class?
+
+**Q: A library dynamically generates classes using bytecode manipulation (ASM). The generated class implements an interface, but `instanceof` checks against that interface fail intermittently. What is the likely cause?**
+
+- The generated class was loaded by a different classloader than the interface. In Java, a class is uniquely identified by (classloader, fully-qualified name). If the generated class is loaded by a custom classloader while the interface is loaded by the application classloader, `instanceof` returns false because the JVM sees them as different types. Fix: ensure the generated class is loaded by the same classloader that loaded the interface, typically via `proxyClassLoader.loadClass()` or by specifying the target classloader in the generation API.
+- **Interview follow-up:** How does `Proxy.newProxyInstance` handle classloader resolution, and what classloader does it use for the generated proxy class?
+
+**Q: A developer uses `Class.forName("com.example.DynamicClass")` in a plugin system where plugins are loaded from JAR files. After the plugin is unloaded, the class is still accessible. What is the memory issue?**
+
+- `Class.forName()` loads the class into the caller's classloader, which may be the application classloader — preventing the plugin's classloader and all its classes from being garbage collected. This causes a classloader leak. Fix: use a dedicated `URLClassLoader` per plugin, load classes through that classloader, and call `close()` on the classloader when the plugin is unloaded. For class lookup, use `classLoader.loadClass("com.example.DynamicClass")` instead of `Class.forName()`.
+- **Interview follow-up:** How does the JVM's class unloading mechanism detect that a classloader is no longer reachable?
+
+**Q: A developer defines a custom annotation `@Auditable` with `@Retention(RUNTIME)` and uses `getAnnotation()` in an AOP interceptor. The interceptor returns `null` even though the annotation is present in the source code. What should they check?**
+
+- The most common cause is applying the annotation to a method that is inherited from an interface. `getAnnotation()` on a class method does not inherit annotations from interface methods. The developer should check whether `@Auditable` is placed on the interface method or the implementation method. If on the interface, the annotation processor should use `Spring's AnnotationUtils.findAnnotation()` or explicitly walk the interface hierarchy. Also verify that the retention policy is RUNTIME, not CLASS.
+- **Interview follow-up:** How does Spring's `AnnotationUtils.findAnnotation()` differ from `java.lang.Class.getAnnotation()` in terms of inherited annotation resolution?
+
 ## Interview Questions
 
 - **What is the difference between `getMethods()` and `getDeclaredMethods()`?**
@@ -207,6 +242,51 @@
 
 - **What is a `MethodHandle` and how does it differ from `java.lang.reflect.Method`?**
   - A `MethodHandle` is a typed, directly executable reference to a method, field, or constructor. Unlike `Method`, it performs access checks at lookup time (not invocation time). It is faster because the JIT can more easily inline the call — `MethodHandle` is a low-level pointer that can be intrinsified.
+
+- **What is the difference between `@Inherited` and `@Repeatable`?**
+  - `@Inherited` causes an annotation on a superclass to be inherited by subclasses (class-level only). `@Repeatable` allows the same annotation to appear multiple times on the same element. They serve completely different purposes: one controls annotation propagation through inheritance, the other allows multiple instances of the same annotation. Both can be used together on the same annotation type.
+
+- **How does `Proxy.newProxyInstance` generate the proxy class?**
+  - `Proxy.newProxyInstance` calls `Proxy.getProxyClass` which generates a class at runtime. The generated class extends `Proxy` and implements the specified interfaces. It delegates every method call to an `InvocationHandler.invoke()` call. The class is cached (weakly) for each unique combination of interfaces. The bytecode is generated using internal sun.misc or java.lang.reflect.Proxy methods, not public ASM — the implementation is JVM-specific.
+
+- **What is the difference between `getAnnotation()` and `getDeclaredAnnotation()`?**
+  - `getAnnotation()` returns the annotation if present on the element or inherited from a superclass (for class-level `@Inherited` annotations). `getDeclaredAnnotation()` returns the annotation only if directly present on the element, ignoring inherited annotations. For non-inherited annotations, both return the same result.
+
+- **What are type-use annotations and where can they be applied?**
+  - Type-use annotations (Java 8+, `@Target(ElementType.TYPE_USE)`) can appear anywhere a type is used: generic type arguments (`List<@NonNull String>`), array levels (`String @NonNull []`), method return types, throws clauses, and `new` expressions (`new @NonNull MyClass()`). They enable compile-time type checking frameworks like Checker Framework and are retained in bytecode for runtime processing.
+
+- **What is the `Unsafe` class and why is it considered dangerous for reflection-like operations?**
+  - `sun.misc.Unsafe` provides low-level operations: direct memory access, object field offset calculation, CAS operations, and class loading without initialization. It bypasses Java's safety guarantees — it can corrupt memory, create objects without calling constructors, and break encapsulation. Its use is strongly discouraged and will be restricted in future JDK versions. `VarHandle` (Java 9+) is the safe replacement for most Unsafe-based CAS/field operations.
+
+- **How does Spring resolve constructor parameters for `@Autowired` injection?**
+  - Spring uses `Class.getDeclaredConstructors()` to find all constructors. It identifies the constructor annotated with `@Autowired` (or the default constructor if none). For each parameter, it resolves the type using `ParameterizedType` if available (to handle generic types like `List<String>`) and looks up the matching bean in the application context. Constructor injection is preferred over field injection because it enables immutable fields and easier testing.
+
+- **What is the difference between `MethodHandle.invoke()` and `MethodHandle.invokeExact()`?**
+  - `invoke()` allows type adaptation: the JIT can insert boxing, unboxing, and widening conversions to match the method type. `invokeExact()` requires an exact type match — no conversions are performed. `invokeExact()` is faster because no adaptation overhead is incurred. Use `invoke()` for convenience and `invokeExact()` in performance-critical code where the exact method type is known at the call site.
+
+- **How does the `javax.annotation.processing.AbstractProcessor` work?**
+  - An annotation processor extends `AbstractProcessor` and overrides `process()`. It is discovered via META-INF/services or the `-processor` javac flag. The `RoundEnvironment` provides elements (types, methods, fields) annotated with the requested annotation types. The processor can generate new source files, create compiler warnings/errors, and check for annotation misuse. Processors run in rounds — one round per annotation processing iteration.
+
+- **What is the difference between `Class#isInstance()` and `instanceof`?**
+  - `Class.isInstance(obj)` dynamically checks if `obj` is an instance of the class represented by the `Class` object. It is equivalent to `obj instanceof MyClass` but works with a dynamically determined class. Both perform the same runtime check. `isInstance()` is useful in reflective code where the target class is unknown at compile time, such as serialization frameworks.
+
+- **How does `Array.newInstance()` work, and when would you use it?**
+  - `Array.newInstance(Class<?> componentType, int length)` creates a new array with the specified component type at runtime. It is used when the array type is not known at compile time — for example, in a generic method that needs to create an array of type `T[]`. Since `new T[length]` is illegal due to erasure, `Array.newInstance(componentType, length)` is the reflective alternative.
+
+- **What is a `ClassValue` and how does it relate to `ThreadLocal`?**
+  - `ClassValue` is a mechanism for associating values with classes, similar to `ThreadLocal` for threads. It provides `get(Class<?>)` which lazily computes a value per class using `computeValue(Class<?>)`. It uses a `WeakHashMap` internally, allowing classes to be garbage collected. It is ideal for caching reflective metadata per class without causing classloader leaks, unlike static `ConcurrentHashMap` caches.
+
+- **How does `java.lang.invoke.LambdaMetafactory` create lambda instances?**
+  - `LambdaMetafactory.metafactory()` is the bootstrap method for `invokedynamic` call sites of lambda expressions. It receives the method handle of the lambda body, the target functional interface, and the captured arguments. It generates an inner class (or uses method handles directly) that implements the functional interface. The resulting `CallSite` is linked to the `invokedynamic` instruction, and subsequent calls use the linked method handle directly.
+
+- **What is the difference between `@Retention(RetentionPolicy.CLASS)` and `RetentionPolicy.RUNTIME` in terms of annotation processing?**
+  - CLASS-retained annotations are available in `.class` files and to compile-time annotation processors but not via runtime reflection. RUNTIME-retained annotations are also available at runtime via `getAnnotation()`. CLASS is suitable for code generation tools (Lombok, AutoValue) where runtime access is unnecessary. RUNTIME is required for frameworks like Spring and JUnit that inspect annotations reflectively at runtime.
+
+- **How do you create a custom annotation that validates method parameters at compile time?**
+  - Create the annotation with `@Target(ElementType.PARAMETER)` and `@Retention(RetentionPolicy.CLASS)`. Write an `AbstractProcessor` that implements `process()`, checks `RoundEnvironment.getElementsAnnotatedWith(YourAnnotation.class)`, and casts elements to `VariableElement`. Use `Elements` utility to verify parameter types, check enclosing method signatures, and produce `javac` error messages via `processingEnv.getMessager().printMessage(Diagnostic.Kind.ERROR, ...)`.
+
+- **What happens when you call `Method.invoke()` on a method that throws a checked exception not declared in the calling code?**
+  - The actual exception is wrapped in `InvocationTargetException`. The caller catches `InvocationTargetException` and calls `getCause()` to retrieve the original exception. The original exception is an `InvocationTargetException`'s cause and can be of any type (checked or unchecked). The caller can then rethrow the cause using exception chaining or handle it specifically. This design allows reflective invocation to bypass compile-time checked exception checking.
 
 ## Developer Recommendations
 

@@ -220,6 +220,36 @@ public class OrderSagaOrchestrator {
 10. **What is the role of idempotency in Sagas?**
     - A: Idempotency allows safe retry of both forward commands and compensating actions. Every command carries a unique ID. Services check if they've already processed an ID before executing. This prevents duplicate charges, duplicate inventory releases, and enables reliable recovery from network failures.
 
+11. **How do you ensure exactly-once processing in a Saga?**
+    - A: Exactly-once processing is achieved through idempotency, not through delivery guarantees. Every command carries a unique idempotency key (saga_id + step_id). Services check a dedup store before executing. The message broker provides at-least-once delivery; the service's dedup check converts it to effectively-once processing. Dedup records must be persisted durably with appropriate TTL to handle crash recovery.
+
+12. **What is the difference between a Saga and a State Machine?**
+    - A: A Saga is a specific pattern for managing distributed transactions with compensating actions. A State Machine is a general computational model that defines states and transitions. Sagas can be implemented as state machines — each step is a state, and transitions are defined by success or failure of step execution. Frameworks like Temporal and Camunda use state machines to implement Saga orchestration, providing persistence, retry, and recovery capabilities.
+
+13. **How do you handle sagas that span different teams' services with different tech stacks?**
+    - A: Define a clear saga protocol contract: message format (Avro, Protobuf), command/response schemas, timeout values, idempotency key format, and error codes. Each team implements the contract in their language (Java, Go, Python, etc.). The orchestrator communicates via a technology-agnostic message broker (Kafka). Use contract testing (Pact) to verify each service implements the saga contract correctly.
+
+14. **What are the failure modes of a choreography-based Saga?**
+    - A: (1) Event ordering: events may arrive out of order, causing incorrect state transitions. (2) Cyclic compensation: if step A's failure triggers step B's compensation, which triggers step A's compensation, creating a loop. (3) Event loss: if an event is lost, the saga hangs indefinitely with no recovery path. (4) Debugging: tracing the saga flow requires reading events across multiple services' logs. Mitigations: event ordering keys, idempotent compensations with state checks, persistent event logs, and monitoring.
+
+15. **How do you model long-running sagas that involve human approval (e.g., loan application)?**
+    - A: Split the saga into two phases: (1) operational saga (reserve data, hold resources) with a limited timeout, and (2) human approval workflow running in parallel. When approval is received, the operational saga is instructed to continue or compensate. If the timeout expires before approval, the saga automatically compensates. The human approval step should not be part of the saga's timeout calculation — it's an external wait.
+
+16. **What is the performance impact of persisting saga state on every step?**
+    - A: Persisting saga state on every step adds latency (DB write per step) and load (concurrent writes to the saga state table). Optimisations: (1) Batch state updates if multiple steps complete quickly. (2) Use an append-only saga event log instead of updating a single state row. (3) For the orchestrator, cache the active saga state in Redis with periodic persistence to the database. (4) Use a database with fast writes (DynamoDB, Cassandra) for saga state storage.
+
+17. **How do you test a saga's failure scenarios without a real distributed environment?**
+    - A: (1) Unit test each step's logic and compensation in isolation. (2) Integration test the saga orchestrator with mocked service clients (WireMock, MockServer). (3) Integration test the message flow with an embedded Kafka (Testcontainers). (4) End-to-end test in a staging environment with fault injection (Toxiproxy, Chaos Mesh). (5) Chaos experiment in production during low traffic with proper monitoring and rollback plans.
+
+18. **How does a saga handle concurrent requests for the same resource (e.g., two orders for the last item in stock)?**
+    - A: The inventory service must use optimistic concurrency control. When the first saga's ReserveInventory command arrives, it decrements the stock count using an atomic operation (e.g., `UPDATE products SET stock = stock - 1 WHERE stock > 0 AND id = ?`). The second saga's command will affect zero rows if stock is already 0, and the service replies with failure. The orchestrator compensates the second saga. This prevents overselling without distributed locks.
+
+19. **What is a "saga log" and why is it important?**
+    - A: A saga log is an append-only record of every event in a saga's lifecycle: step started, step completed, step failed, compensation started, compensation completed. It serves as an audit trail for compliance, a debugging tool for incident response, and a recovery source for saga reconstruction. The saga log should be immutable and stored separately from the saga state (e.g., in a dedicated events table or a streaming platform like Kafka).
+
+20. **Can a saga participant be part of multiple concurrent sagas?**
+    - A: Yes, a participant must handle concurrent sagas by using unique saga IDs and idempotency keys per saga. Each reservation or action is tagged with its saga ID. The participant's state (e.g., inventory reservation) is associated with a specific saga. If saga A compensates while saga B is also active, they don't conflict because each operates on its own reservation records. Concurrent access to the same resource is handled by the participant's concurrency control (optimistic locking, atomic updates).
+
 ---
 
 ## Developer Recommendations

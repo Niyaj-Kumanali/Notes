@@ -148,6 +148,41 @@
 - Generic array creation is illegal because arrays are reified (they know their component type at runtime) while generics are erased. Allowing `new List<String>[5]` would let the runtime believe the array's component type is `List<String>`, but erasure means only raw `List` exists. This could be exploited to violate type safety — for example, assigning a `List<Integer>` to an element and then reading a `String` with no ArrayStoreException.
 - **Interview follow-up:** Can you construct a code example where generic array creation would cause heap pollution without a compiler error, if the JVM allowed it?
 
+**Q: A developer uses `List<? extends Number>` as a method parameter and tries to add a new `Integer` value inside the method, but the compiler rejects it. Why?**
+
+- The wildcard `? extends Number` makes the list a producer only — you cannot add elements (except null) because the compiler does not know the specific subtype of Number. If the actual runtime type were `List<Double>`, adding an Integer would break heap safety. To accept elements, use `? super Number` (consumer) instead, following PECS.
+- **Interview follow-up:** How would you design a method that both reads from and writes to a generic collection parameter?
+
+**Q: A team creates `Wrapper<int>` but the compiler rejects it. Why does Java not allow primitives as type arguments?**
+
+- Type arguments must be reference types because generics work through erasure — at runtime, type parameters are replaced with `Object` or their bounds. Primitives are not subtypes of `Object`. Autoboxing to `Integer` handles assignment but does not change the generic type constraint. Project Valhalla aims to address this with value types and specialized generics.
+- **Interview follow-up:** How would you implement a generic collection that avoids boxing overhead for primitives without Valhalla?
+
+**Q: A utility method declares `<T> void sort(List<T> list, Comparator<? super T> cmp)`. A caller passes `List<Integer>` and `Comparator<Number>`. Does this compile?**
+
+- Yes. The comparator parameter uses `? super T`, where T is inferred as Integer. `Comparator<Number>` is valid because Number is a supertype of Integer. The wildcard accepts any comparator whose type is T or a supertype of T (contravariance). This follows PECS — the comparator consumes T values to compare them.
+- **Interview follow-up:** What happens if the comparator parameter is changed to `Comparator<T>` instead of `Comparator<? super T>`?
+
+**Q: In a generic class `Box<T extends Comparable<T>>`, can you create `Box<Object>`?**
+
+- No, because `Object` does not implement `Comparable<Object>`. The bounded type parameter `<T extends Comparable<T>>` requires that T implements the Comparable interface parameterized with itself. Only types satisfying this self-referential bound are valid as type arguments.
+- **Interview follow-up:** How would you redesign the bound so that sibling subclasses can be compared with each other?
+
+**Q: An API returns `List<List<String>>` and a caller assigns it to `List<List<?>>`. Is this assignment safe?**
+
+- Yes, this is safe. `List<String>` is a subtype of `List<?>`, so the assignment is valid. However, through the `List<List<?>>` reference you can only read elements safely — you cannot add arbitrary `List<T>` values because the wildcard prevents insertion of unknown types. The compiler preserves type safety through capture constraints.
+- **Interview follow-up:** What is the difference between `List<List<?>>` and `List<? extends List<?>>` in terms of what you can add?
+
+**Q: A library uses `Class<T>` as a type token: `public <T> T create(Class<T> type)`. A caller passes a raw `Class` (without angle brackets). What happens?**
+
+- Using the raw type suppresses generic type checking. The compiler emits an unchecked warning, and the method's return type is erased to `Object`. The caller needs an explicit cast to recover the desired type. Fix: always specify the type argument, e.g., `Class<MyClass>` or `Class<?>`. Type tokens rely on the caller to provide the correct reified type.
+- **Interview follow-up:** How does Guice's `TypeLiteral<T>` solve the problem that `Class<T>` cannot represent parameterized types?
+
+**Q: A developer writes `static <T> T[] toArray(List<T> list)` and tries `return (T[]) list.toArray()`. Under what circumstances does this fail at runtime?**
+
+- The cast `(T[])` is an unchecked cast due to erasure — at runtime T is erased to `Object`, so the cast becomes `(Object[])` and the actual array is `Object[]`. If the caller assigns the result to `String[]`, a `ClassCastException` occurs at the assignment point. Use `list.toArray(T[]::new)` with an array constructor reference to create the correct reified type at runtime.
+- **Interview follow-up:** How does `Arrays.copyOf` and the `Array.newInstance` reflective method help create type-safe arrays in generic code?
+
 ## Interview Questions
 
 - **Explain how type erasure works in Java and give an example of a problem it causes.**
@@ -164,6 +199,51 @@
 
 - **What is the difference between `List<?>` and `List<Object>`?**
   - `List<?>` is a homogenous list of unknown type — you can read elements as `Object` but cannot add any element (except `null`). `List<Object>` is a list that explicitly accepts any `Object` instance — you can both read and write `Object` values. `List<String>` is a subtype of `List<?>` but not of `List<Object>`.
+
+- **What is the difference between a bounded type parameter and a wildcard?**
+  - A bounded type parameter (`<T extends Number>`) declares a named type variable with an upper bound used within a class or method body. A wildcard (`? extends Number`) is an anonymous type argument used at use sites. Type parameters are used for relationships between multiple arguments or return types; wildcards express variance constraints without introducing a named type.
+
+- **Can you use generics with enums or anonymous classes?**
+  - Enums cannot declare type parameters because the compiler implicitly extends `Enum<E>`, and generics do not support the kind of self-referential inheritance enums require. Anonymous classes cannot declare type parameters either — their generic types are inferred from the parent type at creation. Workarounds include using generic interfaces that enums implement or passing type information through constructor arguments.
+
+- **What is the impact of type erasure on method overloading?**
+  - Erasure prevents overloading methods that differ only by generic type parameters. For example, `void process(List<String>)` and `void process(List<Integer>)` erase to `void process(List)`, causing a compile error. This is why generic specialization cannot use method overloading — the JVM's method dispatch is based on erased signatures.
+
+- **How does the compiler infer type parameters for a generic method?**
+  - The compiler performs type inference by examining method arguments and the expected return type (target type inference, enhanced in Java 8). It finds the smallest type satisfying all constraints. For example, `Collections.emptyList()` with `List<String> list = Collections.emptyList()` infers String from the assignment target. If inference is ambiguous, the developer must provide an explicit type witness.
+
+- **What is the typesafe heterogeneous container pattern?**
+  - Proposed by Joshua Bloch, this pattern uses `Class<T>` as keys in a `Map<Class<?>, Object>` to store and retrieve values of arbitrary types in a type-safe manner. Each value is cast to the type represented by its key. Example: `public <T> void put(Class<T> type, T instance)` and `public <T> T get(Class<T> type)`. The unchecked cast is isolated inside the container, safe if the key-value contract is maintained.
+
+- **How does the compiler handle `@SuppressWarnings("unchecked")`?**
+  - It suppresses compiler warnings for unchecked operations — situations where the compiler cannot prove type safety due to erasure. Common cases: casting raw types to parameterized types, generic varargs, and unchecked conversions. The annotation does not make the code safe; it only silences the warning. Each use should be accompanied by manual verification of type safety.
+
+- **What is the difference between `List<? extends T>` and `List<T>` as a method parameter?**
+  - `List<T>` accepts exactly `List<T>` (invariant) — you can both read and write T elements. `List<? extends T>` accepts `List` of any subtype of T (covariant) — you can only read T elements (adding anything except null is forbidden). Use `List<T>` when the method both reads and writes; use `List<? extends T>` when it only reads.
+
+- **How do you create a generic method with two type parameters that have a mutual constraint?**
+  - Mutual constraints are expressed using bounded type parameters referencing each other. Example: `<T extends Comparable<? super T>>` ensures T can compare with itself or its supertypes. Another pattern: `<A, B extends A>` enforces that B is a subtype of A. The compiler checks these bounds during type inference and rejects arguments that violate the relationship.
+
+- **What is the capture of `?` in Java generics?**
+  - When the compiler encounters a wildcard, it creates an anonymous "capture" variable representing the unknown type. For `List<?>`, the compiler internally represents it as `List<capture#1 of ?>`. This capture prevents unsafe operations — you cannot add elements because the capture type is unknown. Each wildcard usage gets its own capture variable, enforcing type safety per use site.
+
+- **Can a class implement multiple parameterizations of the same generic interface?**
+  - No. A class cannot implement both `Comparable<Person>` and `Comparable<Employee>` because both erase to `Comparable`, creating a conflict. The compiler rejects this. However, a class can implement different generic interfaces (e.g., `Consumer<Person>` and `Supplier<Employee>`) because they have different erased signatures.
+
+- **How does Java infer types for chained generic method calls?**
+  - For chained calls like `foo().bar()`, the compiler infers left-to-right. If `foo()` returns `List<T>` and `bar()` expects `List<String>`, the compiler may backtrack and re-infer T as String. Java 8+ enhanced this with target-type inference and poly expressions. If inference fails, explicit type witnesses (`<String>foo()`) resolve the ambiguity.
+
+- **What is the difference between `? extends Object` and an unbounded `?`?**
+  - They are semantically equivalent — both accept any type and allow reading as Object. However, unbounded `?` is the idiomatic form and receives special compiler optimization. They are not interchangeable in all syntactic positions: for example, `Class<?>` is preferred over `Class<? extends Object>` because the compiler can optimize unbounded wildcards more aggressively.
+
+- **Why does `Arrays.asList(1, 2, 3)` return `List<Integer>` instead of `List<int>`?**
+  - The varargs parameter `T...` accepts reference types only because of erasure and array covariance. Primitives cannot be type arguments, so Java autoboxes `1, 2, 3` to `Integer`. The inferred return type is `List<Integer>`. For efficient primitive collections, use `IntStream` or specialized libraries like Eclipse Collections.
+
+- **What is the Curiously Recurring Template Pattern (CRTP) in Java?**
+  - CRTP uses `<T extends MyClass<T>>` where a class parameterizes its base with itself. Example: `class Person implements Comparable<Person>`. This allows the base class to work with the concrete subclass type without casting — used in fluent builders, type-safe enums, and `Comparable` implementations. The pattern leverages generics to preserve subclass type information.
+
+- **How does the compiler decide whether a cast is an unchecked cast vs a checked cast?**
+  - A checked cast involves reifiable types and is verified at runtime (e.g., `(String) obj`). An unchecked cast involves non-reifiable types (e.g., `(List<String>) obj`) — the JVM cannot verify the generic portion, so only the raw component type is checked. The compiler issues an unchecked warning for these casts, signaling that type safety cannot be fully enforced at runtime.
 
 ## Developer Recommendations
 

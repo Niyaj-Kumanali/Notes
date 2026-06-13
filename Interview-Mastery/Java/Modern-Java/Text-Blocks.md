@@ -162,6 +162,81 @@
 - The closing `"""` is not on its own line, so the compiler treats it as part of the content. The resulting string will include the trailing `"""` as literal characters. Text blocks require the opening `"""` to be followed by a line terminator, and the closing `"""` to determine indentation from its line.
 - **Interview follow-up:** How would you correctly write a single-line text block?
 
+**Q: You need to embed a JSON payload in a Java test file. How would you ensure that the text block indentation does not add extra whitespace to the JSON string?**
+
+- Indent the text block content to the same level as the surrounding Java code. The compiler strips the common leading whitespace based on the closing `"""` position. Place the closing `"""` at the same indentation as the content lines to remove the incidental whitespace.
+
+  ```java
+  String json = """
+      {
+        "name": "test",
+        "value": 42
+      }
+      """;
+  ```
+
+- **Interview follow-up:** What happens if some content lines have different indentation than others?
+
+**Q: You are writing a multi-line SQL query with dynamic parameters. How do you combine text blocks with prepared statement placeholders?**
+
+- Write the SQL as a text block with `?` placeholders and pass it to `PreparedStatement`. The text block makes the SQL readable. Never use `formatted()` with user input to avoid SQL injection.
+
+  ```java
+  String sql = """
+      SELECT id, name, email
+      FROM users
+      WHERE status = ?
+      AND created_at > ?
+      """;
+  ```
+
+- **Interview follow-up:** How would you handle an IN clause with a dynamic number of parameters?
+
+**Q: Your logging framework produces multi-line log messages that are hard to read. How could text blocks improve log message formatting?**
+
+- Use text blocks to write structured log messages with clear line separation. Each field on its own line makes logs more parseable. Combine with `formatted()` for runtime values.
+- **Interview follow-up:** Would you ever use text blocks for log messages in production code vs. keeping them as single-line strings?
+
+**Q: A teammate writes a text block with `\t` for indentation instead of spaces, but the output is misaligned. Why?**
+
+- Text block whitespace stripping uses the column position of the closing `"""`. Mixed tabs and spaces cause incorrect calculation of common indentation because a tab may not align predictably. Use spaces consistently within text blocks.
+- **Interview follow-up:** How does the text block algorithm handle tabs in content lines?
+
+**Q: You need to generate an XML document as a string. How would text blocks simplify this compared to traditional string concatenation?**
+
+- Write the entire XML document as a text block with proper indentation. No escaping of quotes is needed. Use `formatted()` for dynamic attribute values or content. The result is directly copy-pasteable to an XML validator.
+- **Interview follow-up:** How would you generate XML with dynamically repeating elements (e.g., multiple `<item>` tags) using text blocks?
+
+**Q: You want to test that a method produces the correct multi-line output. How would you use text blocks for the expected value in your assertion?**
+
+- Use a text block for the expected string in the assertion. The test becomes self-documenting because the expected output is visually identical to the actual output. Align the closing `"""` to the same indentation as the test method content.
+
+  ```java
+  String expected = """
+      Line 1
+      Line 2
+      Line 3
+      """;
+  assertEquals(expected, actual);
+  ```
+
+- **Interview follow-up:** How do you handle trailing newlines in text block comparison for assertions?
+
+**Q: You are writing a code generator that produces Java source code. How would you use text blocks to generate method bodies?**
+
+- Use text blocks to template method bodies with `%s` placeholders for dynamically generated names. The text block preserves the generated code's indentation structure. Escape sequences still work inside text blocks for generating strings.
+- **Interview follow-up:** How would you handle the case where the generated code itself contains text blocks?
+
+**Q: A developer uses `+` concatenation to append a text block with another string. What is the readability concern?**
+
+- Concatenating a text block with `+` breaks the visual alignment advantage of the text block. The concatenation operator splits the logical string into parts, making it harder to copy-paste. Use `formatted()` or `String.format()` instead.
+- **Interview follow-up:** Is there a performance difference between concatenation and formatted() with text blocks?
+
+**Q: You have a text block that contains a literal sequence of three double quotes. How do you escape this without breaking the text block delimiter?**
+
+- Use `\"""` to escape the triple quote sequence inside a text block. The backslash tells the compiler that these quotes are literal content, not the closing delimiter.
+- **Interview follow-up:** Can text blocks contain binary data or only text?
+
 ## Interview Questions
 
 - **What determines how much leading whitespace is stripped from a text block?**
@@ -175,6 +250,54 @@
 
 - **Are text blocks compile-time constants?**
   - Yes. A text block is a constant expression of type `String`. It is computed at compile time and stored in the constant pool, just like a regular string literal.
+
+- **Can text blocks be used in annotations?**
+  - Yes, text blocks can be used as values for annotation elements of type `String`, because they are compile-time constants.
+
+- **How do text blocks handle carriage return (`\r`) characters?**
+  - Text blocks normalize line endings. `\r\n` and `\r` are converted to `\n` (LF) during compilation, ensuring consistent behavior across Windows, Linux, and macOS.
+
+- **What is the maximum length of a text block?**
+  - There is no explicit maximum. Text blocks are limited only by available memory and the JVM's maximum string length (typically `Integer.MAX_VALUE` characters).
+
+- **Can you nest text blocks inside each other?**
+  - You cannot nest text block delimiters in Java source. The first `"""` opens the text block and the next `"""` closes it. To include literal `"""` inside a text block, escape it with `\"""`.
+
+- **How does the indent algorithm determine which whitespace is incidental?**
+  - The algorithm computes the minimum leading whitespace across all non-blank content lines. It then strips that many leading whitespace characters from each content line. The position of the closing `"""` sets this baseline.
+
+- **What is the difference between `formatted()` and `String.format()` with text blocks?**
+  - `textBlock.formatted(args)` is an instance method that calls `String.format(this, args)`. They are functionally equivalent, but `formatted()` reads more naturally as applying the template to the text block.
+
+- **Can text blocks be used as the argument to `String.lines()` and similar methods?**
+  - Yes. Since text blocks are `String` instances, all `String` methods work on them. `textBlock.lines()` is commonly used to process multi-line content stream.
+
+- **Do text blocks support escape sequences like `\n`, `\t`, `\\`?**
+  - Yes. All standard Java escape sequences work inside text blocks. `\n` adds an explicit newline, `\t` adds a tab, and `\\` adds a backslash.
+
+- **What happens if you use a text block with only whitespace lines?**
+  - The text block's indent algorithm still applies. If the closing `"""` is at position 0, all leading whitespace is stripped, potentially resulting in an empty string.
+
+- **Can you use text blocks with `switch` expressions?**
+  - Yes. Text blocks are `String` literals and can be used anywhere a `String` is expected, including as values in switch expressions.
+
+- **How do text blocks interact with Java's `indent()` method?**
+  - `textBlock.indent(n)` adds or removes leading whitespace based on the value of `n`. Positive values add indentation; negative values remove up to `n` leading whitespace characters.
+
+- **What is the purpose of the `stripIndent()` method?**
+  - `String.stripIndent()` (introduced with text blocks as a public API) programmatically applies the same indent stripping algorithm that the compiler uses for text blocks, removing common leading whitespace.
+
+- **Can text blocks contain Unicode escape sequences?**
+  - Yes. Unicode escape sequences like `\u00e9` work inside text blocks, just as in regular string literals, and are processed before any other escaping.
+
+- **How do you write a text block that represents an empty string?**
+  - Write `""" """` (opening quotes, space, closing quotes on the same line) or use two consecutive text block delimiters. However, the empty text block `""""""` does not compile because the quotes are ambiguous.
+
+- **What is the difference between a text block and a raw string literal in other languages?**
+  - Unlike raw string literals in some languages, Java text blocks still process escape sequences (`\n`, `\t`, etc.). They are not completely "raw" — they only remove the need to escape quote characters within the content.
+
+- **Can a text block be used as a constant in a `switch` case label?**
+  - Yes, because text blocks are compile-time constants. You can use a text block in a `case` label: `case """hello""" -> ...`. However, this is unusual and may harm readability.
 
 ## Developer Recommendations
 

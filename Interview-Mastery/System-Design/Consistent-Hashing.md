@@ -84,6 +84,62 @@
 - Add nodes one at a time rather than in batches to control the impact
 - **Interview follow-up:** What happens if the new node fails mid-bootstrap — how do you recover the partially streamed data?
 
+**Q: Your consistent hashing ring has 10 physical nodes with 1 vnode each. Node 5 handles 25% of traffic while Node 8 handles only 3%. How do you fix the imbalance?**
+
+- Increase virtual nodes per physical node to 100–200 for finer granularity — this distributes keys more evenly across all nodes
+- Rebalance the ring by reassigning some vnode ranges from the hot node to cooler nodes
+- Monitor per-node key distribution and adjust vnode counts based on actual load
+- **Interview follow-up:** How do you determine the optimal number of virtual nodes for a cluster with heterogeneous hardware?
+
+**Q: You are adding a new data center with 5 nodes to an existing 20-node Cassandra cluster. What happens to the ring and how do you minimize data movement?**
+
+- The new nodes are assigned token ranges on the ring; each new node takes over a portion of keys from existing nodes
+- Data streaming happens only between neighbors of the new token ranges, not the entire cluster
+- Throttle streaming bandwidth and add nodes one at a time to control the impact on existing traffic
+- **Interview follow-up:** How does the replication factor affect data movement when adding nodes?
+
+**Q: Your distributed cache uses consistent hashing. When a cache node fails, the next node clockwise receives all its keys and becomes overloaded. How do you prevent this?**
+
+- Use virtual nodes so that a single physical node's keys are spread across many successors, not just one
+- Configure a replication factor of 2–3 so each key is stored on multiple nodes — if one fails, the load is shared among replicas
+- Add a "load shedding" mechanism: if a node's request rate exceeds a threshold, it returns a retry response to some clients
+- **Interview follow-up:** How would you implement a "consistent hashing with bounded loads" strategy to prevent overload on takeover?
+
+**Q: You use consistent hashing for a CDN edge cache. A new edge location comes online, but users see increased cache miss rates for 30 minutes. Is this expected?**
+
+- Yes — the new node takes over a range of keys from its predecessor. Those keys were previously cached on the predecessor, but the new node has a cold cache
+- Mitigate by gradually shifting traffic: use a "warmup" phase where the new node receives a fraction of its eventual traffic for several minutes
+- Pre-populate the new node's cache by streaming the most popular keys from the predecessor before going live
+- **Interview follow-up:** How would you implement cache warming without impacting the predecessor's ability to serve traffic?
+
+**Q: Your key distribution across virtual nodes shows a standard deviation of 30% in per-node key counts. What is the likely cause and how do you fix it?**
+
+- 100–200 vnodes per physical node should yield <15% standard deviation — 30% suggests too few vnodes or a poor hash function
+- Increase the number of virtual nodes per physical node to improve distribution granularity
+- If vnodes are already high, check the hash function for bias — MurmurHash or SHA-256 are preferred over simple hash codes
+- **Interview follow-up:** How do you measure key distribution imbalance in production without scanning the entire key space?
+
+**Q: Your application uses Redis Cluster with hash slots (16384 slots). You add a new node, but some keys are now missing from the cluster. What went wrong?**
+
+- Redis Cluster requires resharding hash slots from existing nodes to the new node — adding a node does not automatically migrate data
+- Use the CLUSTER SETSLOT command family to migrate slot ranges, or use redis-cli --cluster reshard
+- Verify the cluster state with CLUSTER INFO and CLUSTER NODES after resharding
+- **Interview follow-up:** How does Redis Cluster handle requests for keys in slots that are in the process of being migrated?
+
+**Q: Your consistent hashing implementation uses SHA-256 for node hashing. Node additions cause temporary routing inconsistencies where some clients route to the wrong node. Why?**
+
+- SHA-256 output is large — different implementations may handle byte ordering or truncation differently, leading to inconsistent ring positions
+- Hash functions for consistent hashing should produce consistent 32-bit or 64-bit integers regardless of platform
+- Fix: use a well-defined hash function with a canonical implementation (MurmurHash3_x86_128, or CityHash) with explicit byte ordering
+- **Interview follow-up:** How do you handle a rolling upgrade of the hashing algorithm without causing data unavailability?
+
+**Q: Your database uses consistent hashing with a replication factor of 3. A node failure causes data loss for some keys. How is this possible with replication?**
+
+- With RF=3, each key is stored on 3 consecutive nodes on the ring. If all 3 nodes fail simultaneously, data for the keys in that range is lost
+- The ring topology creates correlated failure risk — nodes adjacent on the ring may share physical infrastructure (same rack, power supply)
+- Mitigate: ensure failure domains are decorrelated from ring positions — use rack-aware placement so replicas span different failure domains
+- **Interview follow-up:** How would you design a consistent hashing scheme that explicitly places replicas in different availability zones?
+
 ## Interview Questions
 
 - **Why does naive hash(key) % N fail for distributed systems?**
@@ -94,6 +150,38 @@
   - Each key is hashed to a position on the ring. Moving clockwise from that position, the first node encountered owns the key. This ensures that when a node is added, only the keys in the arc between the new node and its predecessor change ownership.
 - **How does Cassandra use consistent hashing for data distribution?**
   - Cassandra assigns each node a token range on a consistent hash ring. A key is hashed and mapped to a token value; the node responsible for that token range stores the key. With replication factor R, the next R-1 nodes clockwise also store replicas. Virtual nodes (num_tokens) allow each node to own multiple non-contiguous ranges.
+- **What happens to consistent hashing when a node's performance degrades but it does not fail?**
+  - The node remains on the ring and continues to receive its share of requests. This can cause long-tail latency. Mitigation: use load-based weight adjustment (reduce vnodes for slow nodes) or proactively remove the node and let it rejoin after recovery.
+- **How do you handle key hot spots in a consistent hashing ring?**
+  - Hot keys cannot be solved by hashing alone. Strategies: replicate hot keys to multiple nodes, cache them at the client or in a front cache (Redis), or use a dedicated hot-key detection system that dynamically increases replication for popular keys.
+- **Explain the tradeoff between number of virtual nodes and routing table size.**
+  - More vnodes improve load balance but increase the routing table size (each node tracks all vnode locations). With 1000 nodes × 200 vnodes = 200,000 entries per node, which is manageable in memory but increases update overhead when topology changes.
+- **How does consistent hashing differ from range-based partitioning?**
+  - Range-based partitioning divides the key space into contiguous ranges assigned to nodes. Consistent hashing interleaves ranges using hashing, providing better load balance and less redistribution on topology changes. Range partitioning makes range queries easy; consistent hashing makes them hard.
+- **What is the "ring walking" problem and how do you mitigate it?**
+  - When a node fails, its successor receives all its keys, potentially creating a cascading overload as that successor becomes slower and its own successor then receives even more load. Mitigation: use replication so the load is shared among multiple successors, and use virtual nodes so the load is distributed across many nodes.
+- **How do you implement consistent hashing for a load balancer?**
+  - Hash the client IP or session ID to determine which backend server handles the request. This provides session affinity without sticky cookies. When a server is added or removed, only a fraction of clients (1/N) are remapped to different servers.
+- **How does DynamoDB's partition splitting work with consistent hashing?**
+  - When a partition exceeds throughput capacity, DynamoDB splits it into two partitions on the hash ring. The split affects only that partition's range — adjacent partitions are unaffected. The new partitions may be moved to different physical storage nodes for load distribution.
+- **What is the role of a "token" in Cassandra's consistent hashing?**
+  - Each Cassandra node is assigned a token value that determines its position on the ring. With Murmur3Partitioner, tokens range from -2^63 to 2^63-1. A key is hashed to a token value, and the node whose token range contains that value owns the key.
+- **How do you handle node heterogeneity in a consistent hashing cluster?**
+  - Assign vnode count proportional to node capacity. A 32-core node with 256GB RAM gets more vnodes than a 4-core node with 32GB RAM. Some implementations support weighted consistent hashing where each vnode can have a weight multiplier.
+- **Explain the difference between "random slicing" and "consistent hashing" for data partitioning.**
+  - Random slicing divides key space into fixed slices and maps slices to nodes; adding a node requires remapping slices. Consistent hashing maps both keys and nodes to a ring, requiring only K/N keys to move on average when nodes change.
+- **What happens to read repair in a consistent hashing system during node addition?**
+  - When a new node joins, it initially has no data for its assigned keys. Read repair helps populate the node: when a client reads a key, the coordinator detects the new node is missing the value and writes the latest version to it during the read response.
+- **How do you test consistent hashing correctness?**
+  - Verify that every key maps to the same node before and after a single node addition (except keys in the affected range). Verify that key distribution is uniform (chi-squared test). Test with node removal and confirm only its keys move to successors.
+- **What is the "consistent hashing skew" problem?**
+  - Skew occurs when the hash function does not distribute keys uniformly across the ring, or when node positions are clustered. Virtual nodes reduce skew by giving each physical node many interleaved positions. Monitoring per-node key count variance detects remaining skew.
+- **How does Akamai use consistent hashing for CDN content routing?**
+  - Akamai maps content URLs to edge servers using consistent hashing on the URL hash. When an edge server fails, only content mapped to that server's range is fetched from origin. New servers are gradually populated without a global cache flush.
+- **Compare consistent hashing with a distributed hash table (DHT).**
+  - Consistent hashing maps keys to nodes on a ring with minimal redistribution. DHTs (like Chord) provide a more complete abstraction including lookup protocols, routing, and node discovery. Consistent hashing is simpler; DHTs are more feature-rich for peer-to-peer applications.
+- **What is "rendezvous hashing" and how does it compare to consistent hashing?**
+  - Rendezvous hashing (HRW) assigns each key to the node with the highest computed weight, using a hash of (node, key). It provides minimal redistribution on node changes like consistent hashing, but does not require a ring or virtual nodes. It is simpler to implement but has O(N) lookup cost per key compared to O(log N) for consistent hashing.
 
 ## Developer Recommendations
 

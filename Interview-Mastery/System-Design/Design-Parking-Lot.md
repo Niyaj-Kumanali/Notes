@@ -93,6 +93,62 @@
 - Fix: use event-driven architecture with at-least-once delivery. The gate publishes an event on entry/exit; the board consumer processes the event and updates availability. Add reconciliation: periodically scan actual spot occupancy and correct the board display.
 - **Interview follow-up:** If you cannot fix the synchronicity, should the board show slightly stale data (optimistic) or always under-report (pessimistic)?
 
+**Q: Your parking lot charges different rates for different hours (peak: $5/hr, off-peak: $2/hr). A car enters at 3:50 PM and exits at 4:10 PM during a peak-to-off-peak transition. How do you calculate the fee?**
+
+- Prorate by actual time spent in each rate period: 10 minutes at peak rate + 10 minutes at off-peak rate
+- Use the rate at entry time for the entire stay (simpler but may cause disputes at rate boundaries)
+- Store rate periods as overlapping or adjacent intervals with a rule engine that evaluates each minute of parking
+- **Interview follow-up:** How would you handle multiple rate changes (e.g., weekday vs weekend, holiday surcharges)?
+
+**Q: A driver loses their parking ticket. How does the system handle lost ticket scenarios?**
+
+- Calculate the maximum possible fee: charge the maximum daily rate for the entire day the car could have been parked
+- Look up the vehicle by license plate from entry cameras — if the vehicle is found in the system, use the actual entry time
+- Require manual verification at a staffed booth for lost tickets with identity verification
+- **Interview follow-up:** How do you prevent fraud where a driver claims a lost ticket but actually entered recently to pay a lower fee?
+
+**Q: Your parking lot has monthly reserved spots that should always be available for specific users. During peak hours, regular customers park in reserved spots. How do you enforce reservation?**
+
+- Mark reserved spots with a RESERVED status in the system — the spot assignment algorithm skips reserved spots for non-reserved vehicles
+- Implement license plate recognition at entry: if a reserved spot holder arrives, their spot is guaranteed; if a non-reserved vehicle parks there, issue a ticket
+- Use physical barriers (retractable bollards or gates) for reserved spots that only authorized users can lower via RFID or app
+- **Interview follow-up:** How do you handle the case where a reserved spot holder does not show up — should the spot be released to general parking after a grace period?
+
+**Q: Your parking lot uses a payment kiosk at the exit. During peak hours, the exit line backs up because each payment takes 30 seconds. How do you reduce exit congestion?**
+
+- Implement prepayment kiosks inside the parking lot: customers pay before returning to their car, then scan the receipt at exit for a quick check
+- Support automatic payment via license plate recognition: the camera reads the plate at exit, charges the linked account, and opens the gate
+- Use a mobile app for contactless payment — customers pay through the app and scan a QR code at exit
+- **Interview follow-up:** How do you handle the case where a customer's automatic payment fails (insufficient funds, expired card)?
+
+**Q: Your parking lot has valet parking. How does the valet system integrate with the parking lot design?**
+
+- Valet mode: the attendant checks in the vehicle, the system assigns a spot, the attendant parks the vehicle, and the ticket is stored centrally
+- When the customer returns, the attendant retrieves the vehicle using the ticket ID, and the system processes payment
+- Valet spots are typically located in a dedicated area near the entrance for quick turnaround
+- **Interview follow-up:** How do you track which valet attendant parked which car for accountability?
+
+**Q: Your parking lot uses a sensor per spot to detect occupancy. Some sensors malfunction, reporting occupied spots as empty or vice versa. How do you handle sensor errors?**
+
+- Implement sensor health monitoring: if a sensor reports rapid state changes or no changes for an extended period, flag it for maintenance
+- Cross-validate sensor data with entry/exit gate counts — if 100 cars entered and 95 exited, approximately 5 spots should be occupied
+- When a sensor reports a spot as empty but the assignment system shows it as occupied, trust the assignment system and flag the sensor for inspection
+- **Interview follow-up:** How do you handle the case where a car is parked straddling two spots, confusing both sensors?
+
+**Q: Your parking lot supports electric vehicle (EV) charging stations. How do you integrate charging into the parking system?**
+
+- Designate specific spots with EV charging and mark them in the spot management system
+- Track charging station usage: when a vehicle parks at an EV spot, start a charging session; the fee includes both parking and charging costs
+- Implement a policy: EV spots have a grace period after charging completes — if the vehicle remains past the grace period, apply a surcharge to encourage turnover
+- **Interview follow-up:** How do you handle the case where a non-EV vehicle parks in an EV charging spot?
+
+**Q: Your parking lot system needs to support dynamic pricing based on real-time demand. When occupancy exceeds 80%, rates should increase to discourage entry. How do you implement this?**
+
+- Implement a dynamic pricing service that reads current occupancy from the display board and adjusts rates in real time
+- The rate schedule is evaluated at entry time: if occupancy > 80%, apply a surge multiplier to the base rate
+- Display the current rate on the entry board so drivers can decide whether to enter based on price
+- **Interview follow-up:** How do you prevent rapid rate fluctuations that confuse customers — should there be a minimum time between rate changes?
+
 ## Interview Questions
 
 - **Design the classes for a parking lot system.**
@@ -103,6 +159,38 @@
   - Define a SpotAssignmentStrategy interface with a method findSpot(vehicleSize, floors) -> Spot. Implement NearestStrategy (spot closest to elevator), UtilizationStrategy (fill small spots first), DistributionStrategy (even floor distribution). The ParkingLot accepts a strategy at construction time, allowing runtime swapping.
 - **How would you calculate parking fees for edge cases?**
   - Use a FeeCalculationStrategy with rules: base hourly rate, partial hour rounding (up or prorated), daily maximum cap, overnight flat rate, grace period (15 minutes free), lost ticket penalty, peak/off-peak multipliers. Calculate with minute granularity, not hourly boundaries.
+- **How do you design the parking lot system to handle multiple entry and exit gates?**
+  - Each gate operates independently and communicates with a central ParkingLot coordinator via a shared database or distributed lock. Entry gates call findSpot() atomically. Exit gates free the spot and update the display board. The coordinator ensures consistency across gates using transactions or optimistic locking.
+- **Explain the role of a "display board" in the parking lot system.**
+  - The display board shows real-time availability per floor, per spot type, and total. It helps drivers decide which floor to use before entering. It is updated on every entry and exit event, ideally through an event-driven async pipeline to avoid blocking gate operations.
+- **How does the strategy pattern apply to spot assignment?**
+  - The SpotAssignmentStrategy interface defines a method findSpot(vehicle, floors) → Spot. Implementations include NearestToElevatorStrategy, FillSmallestFirstStrategy, EvenDistributionStrategy. The ParkingLot is configured with a strategy at startup and can swap strategies at runtime (e.g., switch to even distribution during peak hours).
+- **How do you implement a waiting list for a full parking lot?**
+  - When the lot is full, offer the driver an option to join a queue. Store the queue in Redis (sorted set by timestamp). When a spot becomes available, dequeue the next driver and send a notification (SMS, push). The spot is reserved for a limited time (e.g., 5 minutes) before it is released to the next in queue.
+- **What design patterns are used in a parking lot system?**
+  - Singleton: DisplayBoard (typically one per lot). Strategy: SpotAssignmentStrategy and FeeCalculationStrategy. Observer: display board observes entry/exit events. Factory: GateFactory creates EntryGate or ExitGate. Repository: SpotRepository for database access. Command: gate operations as command objects for audit logging.
+- **How do you handle payment failures at the exit gate?**
+  - Retry the payment up to 3 times. If all retries fail, open the gate but flag the ticket for follow-up (invoice the customer later via their registered payment method). For cash payments, if the exact change is unavailable, round down to the nearest available amount and log the discrepancy.
+- **How do you implement seasonal or event-based pricing?**
+  - Use a FeeCalculationStrategy that accepts a rate schedule object. The schedule defines base rates, peak multipliers, and special event overrides. The rate for a given time is looked up from the schedule during fee calculation. Changes to the schedule are effective immediately without code deployment.
+- **How do you handle the scenario where a vehicle exits without paying?**
+  - License plate cameras capture the plate at entry and exit. The system flags unpaid exits and adds the plate to a "blocklist" for future entry. A reconciliation job runs daily to match exit events with payments and generates invoices for unpaid stays.
+- **What is the role of "audit logging" in a parking lot system?**
+  - Every entry, exit, payment, and manual override is logged with timestamp, operator ID (for manual actions), and full state before/after. Audit logs are essential for dispute resolution (a customer claims they paid but the system disagrees) and fraud detection.
+- **How do you design the database schema for a parking lot?**
+  - Tables: parking_lot (id, name, address), floor (id, lot_id, floor_number), spot (id, floor_id, spot_number, size, status), ticket (id, spot_id, vehicle_plate, entry_time, exit_time, total_charge, payment_status), payment (id, ticket_id, amount, method, timestamp), gate (id, lot_id, type, status). Indexes on spot.status, ticket.entry_time, ticket.vehicle_plate.
+- **How do you handle multiple currency and payment method support?**
+  - Store prices in a base currency (USD) and convert at the current exchange rate at payment time. PaymentProcessor interface supports multiple implementations: CashPayment, CreditCardPayment, UPIPayment, MobileWalletPayment. Each implementation handles its own auth, capture, and refund logic.
+- **How do you test a parking lot system for race conditions?**
+  - Write integration tests that simulate multiple concurrent entry/exit operations. Use thread-safe test harnesses that dispatch vehicles to multiple gates simultaneously. Verify that no spot is double-booked and that total occupancy matches entry/exit counts. Test with pessimistic locking enabled.
+- **Explain the difference between "hard reservation" and "soft reservation" for spots.**
+  - Hard reservation: a spot is guaranteed for a specific user and time slot; the system will not assign it to anyone else. Soft reservation: the system predicts availability but does not guarantee a specific spot; if all spots fill, the user is queued. Hard is better for reserved parking; soft is better for general parking.
+- **How do you implement a "frequent parker" loyalty program?**
+  - Track user parking sessions by license plate or account ID. Accumulate points per dollar spent. Points can be redeemed for free parking hours or discounts. Implement a PricingStrategy decorator that applies discounts based on loyalty tier. Points expire after 12 months of inactivity.
+- **How would you design the system to support multiple parking lots across a city?**
+  - Add a ParkingLotManagementSystem that aggregates data from all lots. Each lot operates independently but reports occupancy and availability to a central service. A mobile app queries the central service to show available spots at all lots. Cross-lot reservations allow users to book at any lot through a unified interface.
+- **How does the Observer pattern apply to the display board system?**
+  - The display board acts as an observer of entry/exit events. When a gate processes an entry or exit, it publishes an event (subject notifies observers). The display board receives the event and recalculates availability per floor. This decouples the board from gate logic and allows multiple boards (entrance, per-floor) to react to the same events independently.
 
 ## Developer Recommendations
 

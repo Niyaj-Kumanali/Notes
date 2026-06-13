@@ -220,6 +220,46 @@ public RouteLocator customRouteLocator(RouteLocatorBuilder builder) {
   - A system deployed as separate services that are so tightly coupled they must be deployed together, share a database, or have chatty synchronous dependencies.
   - It combines the worst of both worlds: complexity of distributed systems without the benefits of independent deployability.
 
+- **What is the Circuit Breaker pattern?**
+  - A resilience pattern that monitors for failures and prevents calls to a failing service. When failures exceed a threshold, the circuit "opens" and subsequent calls fail fast without attempting the call.
+  - States: Closed (normal), Open (fail fast), Half-Open (test recovery). Implemented via libraries like Resilience4j, Hystrix.
+
+- **How do you handle logging and monitoring in a microservices architecture?**
+  - Centralized logging with structured JSON format (trace ID, service name, span ID) shipped to ELK/Loki. Metrics exported via Micrometer to Prometheus/Grafana.
+  - Distributed tracing with OpenTelemetry propagates a trace context across service boundaries, enabling end-to-end request debugging.
+
+- **Explain the Saga pattern.**
+  - A sequence of local transactions where each step publishes an event or invokes the next step. If a step fails, the saga executes compensating transactions to undo the previous steps.
+  - Two implementations: choreography (each service publishes events that trigger the next step) and orchestration (a central coordinator manages the workflow).
+
+- **What is CQRS and when would you use it in microservices?**
+  - Command Query Responsibility Segregation separates read and write models. Commands handle mutations; queries handle reads, potentially using a different data store or schema optimized for queries.
+  - Use CQRS when read and write workloads have different performance requirements, or when you need to maintain separate read-optimized views (e.g., materialized views for reporting).
+
+- **How do you manage configuration across multiple microservices?**
+  - Externalized configuration using a centralized config server (Spring Cloud Config, Consul KV, etc.) or Kubernetes ConfigMaps/Secrets.
+  - Configuration is versioned, environment-specific (dev/staging/prod), and can be refreshed at runtime without redeploying the service.
+
+- **What are the challenges of testing microservices?**
+  - Service dependencies require running multiple services for integration tests. Contract testing (Pact) and consumer-driven contracts help decouple test schedules.
+  - Testing strategies: unit tests (fast, isolated), contract tests (API compatibility), integration tests (deployed environment), end-to-end tests (critical flows only, slow and brittle).
+
+- **How do you handle service versioning in microservices?**
+  - URL path versioning (`/v1/orders`, `/v2/orders`), request header versioning (`Accept: application/vnd.company.v1+json`), or query parameter versioning.
+  - Maintain backward compatibility for a defined deprecation period. Use a gateway or routing layer to direct clients to the correct version.
+
+- **What is the difference between REST and gRPC for inter-service communication?**
+  - REST uses HTTP/1.1 with text-based JSON, easy to debug and broadly compatible. gRPC uses HTTP/2 with binary Protocol Buffers, offering lower latency, smaller payloads, and built-in streaming.
+  - Choose REST for external APIs and polyglot clients; choose gRPC for high-throughput internal communication where performance matters.
+
+- **What is a BFF (Backend for Frontend) pattern and why is it important?**
+  - BFF creates separate API surfaces for each client type (web, mobile, IoT), owned by the corresponding frontend team. Each BFF handles client-specific data aggregation, response shaping, and device-specific logic.
+  - Without BFF, the API Gateway becomes bloated with client-specific transformations, and changes for one client risk breaking others.
+
+- **How do you ensure security in a microservices architecture?**
+  - Implement OAuth2/OIDC with JWT tokens validated at the API Gateway. Use mTLS for inter-service communication. Apply the principle of least privilege — each service has its own service account and minimal permissions.
+  - Additional measures: network policies (Kubernetes NetworkPolicies), secret management (HashiCorp Vault, AWS Secrets Manager), and regular dependency scanning for vulnerabilities.
+
 ---
 
 ## Developer Recommendations

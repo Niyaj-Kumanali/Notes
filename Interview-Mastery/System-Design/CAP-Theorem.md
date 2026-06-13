@@ -77,6 +77,62 @@
 - Compensating transactions or sagas handle the rare cases where a trade must be rolled back
 - **Interview follow-up:** How do you maintain CP while keeping p99 latency under 10ms across regions?
 
+**Q: Your social media feed system uses eventual consistency. During a network partition, some users see duplicate posts. How do you fix it?**
+
+- Use idempotency keys on post creation — each post carries a unique ID, and the system deduplicates on write
+- Implement vector clocks to track causal relationships and detect duplicates during read-repair
+- Add a background deduplication job that scans for conflicting entries and merges them based on timestamp and causality
+- **Interview follow-up:** How would you handle the case where two users concurrently post content that causally depends on each other's posts during a partition?
+
+**Q: A financial trading system using CP (Paxos) suffers from high latency during leader re-election. How do you reduce the impact?**
+
+- Pre-commit transactions to a write-ahead log before attempting consensus so that in-flight operations are not lost during leader election
+- Use multi-leader replication per asset class to confine election scope — each asset class has its own Paxos group
+- Optimize leader lease duration: longer leases reduce election frequency but increase failover time — tune based on cluster size and network reliability
+- **Interview follow-up:** How do you handle split-brain scenarios where two nodes both believe they are the leader?
+
+**Q: Your database uses quorum reads and writes for strong consistency. A network partition causes all writes to fail because quorum cannot be reached. How do you improve availability?**
+
+- Reduce quorum size from ALL to QUORUM (N/2 + 1) — this allows minority partitions to still operate at the cost of consistency guarantees
+- Implement a fallback mode: if quorum is unavailable after a timeout, degrade to read-only mode or serve stale data with a warning header
+- Introduce a "quorum lease" that allows a partition with a recent lease to continue operating even without a full quorum
+- **Interview follow-up:** How do you ensure safety when a stale partition is allowed to serve writes after lease expiration?
+
+**Q: Your multi-region database uses synchronous replication. A cross-region latency spike increases write p99 from 5ms to 500ms. How do you fix it?**
+
+- Switch to asynchronous replication for cross-region traffic while keeping synchronous within-region replication
+- Use a committed transaction log that replicates asynchronously — the local region commits immediately, remote regions catch up
+- Implement a latency-aware replication policy: if cross-region latency exceeds a threshold, automatically degrade from synchronous to asynchronous
+- **Interview follow-up:** How do you handle the risk of data loss when switching from synchronous to asynchronous replication?
+
+**Q: Your team implements an AP system for a ride-hailing platform. During a partition, two drivers accept the same ride request. How do you resolve the conflict?**
+
+- Use a conflict resolution strategy: the first acceptance that reaches the central coordinator is honored; the second gets a compensation notification
+- Implement a "claim token" system: the ride request is assigned a unique token; the driver who presents the token first gets the ride
+- After partition recovery, run a reconciliation service that detects double-booked rides and reassigns one driver or cancels with a penalty-free notification
+- **Interview follow-up:** How would you redesign the system to prevent double-acceptance entirely, even during partitions?
+
+**Q: A configuration management service uses ZooKeeper (CP). During a network partition, the minority nodes stop serving reads. How do you ensure your application stays functional?**
+
+- Cache ZooKeeper data locally on each application node so that reads can be served from cache even when ZooKeeper is unavailable
+- Use a sidecar proxy that maintains a local copy of configuration and serves it with a staleness tolerance of a few seconds
+- Implement a "last known good" configuration — if ZooKeeper is unavailable, continue operating with the last successfully read configuration
+- **Interview follow-up:** How do you detect when ZooKeeper state has changed during the outage and invalidate the local cache?
+
+**Q: Your IoT data pipeline ingests sensor readings from millions of devices using AP (Cassandra). Duplicate readings appear during partitions. How do you handle this?**
+
+- Use a composite primary key (device_id, timestamp) to allow upserts — if the same reading arrives twice, the second write overwrites the first
+- Design sensors to include a monotonically increasing sequence number; use it for deduplication during read-repair
+- Accept duplicates at the storage layer and deduplicate at query time using window functions over time
+- **Interview follow-up:** How do you handle out-of-order arrival of sensor readings due to network delays or device clock skew?
+
+**Q: Your e-commerce platform uses eventual consistency for the product catalog. During a flash sale, a user sees an item as "in stock" but it is actually sold out. How do you prevent this?**
+
+- Reduce the convergence window by tuning replica sync intervals from minutes to seconds
+- Implement "reservation" semantics: when an item is added to cart, temporarily decrement the cached stock count and confirm from the authoritative inventory service asynchronously
+- Use a hybrid approach: serve the catalog from an eventually consistent cache, but query the authoritative inventory service for stock checks on checkout
+- **Interview follow-up:** How would you design the inventory system to handle both high-read throughput and strong consistency on stock checks?
+
 ## Interview Questions
 
 - **What happens to a CP system during a network partition?**
@@ -87,6 +143,38 @@
   - Strong consistency guarantees that a read immediately following a write returns that write. Eventual consistency guarantees that if no new writes occur, all replicas will eventually converge. In practice, eventual consistency means stale reads are possible within a convergence window.
 - **Why is CRDT preferred over last-write-wins for conflict resolution in some systems?**
   - LWW loses concurrent updates when timestamps tie or clocks skew. CRDTs (like grow-only counters or register sets) merge mathematically without data loss, making them suitable for offline-first and collaborative applications.
+- **What is the difference between strong consistency and eventual consistency in practical terms?**
+  - Strong consistency guarantees that once a write completes, all subsequent reads return that value. Eventual consistency guarantees that if no new writes occur, all replicas will converge. Strong consistency requires coordination (higher latency), while eventual consistency allows stale reads (lower latency, higher availability).
+- **How do you implement read-after-write consistency?**
+  - Route a client's reads to the same node that handled their most recent write, or have the write wait for acknowledgment from the read replica before returning. Session guarantees in DynamoDB and Cassandra read-your-writes consistency level provide this.
+- **Explain the role of a consensus algorithm like Raft in CAP tradeoffs.**
+  - Raft ensures strong consistency by having a single leader that orders all operations and replicates them to a majority of followers. If a partition separates the leader from the majority, the leader steps down and a new leader is elected in the majority partition. The minority partition cannot accept writes because it lacks a quorum. This makes Raft-based systems CP.
+- **What happens to availability in a CP system using Raft when a follower's disk is full?**
+  - The follower stops accepting log entries and falls behind. As long as a majority of nodes remain healthy, the system continues operating. The full-disk follower will eventually be removed from the cluster, and the leader does not block writes because only majority acknowledgment is needed.
+- **How do you detect a network partition in a distributed system?**
+  - Nodes use heartbeats with timeouts to detect failures. If node A does not receive a heartbeat from node B within a timeout period, A considers B down or partitioned. Gossip protocols (like SWIM) provide scalable failure detection. The challenge is distinguishing between a crash and a partition.
+- **Explain the difference between a network partition and a node crash in CAP terms.**
+  - In a node crash, remaining nodes form a majority and continue operating. In a network partition, two groups each think the other crashed, leading to split-brain. AP systems allow both sides to operate (divergence), while CP systems shut down the minority side to preserve consistency.
+- **How would you design a system that needs strong consistency for some operations and eventual consistency for others?**
+  - Use a polyglot architecture: store critical data (transactions, balances) in a CP system and non-critical data (profiles, feeds) in an AP system. Alternatively, use a single database with tunable consistency — Cassandra's QUORUM for critical reads, ONE for non-critical reads.
+- **What is the role of a quorum in ensuring consistency?**
+  - A quorum is the minimum number of nodes that must participate for an operation to be valid. For strong consistency, read-quorum + write-quorum > N ensures at least one node overlaps between read and write sets. With N=3, write QUORUM=2 and read QUORUM=2 ensures the read set overlaps with the write set.
+- **How does Google Spanner achieve both strong consistency and high availability?**
+  - Spanner uses TrueTime (GPS + atomic clocks) for globally synchronized timestamps, Paxos for synchronous within-region replication, and asynchronous cross-region replication. TrueTime enables lock-free read-only transactions and external consistency, while Paxos provides CP within each replica group.
+- **What is the difference between linearizability and serializability?**
+  - Linearizability means each operation appears to take effect atomically at some point between its start and end — it is about recency. Serializability means the result of concurrent transactions is equivalent to some sequential execution — it is about isolation. A system can be serializable without being linearizable.
+- **How do you implement eventually consistent counters across data centers?**
+  - Use CRDT counters (G-counter or PN-counter) that merge mathematically without conflict. Each data center maintains its own increment counters; periodic gossip merges them by taking the maximum of each counter. The total count is the sum of all per-DC counters, avoiding coordination while ensuring convergence.
+- **What is the split-brain problem and how do consensus algorithms prevent it?**
+  - Split-brain occurs when two nodes both believe they are the leader. Raft prevents this by requiring a candidate to receive votes from a majority. A partitioned node cannot get majority votes, so it cannot become leader. Raft also uses a "term" number to distinguish stale leaders.
+- **How does MongoDB handle CAP tradeoffs in different configurations?**
+  - Standalone MongoDB is CA (no distribution). Replica set with primary reads is CP — if the primary fails, writes are unavailable until election. Replica set with secondary reads is AP — reads may return stale data but availability is maintained.
+- **Explain how hinted handoff works in Dynamo-style systems.**
+  - When a write cannot reach its target replica due to a partition, the coordinator stores the write as a "hint" on a different healthy node. When the target replica recovers, the hint is replayed. Hinted handoff improves availability during partitions but risks data loss if the hint node also fails before replaying.
+- **What is read repair and when is it triggered?**
+  - Read repair compares responses from all replicas during a read. If replicas have different versions, the coordinator pushes the latest version to stale replicas before returning. It is triggered on every read in some systems (Cassandra) or probabilistically to reduce overhead.
+- **How do you balance latency and consistency in a globally distributed database?**
+  - Use a tiered approach: within-region strong consistency with synchronous replication; cross-region eventual consistency with asynchronous replication. Data needing global consistency can use Paxos across regions, accepting higher latency. Use a circuit breaker to degrade to local consistency if cross-region latency exceeds a threshold.
 
 ## Developer Recommendations
 

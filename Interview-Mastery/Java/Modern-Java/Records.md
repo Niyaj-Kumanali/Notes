@@ -132,6 +132,51 @@
 - The compiler generates equals and hashCode automatically based on all components in the record header. A regular POJO must manually override Object.equals and Object.hashCode, which is error-prone and often forgotten.
 - **Interview follow-up:** If you add an instance helper method to a record that returns a derived value, should that value be part of equals/hashCode?
 
+**Q: You are designing an API that returns a paginated list of users. How would you model the response using records?**
+
+- Define a generic `PaginatedResponse<T>` record with components `List<T> items`, `int page`, `int totalPages`, `long totalItems`. This provides a type-safe, immutable response object with built-in equals, hashCode, and toString.
+- **Interview follow-up:** How would you handle serialization of generic records with Jackson?
+
+**Q: A record component is a mutable List. Can callers modify the list through the accessor method?**
+
+- Yes. Record accessor methods return a reference to the component. If the component is a mutable object like `List`, callers can modify the list contents. To prevent this, return a defensive copy in a custom accessor or use `List.copyOf()`.
+- **Interview follow-up:** How would you implement a defensive copy in a record without breaking the transparency contract?
+
+**Q: You need to deserialize a JSON payload into a record using Jackson, but the JSON uses snake_case field names. How do you configure this?**
+
+- Use Jackson's `@JsonProperty` annotation on the record components or configure `ObjectMapper` with `PropertyNamingStrategies.SNAKE_CASE`. Records work with Jackson 2.12+ by using the canonical constructor for deserialization.
+- **Interview follow-up:** What happens if a JSON field is missing when deserializing into a record?
+
+**Q: Can you use Lombok with records? Should you?**
+
+- Records already generate constructor, accessors, equals, hashCode, and toString, so Lombok annotations like `@Data`, `@Getter`, `@AllArgsConstructor` are redundant and may cause conflicts. Lombok's `@Builder` can be useful with records to provide a builder pattern for complex construction.
+- **Interview follow-up:** What happens if you apply both `@Data` and `record` to the same type?
+
+**Q: You have an existing class with 20 fields and you want to migrate it to a record. What challenges might you face?**
+
+- Records cannot have instance fields beyond components, so computed fields (e.g., `fullName` derived from `firstName` + `lastName`) must be implemented as derived methods. Records cannot extend other classes and cannot have a no-arg constructor. If the class implements an interface that requires mutation, the migration is blocked.
+- **Interview follow-up:** How would you handle a derived field like `fullName` after migrating to a record?
+
+**Q: A record implements an interface that has default methods. Does this cause any issues?**
+
+- No. Records can implement interfaces including those with default methods. The default methods are inherited normally. This is useful for modeling algebraic data types where each record variant implements a common interface.
+- **Interview follow-up:** Can a record implement multiple interfaces?
+
+**Q: You are using records in a Spring Boot application. How does Spring Data JDBC handle records as projection DTOs?**
+
+- Spring Data JDBC supports record projections in repository query methods. You can define a record with the exact fields returned by the query, and Spring will map the result set into the record via its canonical constructor. This is type-safe and efficient.
+- **Interview follow-up:** Does Spring Data JPA support records as projections similarly?
+
+**Q: How do you handle backward compatibility when adding a new component to a record in a published API?**
+
+- Adding a component is a breaking change because it changes the canonical constructor, accessor methods, equals/hashCode/toString. Clients using the old constructor or pattern matching on the record will break. Use a separate builder or factory method for evolution.
+- **Interview follow-up:** Can you use a custom constructor to maintain backward compatibility?
+
+**Q: You have a record that contains a reference to another record, forming a graph. How do you avoid StackOverflowError in equals/hashCode?**
+
+- Records use structural equality on all components. If two records reference each other directly or indirectly, equals and hashCode will cause infinite recursion. Use a regular class with custom equality logic that breaks the cycle, or use identity-based comparison for circular references.
+- **Interview follow-up:** How would you model a tree structure using records without circular references?
+
 ## Interview Questions
 
 - **What is the difference between a canonical constructor and a compact constructor in a record?**
@@ -145,6 +190,54 @@
 
 - **How do records work with serialization?**
   - Records have special serialization behavior: the serialized form is derived from the component list and the canonical constructor is used for deserialization. Custom `writeObject`/`readObject` methods are not allowed. This makes serialization safer and more predictable compared to regular classes.
+
+- **What is the purpose of the `java.lang.Record` class?**
+  - `java.lang.Record` is the common superclass of all record classes, analogous to `Enum` for enums. It provides reflective support for record components and is used by the compiler and serialization framework.
+
+- **Can a record have static fields?**
+  - Yes. Records can declare static fields, static methods, and static initializers. Static fields are part of the class, not per-instance, and are not limited by the record component restriction.
+
+- **Can a record have instance methods?**
+  - Yes. Records can define instance methods that operate on the component values. These methods can compute derived values or provide alternative representations of the data.
+
+- **What is the difference between a record and an enum?**
+  - An enum defines a fixed set of named constants with possibly varying behavior. A record defines an immutable data carrier with structural equality. Records can have many instances; enums have a fixed set of singleton instances.
+
+- **Can a record have generic type parameters?**
+  - Yes. Records support generic type parameters: `record Pair<T, U>(T first, U second) { }`. The generic parameters are part of the record header and affect the type signature.
+
+- **How does the compiler implement record accessor methods?**
+  - The compiler generates a public method for each component with the same name as the component and the component's type as the return type. For `record Point(int x, int y)`, it generates `public int x()` and `public int y()`.
+
+- **Can records be used as JSON serialization keys?**
+  - Yes, because records implement proper equals and hashCode. When used as map keys for serialization (e.g., Jackson serializing a `Map<MyRecord, String>`), the record must be serializable and the serializer must support record types.
+
+- **What is the nullability contract for record components?**
+  - By default, records do not enforce null constraints. A record component can be null unless validation is added in the compact constructor. Use `Objects.requireNonNull()` in the compact constructor to reject null values.
+
+- **Can you override the generated equals method in a record?**
+  - Yes, you can override `equals`, `hashCode`, and `toString` in a record body. However, this is discouraged as it breaks the transparency contract — a record is supposed to be "just the data."
+
+- **How do records interact with Java's Optional type?**
+  - Records can have `Optional` components, but this is generally discouraged because `Optional` is not serializable and the intent of "maybe null" is better expressed by allowing the component to be null with proper documentation.
+
+- **What is a wither method in a record?**
+  - A wither method creates a new record instance with one component changed. Since records are immutable, you write `public Point withX(int newX) { return new Point(newX, this.y()); }` to produce a modified copy.
+
+- **Can records be used in a try-with-resources statement?**
+  - Only if the record implements `AutoCloseable`. Records can implement `AutoCloseable` directly, making them usable as resources. However, this is unusual because records typically represent data, not resources.
+
+- **How does pattern matching with instanceof work with records?**
+  - Record patterns allow destructuring: `if (obj instanceof Point(int x, int y))` binds `x` and `y` to the components. This works because the compiler knows the record's component structure.
+
+- **Can you declare annotations on record components?**
+  - Yes. Annotations on record components can be targeted to the component, the field, the accessor method, or the constructor parameter, depending on the `@Target` of the annotation.
+
+- **What happens if a record component name shadows a method from Object?**
+  - Component names like `toString`, `hashCode`, or `equals` will conflict with the generated methods. The compiler will report an error, so these names cannot be used as component names.
+
+- **How do you create a copy of a record with modified values?**
+  - Records use the "wither" pattern (manual `withX` methods) or construct a new instance via `new RecordType(modifiedComponent, otherComponent, ...)`. There is no built-in `with` copy method like in Kotlin data classes.
 
 ## Developer Recommendations
 

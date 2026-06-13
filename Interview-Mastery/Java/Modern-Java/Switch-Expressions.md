@@ -186,6 +186,51 @@
 
 - **Interview follow-up:** What happens if you swap the order of the two String cases?
 
+**Q: You have a legacy switch statement that uses fall-through with multiple `case` labels and a shared block. How do you migrate it to a modern switch expression?**
+
+- Replace the fall-through pattern with a single `case` using comma-separated labels: `case MONDAY, TUESDAY, WEDNESDAY -> "weekday"`. If the original had intentional fall-through to execute shared code and then continue, restructure the logic to avoid needing fall-through behavior.
+- **Interview follow-up:** What if you need to execute some common code before returning a value specific to each case?
+
+**Q: You are writing a switch expression that maps HTTP status codes to messages. How do you handle ranges of values efficiently?**
+
+- List individual codes in comma-separated labels for fixed mappings and use `default` for the rest. Switch expressions do not support range patterns, so you must enumerate each code or use a catch-all default: `case 200 -> "OK"; case 201 -> "Created"; case 301, 302, 307 -> "Redirect"; default -> "Unknown"`.
+- **Interview follow-up:** How would you handle hundreds of status codes without a giant switch?
+
+**Q: A developer uses `switch` as a statement (not expression) with pattern matching but forgets to handle all sealed subtypes. Does the compiler catch this?**
+
+- For switch statements, exhaustiveness is not required — missing cases simply do nothing at runtime. However, with pattern matching, the compiler will issue a warning if the switch is not exhaustive. Switch expressions enforce exhaustiveness as a compile error.
+- **Interview follow-up:** When would you intentionally use a switch statement over a switch expression?
+
+**Q: You need to implement a discount calculator where different customer tiers get different percentage discounts. How would you use a switch expression for this?**
+
+- Define a sealed `CustomerTier` hierarchy or enum, then: `return switch (tier) { case PREMIUM -> 0.2; case GOLD -> 0.15; case SILVER -> 0.1; case BRONZE -> 0.05; case null -> 0.0; }`. The switch is exhaustive and handles null safely.
+- **Interview follow-up:** How would you add a loyalty points factor that modifies the discount?
+
+**Q: Your team uses a switch expression that yields a `String` from a pattern match. One case throws an exception. Does the compiler require that throwing case to also have a return value?**
+
+- No. A case that throws an exception (or returns via `throw`) does not need to yield a value. The compiler accepts `case Integer i -> throw new IllegalArgumentException("unsupported")` because throwing terminates normally in the compiler's analysis.
+- **Interview follow-up:** What about a case that has a `return` statement instead of yield?
+
+**Q: You have a switch expression on an enum where every constant is covered. Is a `default` branch required?**
+
+- If every enum constant is explicitly covered, the compiler accepts the switch without a `default`. However, if the enum is later extended, the switch will break. A `default` that throws an exception is often safer for API enums.
+- **Interview follow-up:** How do you document that adding a new enum constant requires updating the switch?
+
+**Q: You need a switch expression that returns different types based on the input, but switch must have a consistent return type. How do you handle heterogeneous return types?**
+
+- Use a common supertype or sealed interface for the return value. Each case returns a subtype of that common type. For example, `sealed interface Result permits TextResult, NumberResult` with switch cases returning `TextResult` or `NumberResult`.
+- **Interview follow-up:** What if you need to return completely unrelated types?
+
+**Q: A junior developer writes a switch expression with colon syntax and uses `break` instead of `yield`. How do you explain the difference?**
+
+- Explain that `break` exits a switch statement without producing a value. `yield` returns a value from a colon-syntax case in a switch expression. The compiler will reject `break value;` in a switch expression, producing a clear error message.
+- **Interview follow-up:** Can you mix arrow and colon syntax in the same switch?
+
+**Q: You are writing a switch with many cases that all share some logic before returning a distinct value. How do you avoid duplication?**
+
+- Extract the shared logic into a helper method called from each case, or use a `default` delegation pattern: `case A, B, C -> sharedProcessing("specificResult")`. For complex cases, consider a `Map` of handlers instead of a large switch.
+- **Interview follow-up:** When would a Map of handlers be preferable to a switch expression?
+
 ## Interview Questions
 
 - **What is the difference between break and yield in a switch expression?**
@@ -199,6 +244,54 @@
 
 - **Can you use pattern matching with switch for non-sealed types?**
   - Yes, you can use type patterns, record patterns, and guarded patterns in a switch regardless of whether the selector type is sealed. However, the switch must still be exhaustive, which typically means adding a `default` branch for non-sealed types.
+
+- **What is the difference between a switch expression and a switch statement?**
+  - A switch expression produces a value and must be exhaustive. A switch statement does not produce a value and does not require exhaustiveness. Switch expressions use `yield` or arrow syntax with single expressions; switch statements use `break` or fall-through.
+
+- **Can a switch expression throw an exception instead of returning a value?**
+  - Yes. A case can throw an exception via `throw`. The compiler accepts this because the method terminates exceptionally, which satisfies the requirement that every execution path produces a result or throws.
+
+- **How do you handle multiple conditions that yield the same result in arrow syntax?**
+  - Use a comma-separated list of labels: `case MONDAY, TUESDAY, WEDNESDAY -> "weekday"`. This is cleaner than having separate cases that fall through to the same block.
+
+- **What is the purpose of the `yield` keyword in a switch expression?**
+  - `yield` returns a value from a colon-syntax case block in a switch expression. It was introduced in JDK 13 as a replacement for `break value` and is scoped to the switch expression only.
+
+- **Can you use a switch expression in a method argument?**
+  - Yes. Since a switch expression is an expression, it can be passed directly as an argument: `process(switch (val) { case 1 -> "one"; default -> "other"; })`.
+
+- **How does the compiler determine the type of a switch expression?**
+  - The compiler computes the least upper bound of all yielded values. If cases yield `String` and `null`, the type is `String`. If cases yield `Integer` and `Double`, the type is `Number & Comparable<?>`.
+
+- **What happens if a switch expression has unreachable cases?**
+  - The compiler reports an error for unreachable cases. For example, placing `case String s` after `case CharSequence cs` is unreachable because `String` is a subtype of `CharSequence` and the first pattern dominates.
+
+- **Can you use `var` as the selector type in a switch expression?**
+  - No, `var` cannot be used as the selector type because the switch selector must have a known type at compile time to check exhaustiveness and perform pattern matching.
+
+- **How do you handle enums with switch expressions across library versions?**
+  - Adding a new enum constant breaks switch expressions without `default`. The best practice is to include a `default` branch that throws an exception, documenting that enum consumers must update their switches.
+
+- **What is the difference between `case null` and a null check before the switch?**
+  - `case null` integrates null handling into the switch structure, making it visible and part of the exhaustive check. A separate null check before the switch is equivalent but less cohesive.
+
+- **Can a switch expression have empty case bodies?**
+  - No. Each case in a switch expression must produce a value or throw. Empty bodies are not allowed. In a switch statement, empty bodies are allowed and fall through.
+
+- **How does scope work for variables declared inside a switch expression case?**
+  - Variables declared in a case block are scoped to that block. They are not visible in other cases. In arrow syntax, the scope is the expression or block on the right side of `->`.
+
+- **Can you use switch expressions with `String` selectors?**
+  - Yes. Switch expressions support `String` selectors. String comparison uses `equals()` matching, and all the same exhaustiveness rules apply with a required `default` branch.
+
+- **What is the difference between pattern matching dominance and traditional switch ordering?**
+  - Traditional switch ordering matters only for fall-through. Pattern matching ordering matters for which case matches first. A more general pattern (e.g., `Object o`) placed before a specific pattern (e.g., `String s`) dominates it and makes the specific case unreachable.
+
+- **How do you convert a traditional switch with fall-through to a modern switch expression?**
+  - Replace fall-through patterns with comma-separated labels on a single arrow case. Replace shared code blocks with helper methods. Replace `break value` with `yield` for colon syntax or arrow syntax.
+
+- **What happens if a switch expression case throws an exception in arrow syntax?**
+  - The exception propagates normally. The arrow syntax with a block allows `throw`: `case 1 -> { throw new RuntimeException("error"); }`. This is valid because throwing terminates the expression normally in compiler analysis.
 
 ## Developer Recommendations
 

@@ -97,6 +97,62 @@
 - For group channels, use fan-out on read — do not pre-populate inboxes
 - **Interview follow-up:** How do you ensure the user sees all missed messages without causing a thundering herd of reads on the database?
 
+**Q: Your chat system uses WebSocket. Some users behind strict corporate firewalls cannot connect. How do you provide a fallback?**
+
+- Implement HTTP long polling as a fallback — the client sends a request, the server holds it open until a message arrives or timeout occurs
+- Add Server-Sent Events (SSE) support as an alternative one-way channel for receiving messages, with a separate REST endpoint for sending
+- Use a connection library (Socket.IO) that automatically negotiates the best available transport: WebSocket > SSE > long polling
+- **Interview follow-up:** How does the fallback mechanism affect message ordering guarantees and delivery latency?
+
+**Q: Your chat system sends push notifications for every message in a busy group chat with 500 members. Users complain about notification spam. How do you reduce it?**
+
+- Implement notification aggregation: batch messages within a 30-second window and send a single notification ("5 new messages in Group Chat")
+- Allow users to configure per-chat notification settings: mute, mention-only, or all messages
+- For high-traffic groups, use a cooldown per user per chat — send at most one notification per minute regardless of message count
+- **Interview follow-up:** How do you balance timely notifications with aggregation delay?
+
+**Q: A user sends a message, but due to a network blip, the client retries and the same message appears twice. How do you deduplicate?**
+
+- The client generates a unique message UUID before sending; the server checks this UUID in a Redis SET NX with TTL before processing
+- If the UUID already exists within the dedup window, return the existing message ID without creating a duplicate
+- Ensure idempotency handling extends to push notifications and message storage alike
+- **Interview follow-up:** How long should the deduplication window be and what happens to message IDs after the window expires?
+
+**Q: Your chat service stores messages in a relational database. As message volume grows, querying conversation history becomes slow. How do you scale?**
+
+- Partition the messages table by conversation_id using a sharding key derived from conversation ID
+- Use a time-series approach: create per-month or per-day tables for messages and query only relevant partitions
+- Move older messages to a cheaper, slower storage tier (archival) and keep recent messages in fast storage
+- **Interview follow-up:** How do you handle cross-shard queries like "search all my conversations for a keyword"?
+
+**Q: In a group chat, user A sends a message but user B claims it arrived 30 seconds late. The server timestamp shows the message was stored immediately. What could go wrong?**
+
+- The server assigned the timestamp at reception, but the message may have been queued before delivery to user B due to fan-out delays
+- Check if user B's WebSocket connection was reconnecting during that period — messages may have been buffered on the server
+- The message delivery pipeline (server → queue → push notification service → client) may have bottlenecks at the push step
+- **Interview follow-up:** How do you measure and monitor end-to-end message delivery latency per user?
+
+**Q: Your chat system stores read receipts as individual records per message per user. In a busy group chat, this generates millions of small writes. How do you optimize?**
+
+- Aggregate read receipts: instead of per-message updates, store a "last read message ID" per user per conversation
+- Send read receipts periodically (every 5 seconds) rather than on every read event
+- Use a counter-based approach: track that user has read up to message sequence X; infer that earlier messages are also read
+- **Interview follow-up:** How does the aggregated approach affect the accuracy of "seen by" indicators?
+
+**Q: A user's device is offline for 2 hours. When they reconnect, the client tries to sync all missed messages and the app freezes. How do you fix this?**
+
+- Implement cursor-based pagination: load the most recent N messages (e.g., 50) on reconnect and load older messages on demand
+- For high-volume conversations, provide a "catch up" summary: "150 new messages since your last visit. Tap to view."
+- Use a separate sync endpoint that returns only message metadata (sender, sequence ID, timestamp) for quick rendering, with full content loaded on scroll
+- **Interview follow-up:** How do you handle the case where a user has millions of unread messages across thousands of conversations?
+
+**Q: Your chat system supports end-to-end encryption. How does this affect server-side search and push notifications?**
+
+- E2E encryption means the server cannot read message content — search must happen client-side by downloading and decrypting message history locally
+- Push notifications cannot include message content — send a generic notification ("New message from Alice") without the message text
+- For search, consider indexing encrypted message metadata (sender, timestamp) on the server and keeping content search client-side
+- **Interview follow-up:** How do you handle key management when a user logs in from a new device — how do they access old encrypted messages?
+
 ## Interview Questions
 
 - **How do you implement message ordering in a distributed chat system?**
@@ -107,6 +163,38 @@
   - Use Redis with per-user key (presence:{user_id}) and TTL equal to heartbeat interval * 2. Clients send heartbeats every 15 seconds. A separate presence service subscribes to Redis key expiration events for offline detection. For scaling, shard presence data by user ID hash across multiple Redis clusters.
 - **Describe how you would handle media uploads in a chat system.**
   - Clients receive a presigned upload URL from the server, upload directly to blob storage. The server stores only the media URL, thumbnail, and metadata. A CDN caches media at edge locations. Thumbnails are generated server-side using a queue-based image processing pipeline.
+- **How do you scale WebSocket connections to 10M concurrent users?**
+  - Use a dedicated WebSocket gateway layer that handles connection management separately from application logic. Each gateway node handles 100K–500K connections. Use consistent hashing (by user ID) to route clients to the same gateway. Use Redis pub/sub for cross-gateway message delivery.
+- **Explain how message ordering is maintained across shards.**
+  - Each conversation is assigned to a single shard based on conversation_id hash. All messages in a conversation go to that shard, which assigns monotonic sequence IDs. This ensures in-order delivery within a conversation. Cross-shard ordering (unified feed) requires a global sequencer or hybrid logical clocks.
+- **How do you implement "typing indicators" in a chat system?**
+  - The client sends a "typing" event via WebSocket every few seconds while the user is typing. The server broadcasts to other conversation participants with a short TTL (3 seconds). If no new typing event arrives within TTL, indicate "stopped typing." Use Redis pub/sub to fan-out across WebSocket gateway nodes.
+- **What is the difference between a "last seen" indicator and presence tracking?**
+  - Last seen stores the timestamp of the user's last activity, shown when offline. Presence shows real-time online/offline/busy status, based on heartbeat intervals. Last seen is privacy-friendly (approximate), while presence is real-time but more intrusive. Some systems offer configurable privacy controls for both.
+- **How do you handle message deletion for all users?**
+  - Store a "deleted" flag or timestamp on the message record. When fetching conversation history, the server filters out deleted messages. For push notifications, check the deletion status before sending. For "delete for everyone," use a server-side timestamp that retroactively marks the message as deleted.
+- **Explain the architecture of WhatsApp's end-to-end encryption.**
+  - WhatsApp uses the Signal Protocol. Each client generates a public/private key pair. When user A messages user B, the server provides B's public key. A encrypts the message using a per-session symmetric key derived from both parties' keys. The server stores only the encrypted message blob and cannot decrypt it.
+- **How do you implement message search across millions of messages?**
+  - Use a dedicated search index (Elasticsearch) indexed by conversation_id, sender_id, and message content. The search index is updated asynchronously from the message queue. For E2E encrypted systems, search must be client-side — download and decrypt messages, then search locally.
+- **How do you handle message delivery guarantees (at-least-once vs exactly-once)?**
+  - At-least-once: the server stores the message and the client acknowledges receipt; if no ack, the server retries. Exactly-once requires idempotency keys plus deduplication on the client and server. Most chat systems use at-least-once for availability and handle duplicates at the UI layer.
+- **What is the role of a "message queue" in a chat system?**
+  - The message queue (Kafka, RabbitMQ) decouples message ingestion from delivery. The server writes incoming messages to the queue. Fan-out workers consume from the queue and deliver via WebSocket or push notifications. The queue provides buffering during traffic spikes and enables replays for recovery.
+- **How do you design a chat system for offline message sync?**
+  - Store messages in a per-conversation message log. On client reconnect, the client provides its last-known sequence ID. The server returns all messages after that sequence ID, paginated. The client merges the new messages into its local store, maintaining a local copy for offline access.
+- **Explain the concept of "conversation warm-up" and why it matters.**
+  - When a user opens a conversation, the system needs to load recent messages, presence status, and typing indicators. If the user switches between conversations, repeatedly loading full message history is wasteful. Pre-load the N most recent conversations' metadata and message snippets, and lazy-load full content on selection.
+- **How do you rate limit message sending in a chat system?**
+  - Per-user: max N messages per second/minute to prevent spam. Per-conversation: max M messages per minute to prevent flooding. Apply rate limits at the server ingress before message processing. Return 429 with Retry-After for exceeded limits. Consider different limits for 1:1 vs group chats.
+- **What is the difference between a "channel" and a "direct message" in chat architecture?**
+  - Direct messages typically use a conversation ID computed from the sorted pair of user IDs (min(userA, userB) + max(userA, userB)). Channels (group chats) use a unique group ID. DMs are always two-participant; channels support N participants. Both use the same message storage and fan-out mechanisms internally.
+- **How do you handle voice and video calls in a chat system?**
+  - Voice/video uses WebRTC for peer-to-peer media after an initial signaling phase through the chat server. The chat server facilitates the ICE/STUN/TURN negotiation by exchanging SDP offers and answers via WebSocket. Media streams are peer-to-peer when possible; TURN relay is used for NAT traversal.
+- **How do you implement a "reply to message" feature?**
+  - Store a "reply_to_message_id" field on the message record. The client sends the original message ID when composing a reply. The server validates the referenced message exists in the same conversation and includes the quoted snippet when rendering. For deleted replied messages, show "[deleted]" as the quoted content.
+- **How do you design a chat system that handles large file transfers (1GB+)?**
+  - Use presigned upload URLs for direct client-to-blob-storage uploads, bypassing the chat server. Stream the file in chunks to handle network interruptions. Once uploaded, send only the file metadata and download URL through the chat system. Use a CDN for download delivery to reduce server load.
 
 ## Developer Recommendations
 

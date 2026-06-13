@@ -215,6 +215,37 @@ public List<Product> dbFallback(String category, Throwable t) {
 10. **How does the HALF_OPEN state prevent flapping?**
     - A: HALF_OPEN allows a limited number of probe requests. If all succeed, the circuit closes. If any fail, it reopens. Gradual recovery (1% → 10% → 100% traffic) prevents a single success from immediately sending full traffic to a still-unstable service.
 
+11. **What is the relationship between circuit breaker and timeout patterns?**
+    - A: A circuit breaker prevents calls to a failing service. A timeout (TimeLimiter) prevents a single call from blocking indefinitely. They complement each other: the TimeLimiter caps each call at a configured duration (e.g., 2s), and the circuit breaker tracks the failure rate of timed-out calls to decide when to stop calling entirely. Use both together: TimeLimiter first, then circuit breaker.
+
+12. **What is the Bulkhead pattern and how does it prevent cascading failures?**
+    - A: The Bulkhead pattern isolates resources (thread pools, connections, semaphores) for different downstream services or operations — like compartments in a ship. If one downstream service fails, only its dedicated thread pool is affected, not the entire application. Combined with circuit breakers, Bulkhead limits the blast radius: circuit breaker stops calling a dead service, and Bulkhead ensures other services' calls aren't starved of threads.
+    - **Key metrics to monitor:** Thread pool active count, queue depth, rejected task count. When any of these approach limits, the bulkhead needs resizing.
+
+13. **How do you choose circuit breaker threshold values for a new service with no historical data?**
+    - A: Start with conservative defaults: 20-request sliding window, 50% failure rate threshold, 30-second wait in OPEN, 3 permitted calls in HALF_OPEN. After 2-4 weeks of production data, analyse the actual failure rate distribution and P99 latency, then tune. For the slow-call threshold, set it to 2-3x the observed P99 latency from the first weeks of operation.
+
+14. **What happens if a circuit breaker's fallback method itself fails or throws an exception?**
+    - A: The fallback exception propagates to the caller, effectively bypassing the circuit breaker's protection. The caller should handle this with its own fallback or error handling. To prevent this, fallback methods should be as simple as possible: return a hardcoded default, read from a local cache, or queue a message. Never call another remote service in a fallback — that just creates dependency chains.
+
+15. **How does a circuit breaker work with asynchronous communication (message queues)?**
+    - A: Circuit breakers wrap the message sending operation, not the consumer processing. If the downstream message consumer is unhealthy (e.g., its queue is full, it's not consuming), the circuit breaker detects failures when the message broker reports failed delivery or timeout. The circuit opens, and the producer stops sending messages to the queue until the consumer recovers. The fallback could send to a dead-letter queue or a backup topic.
+
+16. **What is the difference between a circuit breaker in the application layer vs. the network layer (service mesh)?**
+    - A: Application-layer circuit breakers (Resilience4j, Hystrix) are configured per-service, per-method in the application code. They provide fine-grained control, custom fallbacks, and per-instance metrics. Network-layer circuit breakers (Istio, Linkerd) operate at the sidecar proxy level — they enforce connection pools, request timeouts, and outlier detection at the TCP/HTTP level. Service mesh circuit breakers are easier to configure globally but cannot execute application-specific fallback logic.
+
+17. **How do you version circuit breaker configurations and roll back a bad configuration change?**
+    - A: Store circuit breaker configuration in a versioned source of truth (Git repository, ConfigMap, or configuration service). Use a deployment pipeline with canary testing: apply the new config to 1% of instances first, monitor circuit breaker metrics (open rate, fallback invocation rate), then roll out to 100%. For rollback, revert the configuration commit and redeploy. For production emergencies, maintain a "safe" default configuration that can be activated via a feature flag.
+
+18. **How does a circuit breaker handle retries — should retries count as individual failure attempts?**
+    - A: Yes, each retry attempt that fails should count as a failure toward the circuit breaker threshold. If a call is retried 3 times and all 3 fail, that's 3 failures. However, to avoid inflating the failure rate, use a single circuit breaker around the entire retry block (including the retry loop), not around individual retry attempts. This way, the circuit breaker sees one logical call with one outcome (success or failure after all retries).
+
+19. **What is the "half-open thundering herd" problem and how do you prevent it?**
+    - A: When a circuit transitions from OPEN to HALF_OPEN, multiple concurrent requests may all be permitted as test calls, overwhelming the recovering service. Prevention: Use a low `permittedNumberOfCallsInHalfOpenState` (1-3), implement gradual recovery (1% → 10% → 100%), or use a distributed rate limiter in the HALF_OPEN state that caps total probe requests across all instances.
+
+20. **How do you monitor circuit breaker effectiveness in production?**
+    - A: Export metrics: circuit breaker state (CLOSED/OPEN/HALF_OPEN), failure rate, call count, slow call count, fallback invocation count, and state transition count. Create Grafana dashboards grouped by service and circuit breaker name. Set alerts: any circuit breaker remaining OPEN for more than 5 minutes, any circuit breaker transitioning between OPEN and CLOSED more than 3 times in an hour (flapping), and any circuit breaker with a fallback invocation rate above 10% of total calls.
+
 ---
 
 ## Developer Recommendations

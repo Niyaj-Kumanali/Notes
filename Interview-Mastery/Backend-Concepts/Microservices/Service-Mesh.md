@@ -118,6 +118,41 @@
 - Envoy returns 503 when the upstream is unhealthy or the circuit breaker is open. The team should inspect Envoy access logs for the actual response flags (e.g., `UF` — upstream failure, `UO` — upstream overflow). Enable the `x-envoy-*` response headers (x-envoy-upstream-service-time, x-envoy-decorator-operation) and create Kiali dashboards showing service-to-service traffic flow with error annotations.
 - **Interview follow-up:** If Envoy access logs show "NR" (no route) for a specific request, what would you check in the mesh configuration?
 
+**Q: Your team deploys Istio and immediately notices that all HTTP requests between services return 503 errors. What is the most likely cause and how do you fix it?**
+
+- The sidecar proxy may be blocking traffic because mTLS is in STRICT mode but not all services have sidecars injected, or the destination rule enforces mTLS on services that are not part of the mesh. Fix by setting mTLS to PERMISSIVE mode initially, ensuring all services have sidecars, and gradually switching to STRICT after confirming all traffic is handled by the mesh.
+- **Interview follow-up:** How would you verify that every service in your cluster has a sidecar injected without manually checking each deployment?
+
+**Q: After enabling Istio, your monitoring shows that the control plane (istiod) CPU usage is at 90%. You have 500 services and 2000 pods. What is likely causing the high CPU usage?**
+
+- istiod pushes configuration updates to every Envoy proxy whenever any VirtualService, DestinationRule, or Service changes. With 2000 proxies, a single config change triggers 2000 xDS push operations. The fix is to use Istio's sharding (revision-based deployments), limit unnecessary config updates, enable delta xDS (incremental updates), and tune the `PUSH_THROTTLE` setting to batch updates.
+- **Interview follow-up:** How would you design your VirtualService and DestinationRule organization to minimize the blast radius of configuration changes on control plane CPU usage?
+
+**Q: A team deploys Linkerd for its simplicity, but needs to run a legacy service that uses TCP traffic (non-HTTP). Linkerd seems to drop these connections. What is the issue?**
+
+- Linkerd's data plane (linkerd2-proxy) primarily handles HTTP/1.x, HTTP/2, and gRPC traffic. Raw TCP traffic has limited support. The fix is either to configure Linkerd to skip proxying for the legacy service (exclude from mesh), or switch to Istio which has full TCP support including TCP traffic management, metrics, and mTLS for raw TCP connections.
+- **Interview follow-up:** What criteria would you use to decide whether to exclude a service from the mesh versus modifying the service to use HTTP/gRPC?
+
+**Q: After enabling Istio's telemetry, your monitoring dashboard shows that Envoy is generating 10x more metric data than expected, causing high storage costs in Prometheus. How do you reduce telemetry volume?**
+
+- Envoy generates metrics per request, per connection, and per cluster. Reduce cardinality by disabling per-client metrics (use aggregated service-level metrics instead), increase the metrics reporting interval, and use metric filtering in the Envoy filter to drop low-value metrics. Use Istio's Telemetry API to selectively enable metrics for only the services that need detailed monitoring.
+- **Interview follow-up:** Which metrics would you prioritize for production monitoring (keeping) versus debugging (dropping) to balance observability with cost?
+
+**Q: Your team enables mTLS in Istio. A legacy service running on a VM outside the Kubernetes cluster cannot communicate with mesh services. How do you integrate external workloads?**
+
+- Use Istio's Mesh Expansion feature to join the VM to the mesh. Install an Istio sidecar on the VM that connects to the control plane and receives its own SPIFFE identity. Configure a `WorkloadEntry` resource to register the VM as a mesh workload. Alternatively, set the external service's `DestinationRule` to disable mTLS for that specific service, or use an Egress Gateway to route traffic to the VM.
+- **Interview follow-up:** For the alternative approach of disabling mTLS, what security risks does it introduce and how would you mitigate them?
+
+**Q: During a traffic spike, Envoy sidecar CPU usage spikes to 200% of its requested limit and the sidecar starts dropping packets. How do you prevent this?**
+
+- The sidecar's resource limits are too low for the traffic volume. Increase the sidecar's CPU and memory limits. Tune Envoy's connection buffer sizes and worker thread count. Distribute traffic across more pod replicas to reduce the per-sidecar load. Consider using Linkerd, which has a lighter-weight proxy (Rust-based, ~50% less CPU usage than Envoy).
+- **Interview follow-up:** Given that the application container and the Envoy sidecar share the same pod, how would you configure resource limits to ensure Envoy gets enough CPU without starving the application?
+
+**Q: A new service is deployed but the Istio mesh does not route traffic to it. The service's pods are running and ready. What configuration might be missing?**
+
+- The service likely lacks a `VirtualService` or `DestinationRule`, or the `VirtualService`'s host field does not match the service's DNS name. Also check that the service's port naming follows Istio conventions (`http-<name>`, `grpc-<name>`). Without proper port naming, Istio treats the port as TCP and no routing rules apply. Verify with `istioctl analyze` to detect configuration issues.
+- **Interview follow-up:** After fixing the VirtualService, you notice traffic is only routed to half the available pods. What would you check next?
+
 ## Interview Questions
 
 - **What is the difference between a service mesh and an API gateway?**
@@ -137,6 +172,62 @@
 
 - **What is the purpose of a VirtualService in Istio?**
   - A VirtualService defines routing rules for a given host: which subsets (versions) of the destination service receive traffic, under what conditions (headers, weight), and with what retry/timeout/mirroring policies. It works with DestinationRule (which defines subsets, load balancer settings, and connection pool/outlier detection settings).
+
+- **How does Istio handle certificate rotation for mTLS?**
+  - Istio's Citadel (part of istiod) issues SPIFFE-compliant certificates to each workload, typically valid for 24 hours. The sidecar proxy (Envoy) watches for certificate expiry and proactively requests new certificates from the control plane via the Secret Discovery Service (SDS).
+  - Old certificates are revoked gracefully by giving them a short remaining validity window. The application never handles certificates directly.
+
+- **What is the role of the Envoy filter chain?**
+  - Envoy processes traffic through a configurable filter chain. Each filter can inspect, modify, or redirect traffic. Built-in filters include HTTP connection manager, router, health check, RBAC, and Lua/WASM.
+  - Filters are ordered and can be chained to implement complex traffic policies (e.g., rate limiting after auth but before routing).
+
+- **How does a service mesh improve security beyond application-level security?**
+  - mTLS encrypts and authenticates all inter-service traffic at the network level, preventing eavesdropping and man-in-the-middle attacks. The mesh provides fine-grained RBAC policies per service, per path, and per method.
+  - The mesh also provides audit trails of all inter-service communication, and automatic certificate rotation that eliminates manual TLS certificate management.
+
+- **What is the difference between a service mesh and a traditional load balancer?**
+  - A load balancer distributes traffic to a set of backend instances based on simple policies (round-robin, least connections). A service mesh provides application-aware routing (header-based, weight-based), resilience features (retries, timeouts, circuit breaking), security (mTLS, RBAC), and deep observability (distributed tracing, metrics per route).
+  - A service mesh operates at the sidecar level (one proxy per service instance), not at a centralized load balancer.
+
+- **How does Istio handle traffic mirroring?**
+  - Traffic mirroring (also called shadowing) copies a percentage of requests to a mirrored service without affecting the primary response. The primary request continues to the original destination; the mirrored copy is sent to a separate service for testing.
+  - Configured via VirtualService mirror field: `mirror: <destination>` and `mirrorPercentage: <value>`. Useful for testing new service versions with production traffic without impacting users.
+
+- **What is the Envoy thread-per-core model and why is it important?**
+  - Envoy uses a thread-per-core model where each worker thread is pinned to a dedicated CPU core. Each thread runs its own event loop and handles a subset of connections. This eliminates lock contention and provides predictable performance.
+  - This model allows Envoy to scale linearly with available CPU cores and maintain consistent low-latency performance under high load.
+
+- **How do you debug connectivity issues in a service mesh?**
+  - Check Envoy access logs for response flags (UF, UO, NR, etc.). Use `istioctl proxy-status` to verify proxy configuration. Inspect the Envoy admin endpoint (`/config_dump`, `/clusters`, `/listeners`). Use Kiali for visual service graph with error annotations.
+  - Enable debug logging on specific proxies if needed. Use `istioctl analyze` for configuration validation.
+
+- **What is the purpose of a DestinationRule in Istio?**
+  - DestinationRule defines policies that apply to traffic after routing (i.e., after the VirtualService has matched). It configures load balancer settings (round_robin, least_request, ring_hash), connection pool settings (max connections, max requests per connection), outlier detection, and TLS settings.
+  - DestinationRule also defines subsets (versions) that VirtualServices reference for traffic splitting.
+
+- **How does a service mesh handle retries differently from application-level retries?**
+  - Mesh-level retries are configured declaratively and applied by the sidecar proxy without application code changes. The proxy handles retry timing, counting, and budget. Application-level retries require custom code in every service.
+  - Mesh retries can be more efficient because the proxy can coordinate retry behavior across the entire mesh and avoid retry storms.
+
+- **What is the difference between PERMISSIVE and STRICT mTLS mode?**
+  - PERMISSIVE: sidecar proxies accept both mTLS and plaintext connections. This allows gradual mTLS rollout — services with sidecars can connect to services without them.
+  - STRICT: all connections must use mTLS. Plaintext connections are rejected. Use STRICT only after all services in the mesh have sidecars injected and are configured to use mTLS.
+
+- **How does Istio integrate with Kubernetes RBAC?**
+  - Istio extends Kubernetes RBAC with its own AuthorizationPolicy resource, which can enforce access control at the service, path, or method level. Policies can reference Kubernetes ServiceAccounts for workload identity.
+  - Istio authorization is enforced by the sidecar proxy before traffic reaches the application, providing defense in depth alongside Kubernetes RBAC.
+
+- **What are the challenges of running a service mesh across multiple Kubernetes clusters?**
+  - Multi-cluster mesh requires network connectivity between clusters (VPN, VPC peering, or service mesh-specific gateways). Service discovery across clusters must be synchronized. Certificate management must span clusters.
+  - Istio supports multi-cluster mesh via a shared control plane (one istiod managing proxies in multiple clusters) or replicated control planes with federation.
+
+- **How does Envoy's outlier detection prevent cascading failures?**
+  - Outlier detection monitors consecutive 5XX errors, connection failures, and request timeouts. When a pod exceeds the configured threshold, Envoy ejects it from the load-balancing pool for a specified ejection time.
+  - Ejected pods are gradually retried (via the base ejection time and max ejection percent). This isolates failing instances and prevents them from degrading the entire service.
+
+- **What is the purpose of the Envoy admin interface?**
+  - Envoy exposes an admin interface (typically port 8001) for debugging and configuration inspection. Endpoints include `/config_dump` (full configuration), `/clusters` (upstream cluster status), `/listeners` (listener details), `/stats` (metrics), `/logging` (dynamic log level changes), and `/quitquitquit` (graceful shutdown).
+  - The admin interface should be disabled or restricted in production environments.
 
 ## Developer Recommendations
 

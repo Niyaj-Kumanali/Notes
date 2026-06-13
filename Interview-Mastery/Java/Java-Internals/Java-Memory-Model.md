@@ -114,6 +114,41 @@
 - The test runs on a single-socket x86 machine where hardware cache coherence is strong and the JIT may not reorder aggressively. Production might use multi-socket NUMA architectures, different JVM versions, or higher optimization levels. Without happens-before, the JMM permits any behavior: writes may not be visible to reader threads, and the map's internal invariants (linked list pointers, resize flags) can appear corrupted. The test has a data race; its outcome is undefined even if it always passes on one platform.
 - **Interview follow-up:** What tools can you use to detect data races in production, and how do they work at the JVM level?
 
+**Q: A team uses `synchronized` on a setter for a `Map` field but leaves the getter unsynchronized. Under heavy read load, the getter sometimes returns a stale or partially updated map. Why?**
+
+- Synchronization guarantees visibility only when both reads and writes are synchronized on the same monitor lock. The unsynchronized getter has no happens-before edge with the synchronized setter. The JIT may hoist the map reference out of loops, and CPU caches may never see the updated reference. Fix: synchronize the getter too, use `ReadWriteLock`, or replace the map with `ConcurrentHashMap` for atomic reads.
+- **Interview follow-up:** Would declaring the field `volatile` fix this? Why or why not?
+
+**Q: In a latency-sensitive trading application, a volatile field is read millions of times per second. Profiling shows the volatile read is 10x more expensive than a normal field read. Explain the source of the cost.**
+
+- Volatile reads on x86 require a LoadLoad barrier, which prevents subsequent loads from being reordered before the volatile read. More importantly, every volatile read forces the CPU to bypass the store buffer and read from the cache coherence protocol, which may require waiting for invalidate acknowledgments. On ARM/PowerPC, volatile reads are even more expensive because they require full memory barriers. The cost is the memory barrier instruction plus cache coherence traffic.
+- **Interview follow-up:** How does `VarHandle` with `acquire` / `release` modes differ from `volatile` in terms of barrier strength?
+
+**Q: A developer writes a lazy initialization holder pattern (`Holder` idiom) and claims it is always thread-safe without volatile. Is this correct?**
+
+- Yes, the holder pattern `private static class Holder { static final Singleton INSTANCE = new Singleton(); }` is thread-safe without volatile because the JVM guarantees that class initialization is performed under a synchronization barrier. When `Holder` is referenced, the class loader acquires a lock, initializes the class (including the static final field), and releases the lock. All threads see the fully initialized object without additional synchronization.
+- **Interview follow-up:** Why does the holder pattern work without volatile while double-checked locking requires it?
+
+**Q: A microservice uses a `static boolean debug` flag (not volatile) to enable verbose logging. An operator sets it via JMX and expects the change to take effect immediately, but it does not. Why?**
+
+- The JMM does not guarantee visibility of a non-volatile write from one thread to another. The JIT may compile the read of `debug` into a register, never re-reading from memory. The CPU may also cache the value in its store buffer. JMX calls the setter from a management thread, but the worker threads have no happens-before edge ensuring they see the update. Fix: declare `debug` as `volatile boolean`.
+- **Interview follow-up:** How does `AtomicBoolean` differ from `volatile boolean` in this context?
+
+**Q: An application creates thousands of short-lived threads that share a `ConcurrentHashMap`. Performance degrades over time and heap analysis shows excessive `Thread` objects. How does the JMM relate to this?**
+
+- The issue is likely a thread-local value leak: each thread writes to `ThreadLocal` variables before dying, but the `ThreadLocal` map entries are not cleaned up if the thread is pooled or if the value holds a strong reference to the thread. The JMM governs visibility of the `ThreadLocal` writes, but the core problem is object retention rather than visibility. Fix: use `ThreadLocal.remove()` in a `finally` block, or use a fixed-size thread pool instead of unbounded thread creation.
+- **Interview follow-up:** How does the `ThreadLocal` implementation leverage the JMM to ensure visibility of per-thread values without synchronization?
+
+**Q: A developer uses `Unsafe.putOrdered()` (StoreStore barrier) for a field update, expecting it to be visible to another thread using `Unsafe.getVolatile()`. Is this sufficient?**
+
+- No. `putOrdered()` inserts only a StoreStore barrier, ensuring that prior stores are visible before this store but does not flush the store buffer to main memory. A thread reading with `getVolatile()` (which uses a LoadLoad+LoadStore barrier) may still see the old value because the writing thread's store buffer has not been drained. For visibility across threads, the writer must use `putVolatile()` (StoreLoad barrier) or the reader must use `getOrdinary()` only if the writer used `putVolatile()`.
+- **Interview follow-up:** When is `putOrdered()` / `lazySet` actually useful in production?
+
+**Q: A testing team runs a multi-threaded test on a 128-core server and sees non-deterministic failures that never reproduce on laptops. The test uses no explicit synchronization. Explain the JMM's role.**
+
+- On a large NUMA (Non-Uniform Memory Access) machine, each core has its own cache and memory controller. Without happens-before edges, writes on one socket may take microseconds to propagate to another socket — or may never be observed by a thread running on a different socket. The laptop has a single cache domain where writes are visible nearly immediately. The test has data races; its behavior is undefined per JMM and varies with hardware topology. Fix: add proper synchronization to establish happens-before between threads.
+- **Interview follow-up:** How would you design a test that reliably detects data races regardless of hardware?
+
 ## Interview Questions
 
 - **What is happens-before and why does it matter?**
@@ -130,6 +165,51 @@
 
 - **What is false sharing and how does it relate to the JMM?**
   - False sharing occurs when two threads modify independent variables that happen to reside on the same CPU cache line (typically 64 bytes). Even though the variables are unrelated, the cache coherence protocol invalidates the entire line, forcing repeated cache misses. The JMM does not directly address false sharing but affects it through the visibility semantics of volatile. Mitigation: pad objects to align fields to separate cache lines using `@Contended` (Java 8+) or manual padding fields.
+
+- **What is the happens-before rule for volatile?**
+  - A volatile write on variable V happens-before every subsequent volatile read of V. This means all actions performed by the writing thread before the volatile write become visible to the reading thread after the volatile read. The JVM enforces this by inserting a StoreStore barrier before the volatile write, a StoreLoad barrier after it, and LoadLoad+LoadStore barriers after the volatile read.
+
+- **What is the happens-before rule for synchronized?**
+  - An unlock on a monitor happens-before every subsequent lock on the same monitor. This ensures that all actions performed inside a synchronized block are visible to the next thread that enters a synchronized block on the same monitor. The JVM uses memory barriers at monitor enter (acquire) and exit (release) to enforce this.
+
+- **What are the happens-before rules for thread start and join?**
+  - `Thread.start()` happens-before the first action in the started thread. This guarantees that all writes performed before calling `start()` are visible to the new thread. `Thread.join()` returns only after all actions in the joined thread have completed, establishing a happens-before edge from the joined thread's actions to the caller of `join()`.
+
+- **What is the difference between happens-before and synchronizes-with?**
+  - Synchronizes-with is a specific relation between synchronization actions (volatile access, lock/unlock, thread start/join). Happens-before is the transitive closure of synchronizes-with plus program order. In other words, happens-before includes both synchronization ordering (synchronizes-with) and intra-thread sequencing (program order). Happens-before is the overall visibility guarantee used by the JMM.
+
+- **How does the JMM define a data race?**
+  - A data race occurs when two accesses to the same variable are from different threads, at least one access is a write, and there is no happens-before relationship between them. The JMM allows programs with data races to exhibit seemingly impossible behaviors — including seeing values that were never written ("out of thin air" values) — because speculative execution and reordering can produce unexpected results in the absence of ordering guarantees.
+
+- **What is the causality requirement in the JMM?**
+  - The JMM's causality requirement ensures that an execution must be "well-justified" — there must exist a chain of causal actions explaining why each read returns the value it does. This prevents circular reasoning where a read returns a value from a write that depends on that same read. The causality requirement eliminates most out-of-thin-air values while still allowing legitimate JIT optimizations.
+
+- **How does the JMM guarantee safe publication of immutable objects?**
+  - If an object's fields are all declared `final` and the object reference does not leak from the constructor, the JMM guarantees that any thread seeing the reference will see the correctly constructed values of all final fields. This is implemented through a StoreStore barrier after the final field writes, preventing the constructor's writes from being reordered after the reference becomes visible.
+
+- **What is the difference between volatile and VarHandle in Java 9+?**
+  - `VarHandle` provides finer-grained memory ordering modes: `read`/`write` (plain access, no ordering), `getOpaque`/`setOpaque` (preventing reordering within a thread but not across threads), `getAcquire`/`setRelease` (one-way barriers — acquire prevents later reads from moving before, release prevents earlier writes from moving after), and `getVolatile`/`setVolatile` (full volatile semantics). `volatile` always uses the strongest mode. `VarHandle` also supports atomic operations like `compareAndSet` and `getAndUpdate`.
+
+- **What is the ABA problem in CAS and how does the JMM relate?**
+  - ABA occurs when a CAS operation succeeds because the value reads as the expected old value, but the value was changed to something else and back to the expected value in between. The CAS does not detect this history. The JMM is relevant because without proper ordering, a thread may see a stale version of the reference. `AtomicStampedReference` and `AtomicMarkableReference` solve ABA by adding a version stamp that is checked alongside the reference.
+
+- **How does the JMM define a happens-before edge for `final` fields in a constructor that throws an exception?**
+  - If a constructor throws an exception and the object is never published, no happens-before edge is needed. If the object escapes during a failed constructor (e.g., storing `this` in a static field before the exception), the final field guarantee does not apply because the object was not properly constructed. The JMM only guarantees final field semantics for objects whose constructor completes normally without leaking `this`.
+
+- **What is the role of the `AtomicReferenceFieldUpdater` and how does it use the JMM?**
+  - `AtomicReferenceFieldUpdater` provides atomic operations (CAS, getAndSet) on volatile fields of a class without requiring the field to be declared volatile in the class itself. It uses `Unsafe` to perform volatile access on the field's memory offset. The JMM guarantees are the same as for volatile fields — CAS operations establish happens-before edges. It is used in frameworks where adding volatile to every field is impractical or where field type is unknown at compile time.
+
+- **How does the JMM handle 64-bit operations on 32-bit JVMs?**
+  - The JMM allows a 64-bit `long` or `double` write to be split into two 32-bit writes on 32-bit JVMs. Without synchronization or volatile, a reader may see a torn value — the high 32 bits from one write and the low 32 bits from another. The JMM requires that volatile 64-bit reads and writes be atomic, but non-volatile 64-bit operations may not be. This is why `long` and `double` fields accessed from multiple threads should always be volatile.
+
+- **What is the happens-before edge in `java.util.concurrent` classes?**
+  - The `java.util.concurrent` package has its own memory consistency guarantees. For example: `ConcurrentHashMap.put()` happens-before a subsequent `get()` of the same key. `BlockingQueue.put()` happens-before a subsequent `take()` of the same element. `Executor.submit()` happens-before the task execution, and task execution happens-before `Future.get()` returns. These are documented in the `java.util.concurrent` package specification.
+
+- **How do JIT compilers affect the JMM guarantees?**
+  - The JIT can reorder, hoist, or eliminate memory operations as long as the transformation is invisible to single-thread execution and preserves happens-before edges. For example, the JIT may hoist a non-volatile field read out of a loop, causing a thread to never see an updated value. The JIT may also remove synchronization that it determines is unnecessary for a particular execution path. However, the JIT must not violate JMM visibility rules — any optimization that could cause a happens-before violation is illegal.
+
+- **What is sequential consistency and how does the JMM relate to it?**
+  - Sequential consistency (SC) is a stronger memory model where all operations appear to execute in a global total order consistent with each thread's program order. The JMM is weaker than SC — it allows some behaviors that SC forbids, such as seeing writes out of order across threads, to accommodate JIT and CPU optimizations. A correctly synchronized program (no data races) behaves as if it were sequentially consistent, but programs with data races have no such guarantee.
 
 ## Developer Recommendations
 

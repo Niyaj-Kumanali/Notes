@@ -149,6 +149,63 @@
 
 - **Interview follow-up:** How would you change this if you wanted to return the first successful result and ignore the others?
 
+**Q: Your application has a synchronized block inside a request handler that uses virtual threads. What performance issue can you expect?**
+
+- The virtual thread will be pinned to its carrier thread while inside the `synchronized` block. This reduces concurrency because the carrier thread cannot be reused for other virtual threads during the blocking operation. Replace `synchronized` with `ReentrantLock` to avoid pinning.
+- **Interview follow-up:** How would you detect pinning in a running application?
+
+**Q: You want to use virtual threads for file I/O operations. Are virtual threads beneficial for disk I/O compared to network I/O?**
+
+- Virtual threads help with any blocking I/O where the thread spends most of its time waiting. File I/O on local disks typically has lower latency than network I/O, but for many concurrent file operations (e.g., batch processing thousands of files), virtual threads still improve throughput by reducing OS thread overhead.
+- **Interview follow-up:** Does file I/O on Windows cause pinning issues with virtual threads?
+
+**Q: You are migrating a legacy application from a fixed thread pool to virtual threads. The application uses ThreadLocal for request-scoped data. What issues might arise?**
+
+- With virtual threads, each request creates a new virtual thread, and ThreadLocal memory scales with the number of threads. Millions of virtual threads each holding a ThreadLocal can exhaust heap memory. Use `ScopedValue` or pass context as method parameters instead.
+- **Interview follow-up:** How does `ScopedValue` differ from `ThreadLocal` in the context of virtual threads?
+
+**Q: How would you handle timeout for a virtual thread that is blocked on a network call?**
+
+- Use `StructuredTaskScope` with `scope.joinUntil(Instant)` to set a deadline for all subtasks. Alternatively, use `Future.get(timeout, unit)` inside the forked task. Virtual threads can be interrupted during blocking operations just like platform threads.
+- **Interview follow-up:** What happens to a virtual thread if the `Future.get()` timeout expires?
+
+**Q: You have a CPU-intensive computation that you currently run in a thread pool. Would virtual threads improve performance?**
+
+- No. Virtual threads do not add parallelism. They are multiplexed onto a limited number of carrier threads (typically the number of CPU cores). CPU-bound workloads benefit from parallelism via platform threads or `ForkJoinPool`, not from virtual threads.
+- **Interview follow-up:** What is the recommended approach for mixing CPU-bound and I/O-bound tasks in the same application?
+
+**Q: A team is using `Executors.newVirtualThreadPerTaskExecutor()` inside a loop that submits 100,000 tasks. How does this affect resource usage compared to a fixed thread pool?**
+
+- Each task runs on a new virtual thread, which is cheap (~few KB stack). The executor does not require a pool — virtual threads are created and disposed per task. A fixed platform thread pool would limit concurrency to the pool size but consume more memory per thread. Virtual threads scale to 100,000 concurrent tasks easily.
+- **Interview follow-up:** Should you ever pool virtual threads?
+
+**Q: You need to call a third-party library that uses `Object.wait()` and `notify()` internally. Does this work with virtual threads?**
+
+- `Object.wait()` causes pinning on virtual threads because it uses `synchronized` internally. The virtual thread will be pinned to its carrier thread during the wait. If possible, replace the library or use platform threads for that code.
+- **Interview follow-up:** Does `LockSupport.park()` cause pinning?
+
+**Q: How would you implement a retry mechanism for a virtual thread that calls an unreliable external service?**
+
+- Use a `StructuredTaskScope` inside a loop with a counter. Each attempt is a separate fork. If the scope fails, retry up to N times. The structured scope ensures that failed attempts are properly cleaned up before retrying.
+
+  ```java
+  for (int i = 0; i < 3; i++) {
+    try (var scope = new StructuredTaskScope.ShutdownOnFailure()) {
+      Future<Result> f = scope.fork(() -> callService());
+      scope.joinUntil(Instant.now().plusSeconds(5));
+      return f.resultNow();
+    } catch (Exception e) { /* retry */ }
+  }
+  throw new RuntimeException("Failed after 3 retries");
+  ```
+
+- **Interview follow-up:** How would you add exponential backoff between retries?
+
+**Q: You are using virtual threads with a database connection pool. Should the pool size be adjusted?**
+
+- Yes. With platform threads, the pool size typically matches the thread pool size (e.g., 200 connections for 200 threads). With virtual threads, you can have thousands of concurrent requests, so the connection pool may need to be larger. However, the database still has a finite connection limit, so consider connection pooling carefully.
+- **Interview follow-up:** How does the `maxPoolSize` interact with virtual thread scalability?
+
 ## Interview Questions
 
 - **What is the difference between a platform thread and a virtual thread?**
@@ -162,6 +219,54 @@
 
 - **When would you choose reactive programming over virtual threads?**
   - Reactive programming is still preferable when you need fine-grained backpressure, streaming of large datasets, or when integrating with reactive libraries that provide operators for complex event processing. Virtual threads are better for straightforward request-response services with blocking I/O.
+
+- **Can a virtual thread be interrupted while unmounted?**
+  - Yes. If a virtual thread is unmounted (waiting for I/O), it can still be interrupted via `Thread.interrupt()`. The interrupt will be delivered when the virtual thread resumes execution.
+
+- **What is the default carrier thread pool size for virtual threads?**
+  - The default carrier pool uses a `ForkJoinPool` with the number of threads equal to the number of available processors. This can be tuned via the `jdk.virtualThreadScheduler.parallelism` system property.
+
+- **Can you create a daemon virtual thread?**
+  - Yes. Virtual threads inherit the daemon status from the builder. `Thread.ofVirtual().daemon(true).start(runnable)` creates a daemon virtual thread that does not prevent JVM shutdown.
+
+- **What happens to a virtual thread's stack when it is unmounted?**
+  - When unmounted, the virtual thread's stack is moved from the carrier thread's stack to the heap as a small stack chunk. This allows the carrier thread to be reused and is the key to virtual thread scalability.
+
+- **Can virtual threads use thread priorities?**
+  - Virtual threads do not support thread priorities. The `setPriority()` method has no effect on virtual threads.
+
+- **How does `Thread.onSpinWait()` behave in virtual threads?**
+  - `Thread.onSpinWait()` hints that the thread is in a spin loop. In virtual threads, this prevents unmounting because the thread is expected to resume quickly. Avoid spin-waiting in virtual threads.
+
+- **Can virtual threads be used with `CompletableFuture`?**
+  - Yes. Virtual threads can create and complete `CompletableFuture` instances. However, avoid blocking on `CompletableFuture.get()` inside a virtual thread if the future is completed by another virtual thread in the same carrier pool, as this can cause starvation.
+
+- **What is the memory footprint of an idle virtual thread?**
+  - An idle (not running) virtual thread occupies approximately a few hundred bytes. Its stack starts very small (a few KB) and grows as needed. This is orders of magnitude less than a platform thread (~1 MB stack).
+
+- **How do you get a thread dump of virtual threads?**
+  - Use `jcmd <pid> Thread.dump_to_file -format=json <file>` which includes virtual threads. JDK Flight Recorder also records virtual thread events. Traditional `jstack` does not show virtual threads.
+
+- **Can virtual threads be used with `ForkJoinPool`?**
+  - Virtual threads can submit tasks to a `ForkJoinPool`, but the pool's worker threads are platform threads. The virtual threads will be unmounted while waiting for the fork-join task to complete.
+
+- **What is the relationship between virtual threads and Java's `ThreadGroup`?**
+  - Virtual threads belong to a `ThreadGroup` just like platform threads. By default, they are placed in a system thread group. You can specify a custom `ThreadGroup` using the thread builder.
+
+- **Can virtual threads be renamed after creation?**
+  - Yes. Virtual threads support `setName()` like platform threads. The name change is reflected in thread dumps and debugging tools.
+
+- **How do you handle thread-local cleanup in a virtual-thread-per-task executor?**
+  - Since virtual threads are created per task, thread-local cleanup is automatic when the virtual thread terminates. However, avoid relying on `ThreadLocal.remove()` in cleanup hooks because the thread may be reused in a pooled scenario.
+
+- **What is the default stack size of a virtual thread?**
+  - The default stack size is very small (a few KB), growing dynamically as needed. This contrasts with platform threads that have a fixed stack (typically 1 MB). The dynamic nature contributes to virtual thread scalability.
+
+- **Can virtual threads be used with Java NIO selectors?**
+  - Yes. Virtual threads can perform selector operations. The virtual thread will be unmounted while waiting for channel events, allowing the carrier thread to be reused.
+
+- **How do you debug a virtual thread that is stuck or deadlocked?**
+  - Use JDK Flight Recorder with virtual thread events enabled, or generate a thread dump via `jcmd <pid> Thread.dump_to_file -format=json`. The dump includes all virtual threads and their stack traces, showing which carrier thread they are mounted on.
 
 ## Developer Recommendations
 

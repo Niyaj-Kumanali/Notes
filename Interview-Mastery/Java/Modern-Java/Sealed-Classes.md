@@ -102,6 +102,51 @@
 - The compiler will flag any switch on the sealed type that is not exhaustive (i.e., does not cover the new subtype). Clients must add a case for the new subtype or add a `default` branch. This is the key benefit: the compiler tells every consumer what to update.
 - **Interview follow-up:** Can you avoid breaking clients by using a `default` branch in your own code?
 
+**Q: You are modeling a payment system where each payment method has different validation rules. How would you use sealed classes to enforce that all payment methods implement a `validate()` method?**
+
+- Define a `sealed interface PaymentMethod` with an abstract `validate()` method, list permitted subtypes (e.g., `CreditCard`, `PayPal`, `Crypto`), and have each record implement `validate()`. Any switch on `PaymentMethod` must cover all subtypes, ensuring no method is missed.
+- **Interview follow-up:** How would you add a new payment method type without recompiling existing code?
+
+**Q: You have a sealed interface `Expression` with subtypes `Constant`, `Add`, `Subtract`, `Multiply`, `Divide`. How do you ensure that division by zero is handled at compile time?**
+
+- Add a `Divide` record with `Expression left, Expression right` and handle the zero case with a guarded pattern: `case Divide(var l, var r) when r.eval() != 0`. The sealed hierarchy guarantees that no unknown expression type can appear, so the switch is exhaustive with these cases.
+- **Interview follow-up:** If you add a `Modulo` subtype later, what compiler guarantees do you get?
+
+**Q: You are migrating an existing class hierarchy to sealed classes. One of the subclasses is used as a base for third-party extensions. How do you handle this?**
+
+- Mark that subclass as `non-sealed`. This allows third parties to extend it while the rest of the hierarchy remains sealed. Document the contract clearly to indicate which branches are open for extension.
+- **Interview follow-up:** What are the security implications of using `non-sealed` in a sealed hierarchy?
+
+**Q: How do sealed classes interact with Java records? Can a record be a permitted subtype?**
+
+- Yes, records are perfect for permitted subtypes because they are implicitly final and provide transparent data carriers. For example, `record Circle(double radius) implements Shape { }` can be a permitted subtype of a sealed `Shape`.
+- **Interview follow-up:** Can a sealed class itself be a record?
+
+**Q: You have a sealed class `Vehicle` permitted to `Car`, `Bike`, `Truck`. A developer accidentally creates a new class `Bus` that extends `Vehicle` without adding it to the `permits` clause. What happens?**
+
+- The compiler rejects `Bus` with an error stating that `Bus` is not allowed to extend `Vehicle` because it is not listed in the `permits` clause. The developer must add `Bus` to the `permits` clause and recompile `Vehicle`.
+- **Interview follow-up:** What if `Bus` is in a different module?
+
+**Q: You are designing a serialization framework that needs to handle a fixed set of data types. How would sealed classes help?**
+
+- Define a `sealed interface DataType permits IntType, StringType, FloatType, BooleanType`. The framework can switch exhaustively over all types. Adding a new type requires updating the `permits` clause and all switch sites, preventing silent deserialization failures.
+- **Interview follow-up:** How would you extend this design to support user-defined custom types?
+
+**Q: How would you use sealed classes to model a Try monad (Success/Failure) pattern in Java?**
+
+- Define `sealed interface Try<T> permits Success<T>, Failure<T>`. `Success` holds the value, `Failure` holds the exception. Switches on `Try` must cover both cases, eliminating forgotten error handling.
+- **Interview follow-up:** How would you add a `Loading` state to this Try monad?
+
+**Q: Your team uses an enum for days of the week, but you need to attach different data to each day. How would sealed classes provide a better solution?**
+
+- Replace the enum with a `sealed interface DayOfWeek` permitting `Weekday` and `Weekend` records. Each record can hold custom data (e.g., `Weekday(boolean isEarlyShift)`). The hierarchy remains exhaustive and more flexible than an enum.
+- **Interview follow-up:** What do you lose by switching from enum to sealed class in this case?
+
+**Q: A junior developer uses a sealed class but forgets to add the sealed modifier to the parent class, only adding it to the subclasses. What error occurs?**
+
+- If the parent class is not declared `sealed`, the `permits` clause is invalid. The compiler will report that the parent class cannot restrict its subclasses without the `sealed` modifier. All classes in a sealed hierarchy must start with the sealed parent.
+- **Interview follow-up:** Can a non-sealed parent class have a sealed child?
+
 ## Interview Questions
 
 - **What is the difference between a sealed class and a final class?**
@@ -115,6 +160,54 @@
 
 - **Can a sealed class be abstract?**
   - Yes, a sealed class can be abstract. The abstract class defines a restricted set of concrete subtypes via the `permits` clause.
+
+- **Can a sealed interface extend another sealed interface?**
+  - Yes. A sealed interface can extend another sealed interface. The extending interface may add further restrictions or open branches via its own `permits` clause.
+
+- **What happens if a permitted subclass is in a different package than the sealed class?**
+  - Permitted subclasses must be in the same module. If no module declaration exists, they must be in the same named package. Cross-package inheritance in the same module is allowed.
+
+- **Can a sealed class be instantiated directly if it is not abstract?**
+  - If a sealed class is concrete (not abstract), it can be instantiated directly via its constructor. However, its permitted subclasses can also be instantiated.
+
+- **How do you reflectively discover all permitted subclasses of a sealed type at runtime?**
+  - Use `Class.isSealed()` and `Class.getPermittedSubclasses()` to get an array of `Class<?>` objects representing the permitted subtypes at runtime.
+
+- **What is the relationship between sealed classes and pattern matching exhaustiveness?**
+  - Sealed classes enable compile-time exhaustiveness checking in switch expressions and statements. The compiler knows all permitted subtypes and can verify that every possible case is handled.
+
+- **Can a permitted subclass be a local class or anonymous class?**
+  - No. Permitted subclasses must be top-level classes or nested classes. Anonymous and local classes cannot be listed in a `permits` clause because they do not have a name that can be referenced.
+
+- **What is the difference between a sealed class and a package-private class hierarchy?**
+  - A package-private class can only be extended within the same package, but this is a visibility restriction, not a hierarchy restriction. Sealed classes explicitly list permitted subtypes and work across packages within a module.
+
+- **Can a sealed class be a nested class?**
+  - Yes. A sealed class can be nested inside another class or interface. The `permits` clause refers to other nested types or top-level types as usual.
+
+- **Does the compiler generate a synthetic constructor for sealed classes?**
+  - No. Sealed classes use regular constructors. The sealing information is stored in the class file as a `PermittedSubclasses` attribute, not in the constructor.
+
+- **How do sealed classes improve API design compared to traditional inheritance?**
+  - They provide a documented, compiler-enforced contract of which subtypes exist. API consumers can rely on exhaustive matching, and the API author controls evolution of the hierarchy.
+
+- **Can a sealed class be used with Java modules to restrict visibility further?**
+  - Yes. Combining sealed classes with module exports gives fine-grained control: the sealed type can be exported while specific permitted subtypes are not, forcing users to program against the sealed type only.
+
+- **What is the purpose of the `non-sealed` modifier?**
+  - The `non-sealed` modifier reopens a sealed hierarchy branch. Any class can extend a `non-sealed` subclass, allowing third-party extension while other branches remain closed.
+
+- **Can a sealed class have multiple levels of hierarchy?**
+  - Yes. A sealed class can have permitted subclasses that are themselves sealed, creating a multi-level hierarchy where each level restricts its own subtypes.
+
+- **How does the `permits` clause affect compilation order?**
+  - The sealed class must be compiled before or at the same time as its permitted subclasses. If the sealed class is a library dependency, adding new permitted subclasses requires recompiling the sealed class.
+
+- **Can a sealed class be declared without a `permits` clause if subclasses are in the same file?**
+  - Yes. If all permitted subclasses are declared in the same source file, the `permits` clause can be omitted. The compiler infers the permitted subtypes from the subclasses in the file.
+
+- **What happens if a permitted subclass is declared `final`?**
+  - A `final` permitted subclass closes that branch of the hierarchy. No further subclasses are allowed under that branch.
 
 ## Developer Recommendations
 
