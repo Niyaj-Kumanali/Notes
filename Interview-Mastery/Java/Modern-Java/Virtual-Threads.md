@@ -1,16 +1,179 @@
 # Virtual Threads
 
-- Purpose: lightweight threads enabling high-concurrency server applications
-- Platform thread: OS-managed thread with a 1:1 mapping to kernel thread, expensive and limited
-- Virtual thread: JVM-managed thread with many-to-one mapping to carrier threads, cheap and plentiful
-- Virtual threads are mounted on carrier platform threads during execution and unmounted when blocking
-- Mounting and unmounting happens transparently on blocking IO operations
-- Use cases: IO-bound workloads like web servers, REST calls, database queries, file reads
-- One-thread-per-request model becomes viable even with thousands of concurrent requests
-- Avoid synchronized blocks and methods because pinning prevents unmounting
-- Avoid ThreadLocal with many virtual threads as it defeats the lightweight memory advantage
-- CPU-bound workloads are not helped; use platform threads or parallelism instead
-- Structured concurrency via StructuredTaskScope groups related tasks and propagates cancellation
-- StructuredTaskScope.ShutdownOnFailure for fail-fast patterns with subtasks
-- More intuitive than reactive programming for most business logic
-- JDK 21 finalized as production-ready
+## Overview
+
+- **Definition** — Virtual threads are lightweight, JVM-managed threads that enable high-concurrency server applications by multiplexing many virtual threads onto a small number of platform (OS) threads.
+- **Why It Exists** — Platform threads are expensive (1:1 mapping to kernel threads) and limit concurrency to the order of thousands. Virtual threads make the "one thread per request" model viable for hundreds of thousands of concurrent requests without the complexity of reactive programming.
+- **Historical Context** — Part of Project Loom, previewed in JDK 19 and JDK 20, finalized in JDK 21.
+- **Key Concepts** — **Platform thread** is an OS-managed thread with 1:1 kernel mapping, expensive and limited; **virtual thread** is JVM-managed with many-to-one mapping to carrier threads, cheap and plentiful; **mounting** attaches a virtual thread to a carrier platform thread during execution; **unmounting** detaches it transparently on blocking I/O; **one-thread-per-request** becomes scalable; **avoid synchronized** because it causes pinning (prevents unmounting); **avoid ThreadLocal** with large pools as it defeats memory advantages; **CPU-bound** workloads are not helped; **structured concurrency** via `StructuredTaskScope` groups related tasks with cancellation propagation.
+
+## Core Concepts
+
+- Creating a virtual thread:
+
+  ```java
+  Thread vThread = Thread.ofVirtual().start(() -> {
+    System.out.println("Hello from virtual thread");
+  });
+  ```
+
+- Using `Executors.newVirtualThreadPerTaskExecutor()` for a per-task executor:
+
+  ```java
+  try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+    executor.submit(() -> processRequest());
+  }
+  ```
+
+- Mounting and unmounting: when a virtual thread executes, it is mounted on a carrier platform thread. When it blocks on I/O or a blocking operation, the JVM unmounts it, allowing the carrier thread to run other virtual threads. The mounting/unmounting is transparent.
+- Platform threads are expensive (stack size ~1MB, context-switch overhead). Virtual threads have a small stack (initially ~few KB), can be created in the millions, and have much lower creation and context-switch cost.
+- Use cases: IO-bound workloads — web servers, REST calls, database queries, file reads. The one-thread-per-request model that was previously limited by OS thread count now scales.
+- Limitations:
+  - **Synchronized blocks/methods** cause pinning: when a virtual thread enters `synchronized` and blocks, the carrier thread cannot unmount it, reducing throughput. Use `ReentrantLock` instead.
+  - **ThreadLocal** with many virtual threads can retain large memory per thread. Avoid pooling of virtual threads (they are cheap enough to create per-task) and avoid ThreadLocal-heavy patterns.
+  - **CPU-bound workloads** are not helped — virtual threads cannot run in parallel on multiple cores beyond the carrier pool size. Use platform threads or parallel streams for CPU-intensive work.
+- Structured concurrency via `StructuredTaskScope`:
+
+  ```java
+  try (var scope = new StructuredTaskScope.ShutdownOnFailure()) {
+    Future<String> user = scope.fork(() -> fetchUser(id));
+    Future<String> order = scope.fork(() -> fetchOrder(id));
+    scope.join().throwIfFailed();
+    return new Response(user.resultNow(), order.resultNow());
+  }
+  ```
+
+- `StructuredTaskScope.ShutdownOnFailure` cancels all subtasks if any one fails (fail-fast). `StructuredTaskScope.ShutdownOnSuccess` cancels remaining subtasks once any succeeds.
+- Structured concurrency enforces that subtasks complete before the scope is closed, preventing task leaks and simplifying error handling.
+- Comparison with reactive programming: virtual threads allow writing synchronous, blocking-style code that is easy to read and debug, while achieving similar concurrency to reactive frameworks (WebFlux, RxJava). Reactive programming still has advantages for backpressure and streaming scenarios.
+
+## Common Mistakes
+
+- **Using synchronized with virtual threads**
+  - When a virtual thread blocks inside a `synchronized` block, it is pinned to its carrier thread — the carrier thread cannot be reused.
+  - **Why it looks correct:** Synchronized is the standard Java locking mechanism and works fine with platform threads.
+  - The fix: replace `synchronized` with `ReentrantLock` or other `java.util.concurrent` locks that do not cause pinning.
+
+- **Creating a ThreadLocal-heavy application with virtual thread pools**
+  - ThreadLocal values are retained for the lifetime of the thread. With a per-task executor creating millions of virtual threads, each ThreadLocal allocation multiplies memory.
+  - **Why it looks correct:** ThreadLocal is widely used with platform thread pools where the thread count is bounded.
+  - The fix: avoid ThreadLocal in virtual-thread-based code. Pass context explicitly as parameters or use `ScopedValue` (incubator in JDK 21).
+
+- **Using virtual threads for CPU-bound computation**
+  - Virtual threads do not add parallelism beyond the available carrier threads (typically the number of platform threads).
+  - **Why it looks correct:** Virtual threads are threads, and threads are used for parallelism.
+  - The fix: use platform threads, parallel streams, or `ForkJoinPool` for CPU-intensive work.
+
+- **Ignoring the pinning issue with native methods and blocking calls**
+  - If a virtual thread calls a native method or a blocking operation that the JVM cannot intercept, it may be pinned.
+  - **Why it looks correct:** Most blocking I/O operations are intercepted, but not all (e.g., JNI calls, some file I/O).
+  - The fix: profile for pinning using JDK Flight Recorder or thread dumps, and refactor pinned operations.
+
+- **Mixing virtual threads with thread-pool-based blocking patterns**
+  - Using `Future.get()` inside a virtual thread is fine, but using a `CompletableFuture` chain that blocks a common ForkJoinPool can cause starvation.
+  - **Why it looks correct:** Both use `Future` and look similar.
+  - The fix: prefer `StructuredTaskScope` for coordinating virtual thread subtasks.
+
+## Real-World Scenarios
+
+### One-Thread-Per-Request Web Server
+
+- A REST endpoint that calls three downstream services:
+
+  ```java
+  public Response handleRequest(Request req) throws Exception {
+    try (var scope = new StructuredTaskScope.ShutdownOnFailure()) {
+      Future<Data> a = scope.fork(() -> serviceA.call(req));
+      Future<Data> b = scope.fork(() -> serviceB.call(req));
+      Future<Data> c = scope.fork(() -> serviceC.call(req));
+      scope.join().throwIfFailed();
+      return new Response(a.resultNow(), b.resultNow(), c.resultNow());
+    }
+  }
+  ```
+
+- Each downstream call blocks inside a virtual thread, but the carrier thread is reused for other virtual threads.
+
+### Batch File Processing
+
+- Process thousands of independent files concurrently:
+
+  ```java
+  try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+    List<Path> files = listFiles();
+    List<Future<Result>> futures = files.stream()
+      .map(file -> executor.submit(() -> processFile(file)))
+      .toList();
+    // collect results
+  }
+  ```
+
+### Database Query Fan-Out
+
+- Execute multiple database queries that block on I/O:
+
+  ```java
+  public Dashboard loadDashboard(String userId) throws Exception {
+    try (var scope = new StructuredTaskScope.ShutdownOnFailure()) {
+      Future<UserProfile> profile = scope.fork(() -> userRepo.findById(userId));
+      Future<List<Order>> orders = scope.fork(() -> orderRepo.findByUserId(userId));
+      Future<Stats> stats = scope.fork(() -> statsRepo.compute(userId));
+      scope.join().throwIfFailed();
+      return new Dashboard(profile.resultNow(), orders.resultNow(), stats.resultNow());
+    }
+  }
+  ```
+
+## Scenario-Based Questions
+
+**Q: Your web application currently uses a thread pool of 200 platform threads to handle HTTP requests. You want to migrate to virtual threads. What changes are required in the web server configuration?**
+
+- Replace the platform thread executor with `Executors.newVirtualThreadPerTaskExecutor()`. The web server (Tomcat, Jetty, Undertow) must be configured to use this executor for request handling. Tomcat 10.1+ and Jetty 12+ support virtual threads natively. No code changes are needed inside request handlers if they already use `ReentrantLock` instead of `synchronized`.
+- **Interview follow-up:** If a library your application depends on uses synchronized internally, what options do you have?
+
+**Q: You are building a microservice that calls five external APIs in parallel. How would you implement this with virtual threads and structured concurrency?**
+
+- Use `StructuredTaskScope.ShutdownOnFailure` to fork all five calls. If any call fails, the scope cancels the remaining ones. This provides clean error handling and ensures no background tasks leak.
+
+  ```java
+  try (var scope = new StructuredTaskScope.ShutdownOnFailure()) {
+    Future<A> a = scope.fork(() -> apiA.call());
+    Future<B> b = scope.fork(() -> apiB.call());
+    Future<C> c = scope.fork(() -> apiC.call());
+    Future<D> d = scope.fork(() -> apiD.call());
+    Future<E> e = scope.fork(() -> apiE.call());
+    scope.join().throwIfFailed();
+    return combine(a.resultNow(), b.resultNow(), c.resultNow(), d.resultNow(), e.resultNow());
+  }
+  ```
+
+- **Interview follow-up:** How would you change this if you wanted to return the first successful result and ignore the others?
+
+## Interview Questions
+
+- **What is the difference between a platform thread and a virtual thread?**
+  - A platform thread is a wrapper around an OS thread with a 1:1 mapping, a large stack (~1 MB), and high creation/context-switch cost. A virtual thread is a JVM-managed thread with a many-to-one mapping to carrier platform threads, a tiny stack, and cheap creation/blocking.
+
+- **What is pinning and why is it a problem for virtual threads?**
+  - Pinning occurs when a virtual thread cannot be unmounted from its carrier thread, typically due to `synchronized` blocks or native method calls. This reduces concurrency because the carrier thread cannot be reused for other virtual threads while pinned.
+
+- **How does structured concurrency differ from unstructured concurrency with ExecutorService?**
+  - Structured concurrency ensures that the lifetime of subtasks is nested within the scope of the parent task. Subtasks are started, joined, and their resources cleaned up before the scope closes. This prevents task leaks, simplifies error propagation, and makes the code structure match the task structure. Unstructured concurrency with `ExecutorService` does not enforce this nesting.
+
+- **When would you choose reactive programming over virtual threads?**
+  - Reactive programming is still preferable when you need fine-grained backpressure, streaming of large datasets, or when integrating with reactive libraries that provide operators for complex event processing. Virtual threads are better for straightforward request-response services with blocking I/O.
+
+## Developer Recommendations
+
+- **Replace synchronized blocks with ReentrantLock in code that runs on virtual threads**
+  - Synchronized causes pinning, reducing throughput. `ReentrantLock` does not pin and allows the virtual thread to unmount when blocked.
+  - Audit your codebase for `synchronized` before migrating to virtual threads. Libraries that use synchronized internally may also need workarounds.
+
+- **Use StructuredTaskScope for task coordination**
+  - `StructuredTaskScope` enforces structured concurrency, ensuring subtasks complete before the scope closes and providing automatic cancellation on failure.
+  - Use `ShutdownOnFailure` for fail-fast and `ShutdownOnSuccess` for first-result patterns. Avoid manual `CompletableFuture` orchestration for simple fan-out.
+
+- **Avoid ThreadLocal in virtual-thread-based applications**
+  - ThreadLocal memory scales with the number of threads, which can be huge with virtual threads.
+  - Pass context explicitly as method parameters or use immutable context objects. For inherited context, consider `ScopedValue` (incubator in JDK 21).
+  - **Production story:** A team migrated their REST API gateway from 50 platform threads per node to virtual threads, handling 50,000 concurrent requests per node with no code changes except replacing the executor and fixing two synchronized blocks. Latency at the 99th percentile dropped from 800ms to 120ms because blocking I/O no longer consumed OS threads.

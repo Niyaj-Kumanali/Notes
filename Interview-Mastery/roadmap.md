@@ -145,21 +145,22 @@ How systems expose and exchange data.
 
 ---
 
-## Phase 7: Backend — Architecture & Microservices (13 files)
+## Phase 7: Backend — Architecture & Microservices (14 files)
 
 System design patterns, distributed architecture, and microservices deep-dive.
 
-- [ ] `Backend-Concepts/Architecture/Microservices.md`
-- [ ] `Backend-Concepts/Architecture/Service-Discovery.md`
-- [ ] `Backend-Concepts/Architecture/API-Gateway.md`
-- [ ] `Backend-Concepts/Architecture/Service-Mesh.md`
-- [ ] `Backend-Concepts/Architecture/Migration-to-Microservices.md`
-- [ ] `Backend-Concepts/Architecture/Distributed-Transactions.md`
+- [ ] `Backend-Concepts/Microservices/Microservices.md`
+- [ ] `Backend-Concepts/Microservices/Service-Discovery.md`
+- [ ] `Backend-Concepts/Microservices/API-Gateway.md`
+- [ ] `Backend-Concepts/Microservices/Service-Mesh.md`
+- [ ] `Backend-Concepts/Microservices/Migration-to-Microservices.md`
+- [ ] `Backend-Concepts/Microservices/Distributed-Transactions.md`
+- [ ] `Backend-Concepts/Microservices/Circuit-Breaker.md`
+- [ ] `Backend-Concepts/Microservices/SAGA.md`
+- [ ] `Backend-Concepts/Microservices/Distributed-Logging.md`
 - [ ] `Backend-Concepts/Architecture/Event-Driven-Architecture.md`
 - [ ] `Backend-Concepts/Architecture/Domain-Driven-Design.md`
 - [ ] `Backend-Concepts/Architecture/CQRS.md`
-- [ ] `Backend-Concepts/Architecture/SAGA.md`
-- [ ] `Backend-Concepts/Architecture/Circuit-Breaker.md`
 - [ ] `Backend-Concepts/Integration/REST-vs-Messaging.md`
 
 ---
