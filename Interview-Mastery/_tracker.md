@@ -51,6 +51,33 @@
 | Java/Concurrency/Multithreading.md | ✅ |
 | Java/Concurrency/Concurrency.md | ✅ |
 
+## Java — Internals
+
+| File | Status |
+|------|--------|
+| Java/Java-Internals/Generics.md | ⬜ |
+| Java/Java-Internals/Java-Memory-Model.md | ⬜ |
+| Java/Java-Internals/Garbage-Collection.md | ⬜ |
+| Java/Java-Internals/Reflection-Annotations.md | ⬜ |
+
+## Java — Modern Java (9-21)
+
+| File | Status |
+|------|--------|
+| Java/Modern-Java/Records.md | ⬜ |
+| Java/Modern-Java/Sealed-Classes.md | ⬜ |
+| Java/Modern-Java/Pattern-Matching.md | ⬜ |
+| Java/Modern-Java/Switch-Expressions.md | ⬜ |
+| Java/Modern-Java/Text-Blocks.md | ⬜ |
+| Java/Modern-Java/Virtual-Threads.md | ⬜ |
+
+## Java — Build Tools
+
+| File | Status |
+|------|--------|
+| Java/Build-Tools/Maven.md | ⬜ |
+| Java/Build-Tools/Gradle.md | ⬜ |
+
 ## Java — Spring Boot
 
 | File | Status |
@@ -87,6 +114,11 @@
 | File | Status |
 |------|--------|
 | Backend-Concepts/Architecture/Microservices.md | ✅ |
+| Backend-Concepts/Architecture/Service-Discovery.md | ⬜ |
+| Backend-Concepts/Architecture/API-Gateway.md | ⬜ |
+| Backend-Concepts/Architecture/Service-Mesh.md | ⬜ |
+| Backend-Concepts/Architecture/Migration-to-Microservices.md | ⬜ |
+| Backend-Concepts/Architecture/Distributed-Transactions.md | ⬜ |
 | Backend-Concepts/Architecture/Event-Driven-Architecture.md | ✅ |
 | Backend-Concepts/Architecture/Domain-Driven-Design.md | ✅ |
 | Backend-Concepts/Architecture/Design-Patterns.md | ✅ |
@@ -180,6 +212,30 @@
 | Cloud-DevOps/Azure-DevOps.md | ✅ |
 | Cloud-DevOps/Azure.md | ✅ |
 | Cloud-DevOps/AWS.md | ✅ |
+
+---
+
+## System Design
+
+| File | Status |
+|------|--------|
+| System-Design/CAP-Theorem.md | ⬜ |
+| System-Design/Load-Balancing.md | ⬜ |
+| System-Design/Consistent-Hashing.md | ⬜ |
+| System-Design/Design-URL-Shortener.md | ⬜ |
+| System-Design/Design-Chat-System.md | ⬜ |
+| System-Design/Design-Rate-Limiter.md | ⬜ |
+| System-Design/Design-Distributed-Cache.md | ⬜ |
+| System-Design/Design-Parking-Lot.md | ⬜ |
+| System-Design/Design-Notification-System.md | ⬜ |
+
+---
+
+## General Tools
+
+| File | Status |
+|------|--------|
+| Git.md | ⬜ |
 
 ---
 

@@ -51,6 +51,40 @@ Lambda expressions, streams, optionals, and the modern Java API that transformed
 
 ---
 
+## Phase 2d: Java Internals (4 files)
+
+Memory model, garbage collection, generics — the topics interviewers use to distinguish depth.
+
+- [ ] `Java/Java-Internals/Generics.md`
+- [ ] `Java/Java-Internals/Java-Memory-Model.md`
+- [ ] `Java/Java-Internals/Garbage-Collection.md`
+- [ ] `Java/Java-Internals/Reflection-Annotations.md`
+
+---
+
+## Phase 2e: Modern Java (6 files)
+
+Records, sealed classes, virtual threads — Java 9 through 21 features that show you stay current.
+
+- [ ] `Java/Modern-Java/Records.md`
+- [ ] `Java/Modern-Java/Sealed-Classes.md`
+- [ ] `Java/Modern-Java/Pattern-Matching.md`
+- [ ] `Java/Modern-Java/Switch-Expressions.md`
+- [ ] `Java/Modern-Java/Text-Blocks.md`
+- [ ] `Java/Modern-Java/Virtual-Threads.md`
+
+---
+
+## Phase 2f: Build & Dev Tools (3 files)
+
+Build tools and version control — practical knowledge every working developer needs.
+
+- [ ] `Java/Build-Tools/Maven.md`
+- [ ] `Java/Build-Tools/Gradle.md`
+- [ ] `Git.md`
+
+---
+
 ## Phase 3: Java Testing (3 files)
 
 Learn to verify code before layering on frameworks.
@@ -111,17 +145,38 @@ How systems expose and exchange data.
 
 ---
 
-## Phase 7: Backend — Architecture & Design (8 files)
+## Phase 7: Backend — Architecture & Microservices (13 files)
 
-System design patterns and distributed architecture.
+System design patterns, distributed architecture, and microservices deep-dive.
 
 - [ ] `Backend-Concepts/Architecture/Microservices.md`
+- [ ] `Backend-Concepts/Architecture/Service-Discovery.md`
+- [ ] `Backend-Concepts/Architecture/API-Gateway.md`
+- [ ] `Backend-Concepts/Architecture/Service-Mesh.md`
+- [ ] `Backend-Concepts/Architecture/Migration-to-Microservices.md`
+- [ ] `Backend-Concepts/Architecture/Distributed-Transactions.md`
 - [ ] `Backend-Concepts/Architecture/Event-Driven-Architecture.md`
 - [ ] `Backend-Concepts/Architecture/Domain-Driven-Design.md`
 - [ ] `Backend-Concepts/Architecture/CQRS.md`
 - [ ] `Backend-Concepts/Architecture/SAGA.md`
 - [ ] `Backend-Concepts/Architecture/Circuit-Breaker.md`
 - [ ] `Backend-Concepts/Integration/REST-vs-Messaging.md`
+
+---
+
+## Phase 7b: System Design (9 files)
+
+Design interviews test architectural thinking at scale.
+
+- [ ] `System-Design/CAP-Theorem.md`
+- [ ] `System-Design/Load-Balancing.md`
+- [ ] `System-Design/Consistent-Hashing.md`
+- [ ] `System-Design/Design-URL-Shortener.md`
+- [ ] `System-Design/Design-Chat-System.md`
+- [ ] `System-Design/Design-Rate-Limiter.md`
+- [ ] `System-Design/Design-Distributed-Cache.md`
+- [ ] `System-Design/Design-Parking-Lot.md`
+- [ ] `System-Design/Design-Notification-System.md`
 
 ---
 

@@ -1,0 +1,30 @@
+# Git
+
+- Purpose: distributed version control system for tracking source code changes and enabling collaboration
+- Local: full repository exists on your machine, all operations are offline except sync
+- Remote: a hosted copy of the repository on a server (GitHub, GitLab, Bitbucket)
+- Staging area (index): intermediate step between working directory and commit — allows selective file inclusion
+- Branching: a lightweight movable pointer to a commit; main branch is typically main or master
+- Feature branches: isolate work on a feature until it is ready to merge
+- GitFlow: structured branching model with main, develop, feature, release, and hotfix branches
+- Trunk-based development: short-lived feature branches merged frequently into a single main line
+- Fast-forward merge: moves the target branch pointer forward when there is no divergent work
+- 3-way merge: creates a merge commit when branches have diverged
+- Squash merge: combines all feature branch commits into a single commit on the target branch
+- Rebase: rewrites commit history by applying commits from one branch onto the tip of another
+- Rebase vs merge tradeoffs: rebase yields a linear history but rewrites commits (dangerous on shared branches); merge preserves history but creates merge commits
+- Conflict resolution: when the same part of a file is modified in two branches; resolve manually, mark as resolved, then commit
+- git log filtering: `--author`, `--grep`, `--since`, `--until`, `--oneline`, `--graph`, `--decorate`
+- git log formatting: `--format="%h %an %s"` with placeholders for hash, author, subject
+- Interactive rebase (`git rebase -i`): allows rewording commits, squashing multiple commits into one, fixup (discard message), reordering commits
+- Stashing (`git stash`): temporarily shelves uncommitted changes to work on something else
+- Cherry-pick (`git cherry-pick <hash>`): applies a specific commit from another branch onto the current branch
+- Revert (`git revert <hash>`): creates a new commit that undoes the changes of a previous commit — safe for shared history
+- Reset (`git reset --soft/mixed/hard <ref>`): moves branch pointer and optionally discards working tree changes — destructive for shared history
+- Remote management: origin (your fork or default remote), upstream (original repository for forks)
+- fetch: downloads remote objects and refs without merging
+- pull: fetch + merge (or rebase with `--rebase`)
+- push: uploads local commits to a remote repository
+- PR workflow: fork → branch → commit → push → open pull request → review → merge → delete branch
+- Hooks (pre-commit): scripts that run automatically on Git events, e.g., linting before allowing a commit
+- .gitignore: pattern file that tells Git which files to ignore (build artifacts, IDE files, dependencies)
