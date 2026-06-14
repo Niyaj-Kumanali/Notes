@@ -59,6 +59,8 @@
 | Java/Java-Internals/Java-Memory-Model.md | ✅ |
 | Java/Java-Internals/Garbage-Collection.md | ✅ |
 | Java/Java-Internals/Reflection-Annotations.md | ✅ |
+| Java/Java-Internals/Async-Profiler.md | ✅ |
+| Java/Java-Internals/Java-Flight-Recorder.md | ✅ |
 
 ## Java — Modern Java (9-21)
 
