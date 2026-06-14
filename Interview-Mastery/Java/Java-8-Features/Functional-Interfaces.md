@@ -635,6 +635,8 @@ public class EventPipeline {
 
 ---
 
+## Developer Recommendations
+
 - **Prefer standard functional interfaces over custom ones**
   - The `java.util.function` package provides 43 interfaces covering the vast majority of lambda use cases.
   - Creating custom interfaces like `Transformer` or `Mapper` introduces incompatibility with standard APIs — `Stream.map()`, `Optional.map()`, and `CompletableFuture.thenApply()` all accept `Function<T,R>`.
