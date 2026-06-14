@@ -701,6 +701,49 @@ public class MetricsAggregator {
   - Parallel streams require that all intermediate operation lambdas be stateless and non-interfering — they must not read or write shared mutable state.
   - Compound operations like `findAny()` and `unordered().skip()` are more efficient in parallel because they exploit non-determinism, while ordered operations like `findFirst()` and `forEachOrdered()` reduce parallel efficiency.
 
+**What is a `Spliterator` and why is it important?**
+  - A `Spliterator` is the internal iteration mechanism that underlies every `Stream`. It provides `tryAdvance()` for sequential traversal and `trySplit()` for parallel decomposition.
+  - The `trySplit()` method divides the remaining elements into two halves, enabling the fork-join framework to partition work across threads. The number of splits determines the parallelism granularity.
+  - Custom data sources implement `Spliterator` to create custom streams with well-defined splitting and ordering characteristics.
+
+**How does `Stream.iterate()` differ from `Stream.generate()`?**
+  - `Stream.iterate(seed, f)` produces an infinite sequential stream: `seed`, `f(seed)`, `f(f(seed))`, ... The result is always ordered.
+  - `Stream.generate(supplier)` produces an infinite stream by repeatedly calling the supplier. The result has no encounter order unless constrained by other operations.
+  - Java 9 added `iterate(seed, hasNext, next)` for finite iteration with a predicate-based termination condition.
+
+**What is a short-circuiting operation and which operations are short-circuiting?**
+  - A short-circuiting operation can produce a result without processing the entire stream. Intermediate: `limit()`, `skip()`. Terminal: `findFirst()`, `findAny()`, `anyMatch()`, `allMatch()`, `noneMatch()`.
+  - Short-circuiting is critical for infinite streams — `Stream.generate(Math::random).anyMatch(d -> d > 0.999)` terminates; without short-circuiting, it would run forever.
+
+**How does `Collectors.toMap()` handle duplicate keys?**
+  - `toMap(keyMapper, valueMapper)` throws `IllegalStateException` on duplicate keys. To handle duplicates, use the overload `toMap(keyMapper, valueMapper, mergeFunction)`.
+  - The merge function resolves collisions: `(a, b) -> a` keeps the first value, `(a, b) -> b` keeps the last, `(a, b) -> a + "," + b` concatenates values.
+
+**What is the difference between `map()` and `peek()`?**
+  - `map()` transforms elements — it is the primary transformation operation. `peek()` is an intermediate operation intended for debugging: it allows viewing elements as they pass through the pipeline without modifying them.
+  - In production, `peek()` should not be used for logging or side effects because the JVM may elide it if it determines the peek has no effect on the pipeline's terminal operation.
+
+**How does `anyMatch()`, `allMatch()`, and `noneMatch()` work with infinite streams?**
+  - `anyMatch()` returns `true` as soon as any element matches — it terminates on infinite streams if a match exists.
+  - `allMatch()` must find a non-matching element to return `false`; otherwise it could run forever on an infinite stream.
+  - `noneMatch()` must find a matching element to return `false`; otherwise it could run forever.
+
+**What is the difference between `sorted()` and `unordered().sorted()`?**
+  - Both perform the same sort. `sorted()` preserves the encounter order of equal elements (stable sort). `unordered().sorted()` drops the stable sort guarantee, allowing the sort algorithm to skip the tie-breaking comparison.
+  - For primitive streams, `unordered().sorted()` can use a simpler sort with less overhead. For most practical purposes, the performance difference is negligible.
+
+**How does `Collectors.partitioningBy()` differ from `groupingBy()`?**
+  - `partitioningBy()` takes a `Predicate` and always returns `Map<Boolean, List<T>>` with exactly two keys. The predicate is applied once per element.
+  - `groupingBy()` takes a classifier `Function` and returns `Map<K, List<T>>` with one key per distinct classification. `partitioningBy()` is more efficient for boolean splits.
+
+**What is the role of the `ofNullable()` method in `Stream` (Java 9+)?**
+  - `Stream.ofNullable(element)` returns a stream of zero or one element — an empty stream if the element is null, a single-element stream otherwise.
+  - Useful in `flatMap()` to handle null-producing functions: `items.stream().flatMap(item -> Stream.ofNullable(item.getChild()))`.
+
+**What is the difference between `forEach()` and `forEachOrdered()` in parallel streams?**
+  - `forEach()` processes elements in whatever order threads complete them — non-deterministic but maximally parallel. `forEachOrdered()` preserves the stream's encounter order, requiring synchronization between threads.
+  - Use `forEach()` when order does not matter (logging, sending to a queue). Use `forEachOrdered()` when order is semantically important (ordered output, sequential processing).
+
 ---
 
 ## Developer Recommendations
