@@ -250,6 +250,32 @@
 
 ---
 
+## Use Cases
+
+- Actuator endpoints provide runtime visibility into Spring Boot applications. These use cases show how to use health checks, metrics, logging, and configuration exposure for production operations.
+
+- **Kubernetes health probes (liveness + readiness)** — A container orchestrator needs to know whether a pod is alive (liveness) and whether it can serve traffic (readiness, including downstream dependency health).
+  - Configure `management.endpoint.health.group.readiness.include=db,redis,paymentGateway` and use separate probe paths: `/actuator/health/liveness` and `/actuator/health/readiness`. Implement custom `HealthIndicator` beans for each dependency.
+  - **Avoid when:** Your app has no external dependencies — the default `health` endpoint with no custom indicators is sufficient.
+
+- **Runtime log level debugging** — A production incident causes errors in a specific package. Changing the log level to DEBUG normally requires a restart and redeploy.
+  - Use `POST /actuator/loggers/com.example.payment` with body `{"configuredLevel": "DEBUG"}`. Logs immediately show debug output. Reset to `INFO` when done. Secure this endpoint with `ADMIN` role.
+  - **Avoid when:** Logs contain sensitive data — restrict access via `management.endpoint.loggers.roles=ADMIN` and audit all log-level changes.
+
+- **Custom business metrics for monitoring dashboards** — Operations needs real-time visibility into order volumes, payment failures, and processing latencies for Grafana dashboards.
+  - Inject `MeterRegistry` and create `Counter`, `Timer`, and `DistributionSummary` meters. Expose via `/actuator/prometheus` using `micrometer-registry-prometheus`. Configure Prometheus to scrape the endpoint.
+  - **Avoid when:** You only need JVM-level metrics (heap, threads, GC) — Actuator's built-in metrics are sufficient; no custom code needed.
+
+- **Runtime environment inspection for debugging** — A configuration issue in production (wrong database URL, feature flag not set) needs diagnosis without accessing the server directly.
+  - Use `GET /actuator/env` to view all property sources and their values. Use `GET /actuator/configprops` to see `@ConfigurationProperties` beans and their current values.
+  - **Avoid when:** The endpoint exposes secrets — use `management.endpoint.env.keys-to-sanitize=*password*,*secret*,*key*` to redact sensitive values.
+
+- **Thread dump and heap dump for performance analysis** — A production service experiences thread contention or memory leaks. Restarting would destroy the evidence.
+  - Use `GET /actuator/threaddump` for a thread stack dump to diagnose deadlocks. Use `GET /actuator/heapdump` to download a heap dump for OOM analysis with Eclipse MAT.
+  - **Avoid when:** The `/actuator/heapdump` exposes PII — restrict access to operators and never enable it in environments with sensitive user data without RBAC.
+
+---
+
 ## Scenario-Based Questions
 
 1. **Q: Your Kubernetes cluster reports the pod as healthy (`/actuator/health` returns `UP`), but the application returns 503 errors for all API calls because the Redis cache cluster is down. How do you make the health check reflect actual readiness?**

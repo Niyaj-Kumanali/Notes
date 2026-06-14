@@ -183,6 +183,29 @@ WITH RECURSIVE org_chain AS (
 SELECT * FROM org_chain ORDER BY depth;
 ```
 
+## Use Cases
+
+Reach for SQL whenever you need to interact with relational data — it is the universal language for structured data storage and retrieval.
+
+- **Data retrieval via SELECT** — Fetch, filter, join, and aggregate data from one or more tables with WHERE, JOIN, GROUP BY, and HAVING.
+  - The most frequent operation in backend applications.
+  - **Avoid when:** you need simple key-value lookups — NoSQL databases may be simpler.
+
+- **Data modification via INSERT/UPDATE/DELETE** — Add, change, or remove rows while maintaining referential integrity through foreign keys.
+  - Always wrap multi-step modifications in transactions.
+  - **Avoid when:** the schema is highly dynamic or unstructured — consider a document or wide-column store.
+
+- **Schema design and DDL** — CREATE, ALTER, and DROP define tables, indexes, constraints, and relationships that enforce data integrity at the database level.
+  - **Avoid when:** the schema changes multiple times daily — schema-less databases reduce migration overhead.
+
+- **Reporting and analytical queries** — Window functions, CTEs, and aggregation produce business reports, dashboards, and data exports.
+  - **Avoid when:** data volume is in petabytes — dedicated OLAP engines (e.g., ClickHouse, Snowflake) may be more appropriate.
+
+- **Backend API data access** — ORMs like Hibernate/JPA generate SQL from object mappings; understanding SQL is essential for debugging generated queries and fixing N+1 problems.
+  - **Avoid when:** the endpoint does simple CRUD on a single table — ORM abstraction alone may suffice.
+
+---
+
 ## Scenario-Based Questions
 
 **Q: You are building a billing system that generates monthly invoices. A single customer can have thousands of transactions. You need to compute the total per customer, apply tiered discounts, and insert results into an invoices table. How do you write this efficiently?**

@@ -211,6 +211,28 @@ jobs:
   - **Context:** A product team manages 80 microservices in a single Git repository, each in its own folder under `services/`. Without optimization, every commit triggers CI for all 80 services.
   - **Resolution:** Use path triggers to only build changed services. A YAML template matrix dynamically generates jobs based on changed paths using a file-change detection script. Fan-out pattern launches parallel builds for each changed service with cached npm packages and Docker layers. Fan-in pattern consolidates deployment — only changed services' artifacts are deployed to environments relevant to the commit's branch. Average CI time reduced from 4 hours to 5 minutes.
 
+## Use Cases
+
+- **Multi-stage CI/CD pipelines** — building, testing, and deploying to multiple environments from a single YAML pipeline
+  - YAML pipelines define stages (build, test, deploy) with environment-specific configurations. Approval gates enforce manual sign-off for production.
+  - **Avoid when:** the deployment is a simple website push — Azure App Service's built-in deployment slots with auto-swap may be sufficient.
+
+- **Azure Boards + Repos integration** — linking work items, commits, and pull requests to trace requirement to deployment
+  - Every commit references a work item ID. PRs link to user stories. Deployments show which work items are included. End-to-end traceability for audits.
+  - **Avoid when:** the team uses a different project management tool (Jira) — integration is possible via webhooks but loses native linking.
+
+- **Monorepo CI with path triggers** — building only changed microservices in a large repository
+  - Path filters in pipeline triggers minimize unnecessary builds. Template jobs generate per-service builds dynamically. Fan-out/fan-in pattern coordinates parallel builds.
+  - **Avoid when:** the monorepo has fewer than 5 services — building everything on every commit is simpler and avoids path-trigger configuration errors.
+
+- **Secure deployment with approval gates** — PCI-compliant pipelines requiring multi-person approval and security scanning
+  - Self-hosted agents in restricted networks. Key Vault integration for secrets. Environment protection rules enforce approvals. Artifact signing ensures integrity.
+  - **Avoid when:** compliance requirements are minimal — skip approval gates and automatic security scans for faster deployment cycles.
+
+- **Release management with variable groups** — deploying the same artifact to different environments with environment-specific configuration
+  - Variable groups linked to environments (Dev, QA, Staging, Production). The same YAML pipeline uses different variables per environment. Library variable groups shared across pipelines.
+  - **Avoid when:** configuration differences are minimal — a single set of variables with overrides per environment is sufficient.
+
 ---
 
 ## Scenario-Based Questions

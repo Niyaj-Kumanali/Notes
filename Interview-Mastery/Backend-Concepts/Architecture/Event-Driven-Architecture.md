@@ -153,6 +153,26 @@ public KStream<String, Transaction> fraudDetection(StreamsBuilder builder) {
 
 **Resolution:** Implement the transactional outbox pattern. Within the same database transaction, both the payment status update and the outbox event record are written atomically. A scheduled `OutboxPublisher` polls the outbox table and publishes events reliably with at-least-once delivery.
 
+## Use Cases
+
+- Event-driven architecture decouples producers from consumers, enabling asynchronous, resilient, and scalable systems. These patterns cover the most common adoption scenarios.
+
+- **Order processing workflows** — coordinating multiple services after an order is placed
+  - When to use: An order triggers inventory reservation, payment capture, shipment creation, and notification — each handled by a different service. Publish an `OrderPlaced` event; each consumer processes independently and publishes its own events for the next step. Example: an e-commerce platform where `order-service` publishes `OrderPlaced`, `inventory-service` reserves stock, `payment-service` charges the card, and `shipping-service` creates a label — all asynchronously via Kafka.
+  - **Avoid when:** The workflow is simple (2–3 steps) and synchronous processing is acceptable — REST/gRPC orchestration is easier to reason about.
+
+- **Real-time notifications** — alerting users via email, SMS, and push when events occur
+  - When to use: An event (order shipped, payment received, account updated) must trigger notifications across multiple channels. Each channel is a separate consumer group that can scale independently. Example: a banking app publishes `TransactionCompleted`, which is consumed by the email service, SMS service, and push notification service — each with its own scaling and retry logic.
+  - **Avoid when:** Notifications must be delivered in strict order across channels — event-driven systems make ordering guarantees difficult.
+
+- **Data pipelines and ETL** — streaming data from source systems to analytics or data warehouses
+  - When to use: Source systems produce events (user actions, sensor readings, system logs) that must be transformed, enriched, and loaded into analytical stores. Kafka with Kafka Streams or Apache Flink processes data in real time. Example: a streaming platform that ingests clickstream events, enriches them with user metadata via a KTable join, and outputs aggregated metrics to Elasticsearch for dashboards.
+  - **Avoid when:** Data volumes are low and batch processing nightly is sufficient — event streaming infrastructure adds operational complexity.
+
+- **Cross-system integration with loose coupling** — connecting heterogeneous systems without direct dependencies
+  - When to use: Two or more systems (internal services, SaaS platforms, legacy systems) need to share state without tight coupling. The producer publishes events without knowing who consumes them; consumers subscribe without knowing the producer's identity. Example: a CRM publishes `CustomerUpdated`, consumed by the billing system, marketing automation, and support ticketing system — each maintained by different teams.
+  - **Avoid when:** The consumer needs an immediate synchronous response — request-driven communication (REST/gRPC) is more appropriate.
+
 ---
 
 ## Scenario-Based Questions

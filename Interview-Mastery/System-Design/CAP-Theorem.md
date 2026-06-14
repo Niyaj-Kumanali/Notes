@@ -61,6 +61,28 @@
 - No network distribution, so partition tolerance is irrelevant
 - If you replicate PostgreSQL and a network split occurs, you must choose CP (synchronous) or AP (asynchronous)
 
+## Use Cases
+
+- **Choosing a database for global e-commerce** — balancing consistency of inventory counts with availability during network partitions
+  - CP database (e.g., Spanner, MongoDB with majority write concern) guarantees consistent reads but may reject writes during a partition. AP database (Cassandra, DynamoDB) accepts writes everywhere but may show stale inventory.
+  - **Avoid when:** your system runs on a single node — CAP only applies to distributed systems.
+
+- **Designing cross-region replication** — multi-region deployments with different CAP trade-offs
+  - Synchronous replication (CP) provides strong consistency but increases write latency and reduces availability during inter-region network issues. Asynchronous replication (AP) accepts writes locally and reconciles later, trading consistency for availability.
+  - **Avoid when:** tolerance for stale reads is zero — CP is mandatory even if it means occasional unavailability.
+
+- **Microservices data store decisions** — each service chooses its own CAP trade-off
+  - Example: inventory service needs CP (you can't sell the same item twice), but analytics service can be AP (some data loss is acceptable). Choose per-service, not enterprise-wide.
+  - **Avoid when:** business requirements don't distinguish between services — a uniform approach simplifies operations.
+
+- **Configuring NoSQL consistency levels** — tuning read/write consistency in Cassandra (ONE, QUORUM, ALL)
+  - Higher consistency reduces availability and increases latency during partitions. QUORUM balances both. Choose based on the criticality of the data being read.
+  - **Avoid when:** all operations have the same consistency requirement — vary consistency per operation based on business context.
+
+- **PACELC trade-off analysis** — considering CAP during partitions AND latency vs consistency during normal operation
+  - Even without partitions, there's a trade-off: replicating synchronously (higher latency, stronger consistency) vs asynchronously (lower latency, eventual consistency).
+  - **Avoid when:** your data store is not replicated — a single-node database has no PACELC trade-off.
+
 ## Scenario-Based Questions
 
 **Q: Your e-commerce platform shows inconsistent product inventory across regions during a network partition. How do you resolve it?**

@@ -230,6 +230,28 @@ kafkaTemplate.send("order.events", event.getOrderId(), event);
 // all go to the same partition and are processed in order
 ```
 
+## Use Cases
+
+- **Event sourcing and audit logging** — order lifecycle events, user activity streams, or financial transactions
+  - Append-only log provides an immutable record. Consumers replay events from any point in time. Retention policies enable both real-time and batch consumption.
+  - **Avoid when:** message throughput is low (<100 msg/sec) — Kafka's batching and commit-log design adds overhead compared to simpler queues.
+
+- **Stream processing** — real-time fraud detection, anomaly monitoring, or data enrichment pipelines
+  - Kafka Streams or ksqlDB processes records within Kafka without external systems. Stateful operations (joins, aggregations, windowing) run in the stream processor.
+  - **Avoid when:** processing logic is complex and requires external coordination — use Kafka Connect to bridge to a stream processor (Flink, Spark).
+
+- **Data pipeline between systems** — database CDC to search index, data warehouse ingestion, or cache refresh
+  - Kafka Connect ingests changes from databases (Debezium CDC) and streams them to Elasticsearch, S3, or data warehouses. Exactly-once semantics prevent data loss or duplication.
+  - **Avoid when:** the pipeline is simple point-to-point — a direct API integration or lightweight queue may be simpler to operate.
+
+- **Log aggregation and metrics** — centralizing application logs, infrastructure metrics, or tracing data
+  - Producers emit structured log/metric records to Kafka topics. Consumers index them into Elasticsearch, Loki, or a time-series database for querying.
+  - **Avoid when:** log volume is low and retention requirements are minimal — direct shipping to Elasticsearch or Loki is simpler.
+
+- **Pub/Sub for large-scale event distribution** — notifications, webhook delivery, or feature flag updates
+  - Topics with consumer groups allow multiple independent subscribers. Each consumer group gets every message, enabling fan-out at scale.
+  - **Avoid when:** messages need routing based on content — RabbitMQ's exchange bindings are more flexible for complex routing topologies.
+
 ---
 
 ## Scenario-Based Questions

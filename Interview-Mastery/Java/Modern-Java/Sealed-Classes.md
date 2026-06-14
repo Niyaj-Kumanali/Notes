@@ -90,6 +90,26 @@
 
 - Exhaustive switches ensure no state is forgotten in business logic.
 
+## Use Cases
+
+Sealed classes give the compiler — and the reader — exact knowledge of every permitted subtype, enabling exhaustive pattern matching and controlled extensibility.
+
+- **Domain state machines** — Model a fixed set of states where every transition is known at compile time.
+  - Declare `sealed interface OrderState permits Pending, Shipped, Delivered, Cancelled` and exhaustively handle each state in a switch. Example: order lifecycle in an e-commerce system.
+  - **Avoid when:** new states can be added by external modules — use `non-sealed` for a subclass that third parties can extend, or skip sealing entirely.
+
+- **Expression trees for interpreters** — Define a closed hierarchy of AST nodes that can be pattern-matched exhaustively.
+  - Permitted subtypes represent each grammar production. Example: `sealed interface Expr permits Const, Neg, Add, Mul` with a recursive `eval()` method using pattern matching.
+  - **Avoid when:** the expression language evolves frequently — adding a new node type requires changing the sealed type and all switch statements.
+
+- **API stability guarantees** — Prevent downstream code from extending a base class in ways that would break internal invariants.
+  - Seal the base class so only the library's own classes can be subtypes. Example: a security-critical `Permission` class that must validate all instances through a controlled constructor.
+  - **Avoid when:** the goal is interface segregation rather than hierarchy control — prefer a regular abstract class with package-private constructors.
+
+- **Algebraic data types with records** — Combine sealed interfaces with records for type-safe, data-carrying variants (sum types).
+  - Each permitted subtype is a record holding variant-specific data. Example: `sealed interface Shape permits Circle, Rect` where `record Circle(double radius) implements Shape {}`.
+  - **Avoid when:** variants share mutable state or need identity — use a class hierarchy with abstract methods instead.
+
 ## Scenario-Based Questions
 
 **Q: You are designing an API that processes geometric shapes. Currently, you have Circle, Square, and Triangle. Other developers in your organization may want to add new shapes later. Should you use a sealed class?**

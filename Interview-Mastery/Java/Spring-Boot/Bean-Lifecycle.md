@@ -275,6 +275,32 @@ public class MessageConsumer {
 
 ---
 
+## Use Cases
+
+- The bean lifecycle hooks (`@PostConstruct`, `@PreDestroy`, `*Aware` interfaces, and `*Processor` interfaces) let you execute code at precise points during a bean's life. These use cases show when each hook is the right tool.
+
+- **Startup validation with `@PostConstruct`** — A service must verify that a database connection, cache cluster, or external API is reachable before the application accepts traffic.
+  - Place validation logic in a `@PostConstruct` method. Spring fails fast — the application context won't start if validation throws.
+  - **Avoid when:** The check depends on AOP proxies (e.g., `@Transactional`, `@Cacheable`) — `@PostConstruct` runs before proxy creation. Use `@EventListener(ContextRefreshedEvent.class)` instead.
+
+- **Resource cleanup with `@PreDestroy`** — A message consumer holds a RabbitMQ connection that must be closed gracefully on shutdown.
+  - Use `@PreDestroy` to close connections, release thread pools, or flush buffers. Spring calls it during context close — even for non-web applications.
+  - **Avoid when:** You need to complete in-flight work — use `@EventListener(ContextClosedEvent.class)` for earlier notification, then `@PreDestroy` for final cleanup.
+
+- **Cache warming after AOP proxy creation** — A product catalog uses `@Cacheable`, and the cache is empty at startup. The first user experiences a slow response.
+  - Use `@EventListener(ContextRefreshedEvent.class)` — this fires after all beans are fully initialized and AOP proxies are in place, so `@Cacheable` calls within the event handler work correctly.
+  - **Avoid when:** The warming operation is expensive and non-essential — consider a background thread instead of blocking startup.
+
+- **Custom bean modification with `BeanPostProcessor`** — A framework needs to wrap every `@Service` bean with a custom logging proxy without touching each service class.
+  - Implement `BeanPostProcessor.postProcessAfterInitialization()`. It runs after each bean is fully initialized, giving you access to the final proxy object.
+  - **Avoid when:** A simpler AOP advice (`@Around`, `@Before`) achieves the same goal — `BeanPostProcessor` is more manual and error-prone.
+
+- **Property placeholder resolution with `BeanFactoryPostProcessor`** — A library's `@Value("${app.secret.key}")` fields are not resolving because the property source hasn't been registered yet.
+  - Implement `BeanFactoryPostProcessor` to register `PropertySourcesPlaceholderConfigurer` — this runs before any beans are instantiated, ensuring `${...}` placeholders are resolved.
+  - **Avoid when:** You just need to add a property file — use `@PropertySource` on a `@Configuration` class instead.
+
+---
+
 ## Scenario-Based Questions
 
 - **Q: Your `@PostConstruct` method calls `cacheManager.getCache("products")` but the cache manager is null even though it's injected via the constructor. The constructor shows it's non-null. What's happening?**

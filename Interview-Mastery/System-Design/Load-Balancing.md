@@ -77,6 +77,28 @@
 - Supports advanced circuit breaking, retry policies, and outlier detection
 - Used as the data plane in Istio service mesh
 
+## Use Cases
+
+- **Traffic distribution across servers** — scaling a web application across multiple instances for high availability
+  - ALB or NLB distributes incoming requests to healthy backend instances. Health checks automatically remove failing instances from the pool.
+  - **Avoid when:** only one instance exists — a load balancer doesn't help availability without redundancy.
+
+- **TLS termination** — offloading SSL/TLS decryption from application servers
+  - Load balancer handles certificate management and decryption, passing plain HTTP to backend. Reduces CPU load and centralizes certificate management.
+  - **Avoid when:** end-to-end encryption is mandatory — configure passthrough mode or re-encrypt between LB and backend.
+
+- **Session persistence (sticky sessions)** — ensuring a user's requests always go to the same backend
+  - Cookie-based or source-IP-based affinity. Essential for stateful applications that store session data in local memory.
+  - **Avoid when:** the application is stateless or uses a distributed session store (Redis) — stickiness reduces load balancing effectiveness.
+
+- **Path-based routing** — routing `api.example.com/users` to the User Service and `api.example.com/orders` to the Order Service
+  - ALB or API Gateway routes based on URL path, host header, or query parameters. Enables microservice architectures behind a single endpoint.
+  - **Avoid when:** the routing rules are complex and conditional — a service mesh (Envoy, Istio) provides more sophisticated routing.
+
+- **Weighted target groups for canary deployments** — gradually shifting traffic from v1 to v2
+  - Route 5% of traffic to the new version, monitor metrics, then increase to 25%, 50%, 100%. Rollback by resetting weights to 0%.
+  - **Avoid when:** traffic patterns are identical across versions — blue-green deployment (instant switch) is simpler for verified releases.
+
 ## Scenario-Based Questions
 
 **Q: Your backend servers show uneven CPU usage despite round-robin load balancing. How do you diagnose and fix it?**

@@ -288,6 +288,32 @@ public class FileUploadExceptionHandler {
 
 ---
 
+## Use Cases
+
+- Structured exception handling is critical for production APIs that serve external clients or integrate with other services. These use cases show when to use each Spring error-handling mechanism.
+
+- **Global consistent error responses via `@RestControllerAdvice`** — A public REST API must return errors in a uniform JSON format (`{error, message, status, timestamp, path}`) across all endpoints.
+  - Create a single `@RestControllerAdvice` with `@ExceptionHandler` methods for each exception type. Return a `ResponseEntity<ErrorResponse>` with appropriate HTTP status codes.
+  - **Avoid when:** Only one controller needs custom error handling — use an `@ExceptionHandler` directly in that controller instead.
+
+- **Correlation ID propagation for microservice debugging** — A 10-microservice system makes it impossible to trace a single user request across service boundaries during errors.
+  - Add a servlet `Filter` that generates or propagates an `X-Correlation-Id` header, stores it in `MDC`, and includes it in all error responses. Downstream services forward the header.
+  - **Avoid when:** You operate a monolith — a single `@ControllerAdvice` with structured logging is sufficient.
+
+- **Field-level validation error collection** — A file upload API returns generic "invalid request" when a CSV row has multiple validation failures, forcing clients to guess which field is wrong.
+  - Handle `MethodArgumentNotValidException` in `@RestControllerAdvice`. Extract `BindingResult.getFieldErrors()` and group by field name in the error response.
+  - **Avoid when:** You only validate at the service layer — use a custom exception that carries field-level errors and handle it in `@ControllerAdvice`.
+
+- **Graceful handling of external API failures** — A payment gateway call fails with a timeout, and the API must return a `502 Bad Gateway` with a user-friendly message instead of a 500 with a stack trace.
+  - Catch the gateway exception in `@ExceptionHandler` and map it to `HttpStatus.BAD_GATEWAY` with a redacted message. Include a retryable flag and correlation ID.
+  - **Avoid when:** The external failure is transient — combine with Spring Retry to retry before surfacing the error to the client.
+
+- **Catch-all for unexpected errors** — An unhandled `NullPointerException` in deep code reaches the servlet container and returns a generic Whitelabel Error Page with no details.
+  - Register a fallback `@ExceptionHandler(Exception.class)` that logs the full stack trace and returns a sanitized 500 response with a reference ID for support.
+  - **Avoid when:** You use a centralized error tracking service (Sentry, Datadog) — delegate to it and return a minimal error to the client.
+
+---
+
 ## Scenario-Based Questions
 
 - **Q: You ship a new API endpoint to production. A client integration team reports they get a generic 500 with no body for certain inputs, but your logs don't show any errors. How do you diagnose this?**

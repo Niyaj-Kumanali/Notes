@@ -244,6 +244,28 @@ stages:
 
   - Compliance gates are enforced at multiple points in the pipeline. The first gate is the security scan stage in CI — Trivy scans for vulnerabilities and the pipeline fails if any CRITICAL severity vulnerability is found. The second gate is the dependency check using OWASP Dependency-Check — the pipeline fails if any dependency has a known CVE with a CVSS score above 7.0. The third gate is SBOM generation — every build produces a CycloneDX-format SBOM that is stored alongside the artifact and submitted to the company's GRC (Governance, Risk, and Compliance) platform. The fourth gate is manual approval for production — a designated security officer must approve the deployment after reviewing the scan results, the SBOM, and the change request. The fifth gate is post-deployment validation — automated compliance checks run in production to verify that the deployed environment matches the security baseline.
 
+## Use Cases
+
+- **Automated testing on every commit** — running unit tests, linting, and static analysis for every pull request
+  - CI pipeline triggers on PR creation and each subsequent commit. Failing builds block merging. Provides fast feedback to developers.
+  - **Avoid when:** the project is a prototype or proof-of-concept — CI adds overhead before the product-market fit is validated.
+
+- **Automated deployment to production** — deploying verified builds to production without manual steps
+  - CD pipeline takes the same artifact through dev, staging, and production. Each environment applies environment-specific configuration without rebuilding.
+  - **Avoid when:** compliance requires manual approval and audit — implement approval gates in the CD pipeline.
+
+- **Monorepo CI with selective building** — building only changed services in a repository with 100+ microservices
+  - Path triggers detect which directories changed. Dependency graph analysis determines impacted services. Only affected services are built and tested.
+  - **Avoid when:** all services are tightly coupled — a single build step for the entire codebase is simpler if changes almost always affect everything.
+
+- **Progressive delivery (canary/feature flags)** — gradually rolling out changes to a subset of users
+  - CI/CD pipeline integrates with feature flag systems (LaunchDarkly). Canary deployments route small traffic percentages to new versions. Auto-rollback on metric degradation.
+  - **Avoid when:** the change is a trivial bug fix with zero risk — direct deployment with monitoring is faster.
+
+- **Security and compliance gate enforcement** — scanning for vulnerabilities, verifying dependencies, and generating SBOMs in every build
+  - Pipeline stages for SAST, DAST, dependency scanning, container scanning, and license compliance. Pipeline fails on critical findings. Audit trail for every build.
+  - **Avoid when:** speed is the only priority — security scanning adds 5–30 minutes per build. Trade off based on risk tolerance.
+
 ---
 
 ## Scenario-Based Questions

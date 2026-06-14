@@ -471,6 +471,30 @@ public class PaymentService {
 
 ---
 
+## Use Cases
+
+Reach for default and static methods when you need to evolve interfaces or attach behavior to an interface without breaking implementors.
+
+- **Evolving public interfaces without breaking clients** — Add a new method to a widely-implemented library interface (e.g., adding `stream()` to `Collection`) with a sensible default so existing classes compile unchanged.
+  - The primary motivation for the feature in Java 8.
+  - **Avoid when:** the interface is internal to a single codebase — update all implementations at once with an abstract method.
+
+- **Providing optional behavior** — A default method lets consumers opt in to new functionality by overriding the default. Consumers that don't need it inherit the default unmodified.
+  - **Avoid when:** the behavior must be mandatory — use an abstract method so the compiler enforces implementation.
+
+- **Mixin-style composition across unrelated classes** — Multiple interfaces with default methods compose shared behavior (e.g., `Loggable`, `Auditable`, `Serializable`) without a common base class.
+  - Java's single-inheritance limitation makes this especially valuable.
+  - **Avoid when:** two interfaces provide conflicting defaults — resolve via explicit override and `InterfaceName.super.method()`.
+
+- **Replacing utility companion classes** — Static interface methods (e.g., `List.of()`, `Set.of()`) keep helper logic on the interface itself instead of a separate `Collections` class.
+  - Better discoverability and stronger logical grouping.
+  - **Avoid when:** the utility method depends on private state or needs inheritance — a class is more appropriate.
+
+- **Template method pattern at the interface level** — A default method calls abstract methods in a defined order, letting subclasses customize individual steps without redefining the overall algorithm.
+  - **Avoid when:** the ordering contract between the default and abstract methods is not clearly documented — callers may override in unexpected ways.
+
+---
+
 ## Scenario-Based Questions
 
 **Q: A team defines an interface `ReportGenerator` with a default method `generate()`. The default calls `fetchData()`, `computeMetrics()`, and `formatOutput()` — all abstract methods on the same interface. A subclass overrides `fetchData()` to return cached data, but the default `generate()` still calls `fetchData()` and the cached data is stale. Who is at fault — the interface for providing a default that calls overridable methods, or the subclass for overriding `fetchData()` without understanding `generate()`'s contract?**

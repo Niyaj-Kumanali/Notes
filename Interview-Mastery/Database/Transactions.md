@@ -220,6 +220,31 @@ public void processInvoices() {
 
 - Only the current batch is lost on failure, not the entire 1M records.
 
+## Use Cases
+
+Reach for transactions whenever a group of database operations must succeed or fail as a unit.
+
+- **Order processing workflows** — Deduct inventory, charge the customer, and create the order atomically. If any step fails, the entire operation rolls back.
+  - **Avoid when:** operations involve external services (payment gateways, email) — holding database locks for seconds causes contention.
+
+- **Financial transfers** — Debit one account and credit another in a single transaction. A failure mid-way leaves money neither lost nor created.
+  - The canonical example of atomicity requirements.
+  - **Avoid when:** the system uses eventual consistency (e.g., activity log entries) — individual inserts with idempotency keys suffice.
+
+- **Batch processing with partial failure tolerance** — Process 1M records in batches of 1000, committing after each batch. A crash loses only the current batch.
+  - Balances throughput with failure isolation.
+  - **Avoid when:** each record is fully independent — consider individual auto-commit statements for simplicity.
+
+- **Concurrent inventory reservation** — Read available stock, check sufficiency, and decrement within a single transaction (often with `SELECT FOR UPDATE`).
+  - Prevents overselling when thousands of users book concurrently.
+  - **Avoid when:** the reservation requires external confirmation — use a Saga pattern with compensation.
+
+- **Spring @Transactional boundaries** — Annotate a service method to let Spring manage begin, commit, and rollback automatically based on runtime exceptions.
+  - Declarative transaction management keeps business logic clean.
+  - **Avoid when:** the method performs only reads — adding `readOnly=true` helps the optimizer but is often unnecessary.
+
+---
+
 ## Scenario-Based Questions
 
 **Q: You are building an order system where placing an order must deduct inventory, charge the customer, and send a confirmation. The payment gateway call takes 5 seconds. How do you structure transactions to avoid holding database locks for 5 seconds?**

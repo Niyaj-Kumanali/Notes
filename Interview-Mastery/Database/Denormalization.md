@@ -346,6 +346,29 @@ public class FeedItem {
 }
 ```
 
+## Use Cases
+
+Reach for denormalization when read performance is critical and the cost of redundant writes and consistency maintenance is acceptable.
+
+- **Read-heavy application optimization** — Product listings, feeds, and dashboards that serve millions of reads per write benefit from pre-joined and pre-aggregated data.
+  - Eliminate expensive multi-table joins on every read.
+  - **Avoid when:** data is written as often as it is read — normalization keeps writes fast.
+
+- **Real-time analytics** — Summary tables with pre-calculated metrics (monthly revenue, daily active users) provide sub-second responses without running aggregations at query time.
+  - **Avoid when:** the query needs access to raw, unaggregated detail.
+
+- **Caching read models (CQRS)** — Maintain a denormalized read model that reflects the normalized write model after each mutation.
+  - Separates write-optimized from read-optimized schemas.
+  - **Avoid when:** strong consistency between write and read models is required — eventual consistency may not be acceptable.
+
+- **High-traffic API optimization** — Store frequently accessed related data (e.g., category name) directly on the main table to avoid joins on every request.
+  - **Avoid when:** the duplicated data changes frequently — the overhead of updating all copies outweighs the read benefit.
+
+- **Time-series pre-aggregation** — Hourly/daily rollups of metrics like page views or revenue enable fast historical queries without scanning raw events.
+  - **Avoid when:** every individual data point must be queryable with full precision.
+
+---
+
 ## Scenario-Based Questions
 
 **Q: You are building a product listing page that shows product name, category name, and review count. The normalized query joins 4 tables and takes 200ms at 1000 QPS. How do you decide which columns to denormalize?**

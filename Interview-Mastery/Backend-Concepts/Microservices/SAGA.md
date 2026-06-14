@@ -146,6 +146,26 @@ public class OrderSagaOrchestrator {
 
 **Resolution:** Every saga command carries a unique `commandId`. Each service stores processed command IDs in a dedup table. If a duplicate command arrives (same `commandId`), the service returns the cached result instead of executing again. This enables safe retry of both forward actions and compensating actions.
 
+## Use Cases
+
+- Sagas manage distributed transactions across services where 2PC is too slow or blocking. These patterns cover when to use choreography vs orchestration and how to handle compensation.
+
+- **Multi-step order processing** — coordinating inventory, payment, and shipping across services
+  - When to use: An order requires sequential steps (reserve inventory, charge payment, create shipment) each owned by a different service. If any step fails, previous steps must be undone via compensating transactions. Example: an e-commerce checkout where `ReserveInventory` succeeds, `ChargePayment` succeeds, but `CreateShipment` fails — the saga compensates by refunding the payment and releasing inventory.
+  - **Avoid when:** The workflow is a single-service local transaction — a database transaction with rollback is simpler and consistent.
+
+- **Booking systems** — hotel, flight, and car rental reservations across independent systems
+  - When to use: A travel booking involves reserving a hotel room, booking a flight, and renting a car — each managed by a different provider. A saga coordinates the reservations and compensates (cancels) if any step fails. Example: orchestration-based saga where the booking service calls hotel API → flight API → car API — if the car rental fails, the saga cancels the hotel and flight reservations.
+  - **Avoid when:** Each reservation can be made independently and the user accepts partial bookings — individual requests without coordination are simpler.
+
+- **Financial transfers across services** — moving money between accounts in different services
+  - When to use: A transfer from a checking account to a savings account involves debiting one service and crediting another. If the credit fails, the debit must be reversed. Example: an orchestrated saga where the `Debit` step completes, then `Credit` fails — the saga calls the `Refund` compensating transaction to restore the original balance.
+  - **Avoid when:** Both accounts are in the same service/database — a single ACID transaction guarantees atomicity without saga complexity.
+
+- **Long-running business workflows** — processes that take minutes, hours, or days to complete
+  - When to use: A business process pauses between steps (e.g., wait for manager approval, wait for external system response). Sagas persist their state, allowing steps to execute asynchronously over extended periods. Example: a loan application saga where the application is submitted, credit check runs (< 1s), underwriter reviews (hours), and funds are disbursed — the saga persists state between each step and compensates if the underwriter rejects the application.
+  - **Avoid when:** The workflow completes in milliseconds — synchronous orchestration with a distributed transaction or simple retry logic is sufficient.
+
 ---
 
 ## Scenario-Based Questions

@@ -140,6 +140,26 @@ public List<Product> dbFallback(String category, Throwable t) {
 }
 ```
 
+## Use Cases
+
+- The circuit breaker pattern protects services from cascading failures and lets the system degrade gracefully. These patterns cover when and how to apply circuit breakers, bulkheads, and time limiters.
+
+- **External API integration with fallbacks** — protecting your service from a slow or failing third-party API
+  - When to use: Your service calls an external API (payment gateway, SMS provider, mapping service) that can become slow or unavailable. The circuit breaker fails fast for subsequent calls when the external API is unhealthy, and a fallback returns cached data or a default response. Example: a ride-sharing app's fare estimation service calls a mapping API — when the circuit opens, fallback returns an estimate based on the last known average rather than blocking the user.
+  - **Avoid when:** The external API is the sole source of truth and stale data is unacceptable — fail fast and surface the error explicitly rather than serving stale fallback data.
+
+- **Microservice dependency protection** — preventing a failing downstream service from exhausting upstream resources
+  - When to use: Service A calls Service B, which is experiencing a slowdown. Without a circuit breaker, Service A's threads/connections are held waiting for Service B's timeouts, eventually exhausting Service A's resources and taking down both services. Example: `order-service` calls `payment-service` — when payment-service's p99 latency spikes to 10s, the circuit breaker opens after 5 consecutive timeouts, and order-service returns a "payment pending" status instead of blocking.
+  - **Avoid when:** All services are equally reliable and running on the same infrastructure — circuit breakers add complexity with little benefit.
+
+- **Degraded mode during outages** — serving partial functionality when non-critical dependencies are down
+  - When to use: A core feature depends on multiple services, but some are optional. Circuit breakers on optional dependencies let the system degrade gracefully instead of failing entirely. Example: an e-commerce product page requires the catalog service (essential) but the recommendation service (optional) — when the recommendation circuit opens, the page still renders without "You might also like" suggestions.
+  - **Avoid when:** Every dependency is critical to the feature's functionality — there's no degraded mode to offer.
+
+- **Preventing cascading failures** — isolating a fault to one service so it doesn't propagate
+  - When to use: In a distributed system, a single slow service can cause a chain reaction. Circuit breakers (combined with bulkheads and time limiters) create isolation boundaries. Example: a checkout flow with separate bulkheads for payment, inventory, and shipping calls — if inventory is slow, checkout still works for in-stock items because the inventory bulkhead doesn't starve the payment pool.
+  - **Avoid when:** The service has a single dependency and no internal thread pool management — a simple timeout may suffice.
+
 ---
 
 ## Scenario-Based Questions

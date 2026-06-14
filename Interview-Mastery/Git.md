@@ -57,6 +57,32 @@
 
 - A junior developer force-pushes a rebased branch to the shared develop branch, wiping out commits from three teammates. The recovery uses `git reflog` on a teammate's local repository to find the original commit hashes. The teammate creates a new branch from the last known good commit and pushes it to develop. The team re-applies the lost commits using cherry-pick. The developer is instructed to use `--force-with-lease` going forward.
 
+## Use Cases
+
+Reach for Git whenever you need to track changes, collaborate on code, or manage multiple release streams.
+
+- **Feature branch collaboration** — Developers create branches from main, commit incrementally, and merge via pull requests after code review.
+  - Keeps main stable while multiple features are developed in parallel.
+  - **Avoid when:** deploying directly from trunk (trunk-based development) matches your release cadence better.
+
+- **Hotfix patching in production** — Branch from a release tag, fix the bug, merge back to both main and the release branch.
+  - Cherry-pick the fix to other active branches without merging unrelated changes.
+  - **Avoid when:** the fix can wait for the next regular release cycle.
+
+- **Commit history cleanup before merging** — Interactive rebase squashes, rewords, and reorders commits so the target branch receives a clean, reviewable history.
+  - Essential for maintaining readable project history.
+  - **Avoid when:** the branch is shared with other developers — rebasing rewrites commit hashes.
+
+- **Recovering from mistakes** — `git reflog` locates lost commits, `git reset` undoes staged or committed changes, and `git revert` safely undoes public history.
+  - Every Git user should know these recovery workflows.
+  - **Avoid when:** the commits exist only on a remote with no local clones — reflog is local-only.
+
+- **Open-source contribution** — Fork, feature branch, commit, push, open a PR, then sync from upstream via fetch and rebase.
+  - The standard model for contributing to projects on GitHub, GitLab, and Bitbucket.
+  - **Avoid when:** you have direct push access to the shared branch.
+
+---
+
 ## Scenario-Based Questions
 
 **Q: You accidentally committed a change to the main branch instead of a feature branch. How do you undo this mistake?**

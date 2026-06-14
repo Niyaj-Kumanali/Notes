@@ -195,6 +195,28 @@ export default defineConfig({
 ### Scenario 3: Flaky Tests from Module Mocking
 - A team migrated to Vitest but tests are flaky — sometimes the mock works, sometimes the real module is imported. Developers spend hours debugging mock resolution. **Fix:** The issue is `vi.mock` hoisting — if the import statement uses a dynamic path or the mock factory is incorrect, the real module leaks through. Standardize on `vi.mock()` with factory functions at the top of the file. Use `vi.hoisted()` for mock variables. Add a lint rule enforcing Vitest mock patterns. Result: mock behavior becomes deterministic.
 
+## Use Cases
+
+- **Migrating from Jest to Vitest** — adopting Vitest for its speed and native Vite integration
+  - Drop-in replacement for most Jest APIs (`describe`, `it`, `expect`). `vi.mock` replaces `jest.mock`. Simultaneous running with Jest during migration allows side-by-side validation.
+  - **Avoid when:** the project doesn't use Vite — Jest is more widely compatible with non-Vite projects.
+
+- **Monorepo testing with workspaces** — running per-package tests with package-specific configurations
+  - `vitest.workspace.ts` defines per-package configs with different environments (jsdom, node, browser). Single `vitest run` tests the entire monorepo.
+  - **Avoid when:** all packages share the same test environment — a single Vitest configuration is simpler.
+
+- **ESM-first testing** — testing modern JavaScript/TypeScript with native ES module support
+  - Vitest natively handles ESM without Babel or transpilation steps. `vi.mock` respects ESM hoisting rules. TypeScript works out of the box.
+  - **Avoid when:** the codebase uses CommonJS extensively — Jest's CommonJS support is more mature.
+
+- **In-source testing** — writing tests alongside production code for better co-location
+  - Vitest supports `import.meta.vitest` for in-source testing. Tests are tree-shaken in production builds. Enables testing private functions without export.
+  - **Avoid when:** the team prefers separate test files — out-of-source tests with `*.test.ts` matching patterns are fully supported.
+
+- **Browser-mode E2E testing** — running Vitest in a real browser (Chrome, Firefox) for component tests
+  - `@vitest/browser` plugin runs tests in actual browsers. Supports Playwright and WebdriverIO. Screenshot diffing and user interaction testing.
+  - **Avoid when:** unit/component tests in jsdom are sufficient — browser mode is slower and requires browser dependencies.
+
 ---
 
 ## Scenario-Based Questions

@@ -246,6 +246,30 @@ A daily batch query suddenly takes 2x longer. The deployment log shows no code c
 
 Fix: run ANALYZE to refresh statistics. Use pg_hint_plan to pin the hash join plan if the issue persists.
 
+## Use Cases
+
+Reach for execution plan analysis whenever a query is slower than expected — the plan tells you exactly how the database is executing it.
+
+- **Debugging slow queries in production** — Use `EXPLAIN ANALYZE` to compare estimated vs actual row counts. A large discrepancy indicates stale statistics or a wrong join strategy.
+  - The single most effective diagnostic tool for query performance.
+  - **Avoid when:** the query runs in under a millisecond — plan analysis overhead isn't justified.
+
+- **Verifying index usage** — Check whether the plan shows Index Scan, Index Only Scan, or Seq Scan. If a critical filter uses Seq Scan, an index is missing or not being used.
+  - **Avoid when:** the table has no indexes — start by creating appropriate indexes first.
+
+- **Tuning JOIN performance** — Compare Nested Loop (good for small results), Hash Join (good for large unsorted data), and Merge Join (good for pre-sorted data).
+  - The join algorithm choice often determines query runtime.
+  - **Avoid when:** the query touches only one table — plan analysis is less critical for single-table queries.
+
+- **Detecting plan regressions** — Compare plans before and after schema changes (adding an index, column, or constraint) to ensure the optimizer didn't choose a worse plan.
+  - **Avoid when:** the schema change is trivial and unlikely to affect plan choice.
+
+- **Cardinality estimation debugging** — When estimated rows differs from actual rows by > 10x, update table statistics (`ANALYZE`) or create extended statistics for correlated columns.
+  - Wrong estimates lead to bad join order and algorithm choices.
+  - **Avoid when:** the estimate is within 2x of actual — the optimizer handles small errors well.
+
+---
+
 ## Scenario-Based Questions
 
 - **Q:** You are debugging a query that became 10x slower after a data load. EXPLAIN ANALYZE shows `actual rows=1000000` but `plan rows=5000`. The query uses an index scan. How do you fix it?

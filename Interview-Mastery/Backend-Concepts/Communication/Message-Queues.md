@@ -226,6 +226,28 @@ public class OrderProcessingConsumer {
 
 **Resolution:** Implement the transactional outbox pattern. Within the same database transaction, both the user email update and an outbox record are written. A scheduled `OutboxRelay` polls for unprocessed outbox records and publishes them reliably. This ensures exactly-once publication of the event.
 
+## Use Cases
+
+- **Load leveling for traffic spikes** — order processing, video uploads, or payment settlements during flash sales
+  - The queue buffers bursts of requests; consumers process at a sustainable rate. Prevents backend overload and acts as a shock absorber.
+  - **Avoid when:** latency is critical — queueing adds unavoidable delay compared to synchronous processing.
+
+- **Decoupling microservices** — async communication between independent services
+  - Producer and consumer evolve independently, scale separately, and fail in isolation. The queue mediates the contract between them.
+  - **Avoid when:** strong consistency is required — eventual consistency is inherent; consider sagas or distributed transactions.
+
+- **Task distribution** — image processing, report generation, or batch email sending
+  - Work items are enqueued and distributed across worker instances. Failed tasks can be retried or moved to a dead letter queue.
+  - **Avoid when:** task ordering must be preserved — use a single consumer or Kafka partitions with key ordering.
+
+- **Event notification** — new user signup triggers email, SMS, analytics, and CRM updates
+  - Fan-out pattern: one event (e.g., `UserCreated`) is published to an exchange and delivered to multiple queues, each consumed by a different service.
+  - **Avoid when:** events must be processed in strict order across consumers — use a partitioned log (Kafka) instead.
+
+- **Reliable delivery with retries** — payment processing, invoice generation, or order fulfillment
+  - At-least-once delivery with consumer acknowledgments. Failed messages are retried with exponential backoff then routed to a dead letter queue.
+  - **Avoid when:** exactly-once semantics are mandatory — implement idempotent consumers or use a transactional outbox pattern.
+
 ---
 
 ## Scenario-Based Questions

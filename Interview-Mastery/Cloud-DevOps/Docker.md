@@ -226,6 +226,28 @@ build:
       --cache-repo=$CI_REGISTRY_IMAGE/cache
 ```
 
+## Use Cases
+
+- **Consistent development environments** — eliminating "works on my machine" across a team
+  - Docker Compose defines all services (app, database, cache, queue) in a single YAML file. Every developer runs the exact same stack regardless of host OS.
+  - **Avoid when:** the application has no external dependencies (e.g., a pure CLI tool) — a simple binary or script is more portable.
+
+- **CI/CD build artifacts** — building and packaging applications as immutable Docker images
+  - Multistage builds create minimal production images. Image tags (commit SHA, semantic version) identify exact artifacts. Images are pushed to a registry for deployment.
+  - **Avoid when:** the artifact is a native binary or library — a container adds unnecessary overhead for deployment.
+
+- **Microservice deployment** — deploying multiple independent services on the same host or orchestrated by Kubernetes
+  - Each service runs in its own container with isolated filesystem, network, and resource limits. Scaling and updating individual services without affecting others.
+  - **Avoid when:** all services share the same lifecycle and dependencies — a monolith container is simpler to manage.
+
+- **Local integration testing** — spinning up test dependencies (PostgreSQL, Redis, Kafka) without installing them natively
+  - Testcontainers or `docker-compose up` provisions dependencies in containers. Tests connect to containerized services. Cleanup via `docker-compose down`.
+  - **Avoid when:** the test environment is already available as a shared service — dedicated test instances may be more resource-efficient.
+
+- **Legacy application containerization** — modernizing old applications without rewriting code
+  - Package the legacy app and its specific OS version, libraries, and runtime into a container. Runs on modern infrastructure unchanged.
+  - **Avoid when:** the legacy app needs direct hardware access (GPU, specific kernel modules) — containers share the host kernel and may not support certain device access.
+
 ---
 
 ## Scenario-Based Questions

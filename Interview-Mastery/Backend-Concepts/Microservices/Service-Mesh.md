@@ -101,6 +101,28 @@
 - The root cause: the authentication service created a new gRPC connection for every request (no connection pooling). Each new connection required a full TLS handshake with certificate validation.
 - They fixed by switching to gRPC persistent connections and enabling TLS session caching; p99 dropped back to 60ms.
 
+## Use Cases
+
+- A service mesh handles inter-service communication, security, and observability at the infrastructure layer, freeing application code from these concerns. These patterns cover the most common adoption scenarios.
+
+- **Zero-trust security with mTLS** — encrypting and authenticating all service-to-service traffic
+  - When to use: You need to ensure that every service call is encrypted and that both sides are authenticated. A service mesh with mutual TLS (mTLS) provides automatic certificate issuance, rotation, and enforcement without application changes. Example: an Istio mesh with `STRICT mTLS` mode where every pod gets a SPIFFE-compliant identity, and all HTTP/gRPC traffic is automatically encrypted and authenticated.
+  - **Avoid when:** Services run on a trusted network with no cross-team boundaries — mTLS overhead (CPU for handshakes) may not be justified.
+
+- **Traffic splitting for canary deployments** — gradually shifting traffic to a new service version
+  - When to use: You deploy a new version of a service and want to route a small percentage of traffic to it before full rollout. The mesh's traffic management (Istio VirtualService / DestinationRule) handles weighted routing without changing application code. Example: routing 5% of traffic to `reviews:v2` and 95% to `reviews:v1`, with request header matching for internal testers.
+  - **Avoid when:** You already have a gateway-level or client-level canary mechanism — adding mesh-level routing is redundant.
+
+- **Observability without code instrumentation** — collecting metrics, logs, and traces from all service calls
+  - When to use: Services are written in multiple languages and manual instrumentation is inconsistent. The mesh sidecar proxies generate consistent telemetry (HTTP status codes, latency, request/response sizes, trace spans) for all traffic. Example: Envoy proxies in an Istio mesh emit standardized metrics to Prometheus and distributed trace spans to Jaeger, giving a unified view of service health and request flows.
+  - **Avoid when:** All services are written in the same language with a shared observability library — consistent instrumentation is achievable without the mesh's overhead.
+
+- **Resilience (retries, timeouts, circuit breaking)** — applying fault-tolerance policies at the proxy level
+  - When to use: You need consistent retry, timeout, and circuit-breaking policies across all services without modifying each service's code. Configure these in the mesh's destination rules. Example: setting a 3-second timeout with 2 retries for all calls to `payment-service`, and opening a circuit breaker after 5 consecutive 5xx responses — all configured in Istio `DestinationRule` without touching the application.
+  - **Avoid when:** Resilience requirements differ per endpoint or per caller — application-level resilience libraries (Resilience4j) provide finer control.
+
+---
+
 ## Scenario-Based Questions
 
 **Q: After deploying Istio, your team notices that all service-to-service communication is encrypted (mTLS) and latency has increased by 30%. What common misconfiguration might cause this?**

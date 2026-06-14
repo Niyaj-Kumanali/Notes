@@ -336,6 +336,30 @@ CREATE TABLE order_items (order_id INT, product_id INT, product_name VARCHAR(255
 CREATE TABLE order_items (order_id INT, product_id INT REFERENCES products(id), quantity INT, PRIMARY KEY (order_id, product_id));
 ```
 
+## Use Cases
+
+Reach for normalization when data integrity and consistency are the top priority — typically in transactional (OLTP) systems.
+
+- **Transactional system design** — Banking, order processing, and inventory systems where update anomalies are unacceptable.
+  - Each fact stored once means one place to update and no inconsistency.
+  - **Avoid when:** the workload is read-heavy analytical queries — joins across many tables hurt performance.
+
+- **Schema refactoring** — Decompose a monolithic table with repeated data into normalized form to eliminate redundancy.
+  - Common when inheriting a poorly designed schema.
+  - **Avoid when:** the table is write-once / read-many (e.g., logs) — normalization adds complexity with little benefit.
+
+- **Data warehouse staging** — Normalize source data before transforming into dimensional models to ensure consistency at ingest.
+  - The staging layer should mirror the source without duplication.
+  - **Avoid when:** building the final presentation layer — star/snowflake schemas intentionally denormalize.
+
+- **API contract design** — Normalized schemas map naturally to REST resources with clear entity boundaries and foreign-key relationships.
+  - **Avoid when:** the API serves aggregated, denormalized views and the backing store is read-optimized.
+
+- **Multi-tenant SaaS platform** — Centralized entity definitions with tenant-specific extensions avoid duplicating schema per tenant.
+  - **Avoid when:** each tenant has entirely different data models — consider a document database per tenant.
+
+---
+
 ## Scenario-Based Questions
 
 **Q: You are designing the schema for a multi-tenant SaaS platform. Each tenant has customers, products, and orders. How do you design tables to avoid data duplication across tenants while maintaining query performance?**

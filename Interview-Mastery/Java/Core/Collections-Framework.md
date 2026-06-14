@@ -370,6 +370,30 @@ Second, `LongAdder` over `AtomicLong`: under high contention, `AtomicLong.increm
 
 The `remove(key)` in `snapshotAndReset()` is not incidental — it ensures counters drain atomically so the same value cannot be counted in two consecutive snapshots. Without it, the snapshot would return cumulative totals instead of per-interval values.
 
+## Use Cases
+
+- Reach for the Java Collections Framework whenever you need to store, retrieve, or manipulate groups of objects. Choosing the right collection is often the difference between an O(1) operation and an O(n) scan.
+
+- **List for ordered, indexed access** — ArrayList vs. LinkedList
+  - Use `ArrayList` when you access elements by index most of the time (O(1)) and add/remove primarily at the end. Use `ArrayDeque` when you need frequent insertions/removals at both ends (queue, stack).
+  - **Avoid when:** you need fast random access *and* frequent middle insertions — no single List excels at both; consider a `LinkedHashSet` or a custom data structure.
+
+- **Set for uniqueness** — HashSet vs. TreeSet vs. LinkedHashSet
+  - Use `HashSet` for O(1) add/contains/remove with no ordering guarantees. Use `TreeSet` for sorted iteration and range operations. Use `LinkedHashSet` when insertion order matters.
+  - **Avoid when:** duplicates are valid — use a `List` or `Multiset` (Guava) instead.
+
+- **Map for key-value associations** — HashMap vs. TreeMap vs. LinkedHashMap
+  - Use `HashMap` for O(1) average lookups. Use `TreeMap` when you need sorted keys or range queries. Use `LinkedHashMap` for insertion-order or access-order iteration (useful for LRU caches with `removeEldestEntry`).
+  - **Avoid when:** a simple array index or enum ordinal suffices — `EnumMap` is more compact and faster than its general counterparts.
+
+- **Queue / Deque for FIFO and LIFO** — order of processing
+  - Use `ArrayDeque` as a stack (LIFO) or queue (FIFO) — it's faster than `Stack` (synchronized) and often faster than `LinkedList`. Use `PriorityQueue` when processing order depends on priority, not insertion order.
+  - **Avoid when:** you need blocking operations for multi-threaded producer-consumer — use `BlockingQueue` implementations.
+
+- **Concurrent collections for thread safety** — ConcurrentHashMap, CopyOnWriteArrayList
+  - Use `ConcurrentHashMap` when multiple threads read/write a map without explicit synchronization — it provides per-bucket locking. Use `CopyOnWriteArrayList` when reads vastly outnumber writes (e.g., listener lists).
+  - **Avoid when:** you need atomic compound operations (get-then-put) — use `ConcurrentHashMap`'s `compute` or `merge` methods, or external synchronization.
+
 ---
 
 ## Scenario-Based Questions

@@ -120,6 +120,26 @@
   }
   ```
 
+## Use Cases
+
+Records reduce boilerplate for immutable data carriers and integrate deeply with pattern matching, making them the default choice for value objects in modern Java.
+
+- **Immutable DTOs and value objects** — Replace hand-written POJOs or Lombok `@Data` with a concise, transparent data carrier.
+  - Declare `record Address(String street, String city, String zip) {}` for automatic constructor, accessors, `equals`, `hashCode`, and `toString`. Example: transfer objects between layers or across API boundaries.
+  - **Avoid when:** you need mutable state, inheritance, or a no-arg constructor — records are implicitly `final` and all fields are `private final`.
+
+- **Local intermediate results** — Model ad-hoc tuples within a method without a separate top-level class.
+  - Define a local record inside the method body for grouped return values. Example: `record NameCount(String name, long count) {}` used as an intermediate aggregation step in a stream pipeline.
+  - **Avoid when:** the data is shared across methods or modules — promote to a named top-level record for reuse.
+
+- **Sealed type hierarchy components** — Combine records with sealed interfaces to model algebraic data types.
+  - Each permitted subtype can be a record carrying its own data. Example: `sealed interface Expr permits Const, Add, Mul` where `record Const(int val) implements Expr {}`.
+  - **Avoid when:** the subtypes share significant behavior — consider an abstract class instead of records.
+
+- **Pattern matching deconstruction targets** — Leverage record patterns to extract fields in a single expression.
+  - Use `if (obj instanceof Address(var street, var city, var zip))` to destructure directly. Example: processing a heterogeneous list of record instances in a type-safe switch.
+  - **Avoid when:** you need to preserve backward compatibility of serialization — records serialize by component, which may differ from traditional Java serialization contracts.
+
 ## Scenario-Based Questions
 
 **Q: You are migrating a large codebase from traditional POJOs to records. A POJO called `Address` is used as a JPA entity and also as a DTO. How would you handle the migration?**

@@ -138,6 +138,26 @@
     """.formatted(userName, verificationLink);
   ```
 
+## Use Cases
+
+Text blocks eliminate the readability tax of multi-line string literals — no more `\n`, broken indentation, or escaped quotes obscuring the actual content.
+
+- **SQL queries** — Write multi-line queries with natural indentation and without concatenation noise.
+  - Open a text block, write the SQL as you would in a database console, and close. Example: a DAO layer with complex JOIN queries for reporting.
+  - **Avoid when:** the query is dynamic — use `?` placeholders with `PreparedStatement` and set parameters separately to prevent injection.
+
+- **HTML/XML templates** — Embed markup directly in code with proper structure visible to the developer.
+  - Compose email bodies or API response templates as text blocks with `%s` or `%s`/`formatted()` for substitution. Example: a verification email with HTML styling.
+  - **Avoid when:** the template is large or changes frequently — move to a dedicated template file (Thymeleaf, FreeMarker) and keep Java code for logic.
+
+- **JSON or YAML constants** — Include sample payloads, test fixtures, or configuration snippets without escaping every quote.
+  - Paste a JSON document verbatim into a text block and strip incidental indentation with `stripIndent()`. Example: test data for a REST API integration test.
+  - **Avoid when:** the constant must be compiled once and reused across modules — define it in a resource file instead.
+
+- **Shell scripts or command strings** — Embed small command sequences or multi-line instructions.
+  - Use a text block for a series of shell commands passed to `ProcessBuilder` or SSH exec calls. Example: a deployment script that creates directories, copies files, and restarts a service.
+  - **Avoid when:** the script is platform-specific and long — prefer a separate script file to avoid mixing languages in the same source file.
+
 ## Scenario-Based Questions
 
 **Q: You are writing a SQL query with a dynamic WHERE clause that depends on user input. How would you use a text block while safely interpolating user-controlled values?**

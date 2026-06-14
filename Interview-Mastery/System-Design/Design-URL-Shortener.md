@@ -73,6 +73,28 @@
 - RDBMS-backed for consistency and custom alias support
 - Simpler architecture suitable for moderate scale
 
+## Use Cases
+
+- **Link shortening for social media** — Twitter/X character limits, SMS marketing, or printed QR codes
+  - Short URL reduces character count. Redirect via 301 (permanent) for caching efficiency or 302 (temporary) for analytics tracking.
+  - **Avoid when:** the original URL is already short — shortening adds a redirect hop with no benefit.
+
+- **Custom branded short links** — marketing campaigns where the short domain matches the brand (e.g., `go.company.com/sale`)
+  - Custom aliases (e.g., `/blackfriday`) are readably memorable. The system reserves a namespace of human-readable short codes.
+  - **Avoid when:** scale is massive (billions of URLs) — custom aliases cause hash collisions and require lookup tables.
+
+- **Analytics and tracking** — measuring click-through rates, geographic distribution, and referrer data
+  - Each redirect records IP, user-agent, referrer, and timestamp. Analytics pipeline (Kafka + batch processing) aggregates for dashboards.
+  - **Avoid when:** privacy regulations (GDPR, CCPA) require minimal data collection — consider anonymized tracking or opt-out.
+
+- **Rate-limited temporary links** — password reset links, email verification, or document sharing with expiration
+  - Short URL configured with TTL and single-use semantics. The redirect logic checks expiration and usage count before serving the target URL.
+  - **Avoid when:** the content is highly sensitive — the short URL's target is visible in the HTTP redirect; use signed URLs instead.
+
+- **API response pagination cursors** — encoding opaque pagination tokens for API page navigation
+  - Short hash encodes the last item ID and page size. The API decodes the cursor and queries the next page efficiently.
+  - **Avoid when:** the API uses offset-based pagination — offset parameters are simpler and don't need encoding.
+
 ## Scenario-Based Questions
 
 **Q: A viral short URL causes millions of requests per second. Your database is overwhelmed. How do you handle it?**

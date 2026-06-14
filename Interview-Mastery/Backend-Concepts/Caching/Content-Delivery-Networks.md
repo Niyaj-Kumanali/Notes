@@ -109,6 +109,28 @@ public ResponseEntity<Product> getProduct(@PathVariable String sku) {
 
 **Resolution:** Use CDN with signed URLs. When a user requests a report, the application generates a time-limited signed URL (valid for 1 hour) and redirects the user. The CDN validates the signature and serves the content from the edge if cached, or fetches from origin once. The origin server is protected because only authenticated, authorized users can generate valid signed URLs.
 
+## Use Cases
+
+- **Global static asset delivery** — images, CSS, JS, fonts served to users worldwide
+  - Edge nodes cache assets geographically close to users. Content-hashed filenames enable infinite TTL with instant cache-busting on update.
+  - **Avoid when:** assets are rarely accessed by global audiences — a single-region origin with a CDN adds unnecessary complexity.
+
+- **API response caching** — public REST endpoints with infrequently changing responses
+  - Cache GET responses at the edge with short TTLs (30–300s) and `stale-while-revalidate` for freshness. Reduces origin load by 80–95%.
+  - **Avoid when:** responses are user-specific or authenticated — use CDN with signed URLs or skip caching for dynamic content.
+
+- **DDoS mitigation** — absorbing large-scale attacks targeting application endpoints
+  - CDNs provide multi-Tbps bandwidth capacity, rate limiting, WAF rules, and challenge-based protections (CAPTCHA, JS challenges).
+  - **Avoid when:** the attack targets the application layer with legitimate-looking requests — combine CDN with Web Application Firewall (WAF) rules.
+
+- **Origin offload for video/streaming** — video-on-demand, live streams, or software downloads
+  - Edge caches large files, reducing origin bandwidth costs. Byte-range requests enable efficient partial content delivery.
+  - **Avoid when:** content is highly dynamic or user-specific — video transcoding should be tailored per user segment.
+
+- **SSL/TLS termination** — offloading encryption overhead from origin servers
+  - CDN handles SSL handshake at the edge, managing certificates and protocol negotiation. Reduces origin CPU load for HTTPS.
+  - **Avoid when:** end-to-end encryption is mandatory — configure CDN for passthrough or re-encrypt to origin.
+
 ---
 
 ## Scenario-Based Questions

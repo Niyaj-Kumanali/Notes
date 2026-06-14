@@ -98,6 +98,28 @@ public ProducerFactory<String, Event> producerFactory() {
 
 **Resolution:** Options: (1) Reduce service time (optimize code, add caching) — lower service time reduces utilization. (2) Increase thread count (more threads handle more concurrent requests). (3) Add more server instances (distributes load). (4) Implement load shedding — reject excess requests with 503 to prevent queue growth. (5) Use async I/O to handle more requests with fewer threads.
 
+## Use Cases
+
+- **API response time optimization** — reducing end-user perceived latency for web or mobile APIs
+  - Measure P50/P95/P99 latency. Identify which component dominates: network, queueing, processing, or contention. Parallelize independent calls, cache hot paths.
+  - **Avoid when:** the system is idle and latency is already sub-millisecond — throughput capacity is a more relevant concern.
+
+- **Bottleneck throughput analysis** — finding the limiting factor in a processing pipeline
+  - Use Little's Law (Concurrency = Throughput × Latency) to validate measurements. Identify the slowest serial component — that's the throughput ceiling.
+  - **Avoid when:** the system is not under load — measure throughput at saturation, not at idle.
+
+- **Capacity planning** — determining how many servers or resources are needed to handle projected traffic
+  - Model the relationship between throughput and latency. At utilization >80%, latency grows non-linearly. Plan to keep utilization below 70% for predictable latency.
+  - **Avoid when:** traffic is purely batch with no user-facing responsiveness requirements — maximizing throughput at any latency cost may be acceptable.
+
+- **Tail latency debugging** — fixing the requests that take 10× longer than the median
+  - Causes: GC pauses, noisy neighbors, hot keys, network packet loss. Solutions: hedged requests, timeouts, circuit breakers, redundant requests.
+  - **Avoid when:** few users experience the tail — only focus on tail latency if it affects a meaningful segment of users or violates SLOs.
+
+- **Load testing and performance validation** — verifying that a system meets latency and throughput requirements under expected load
+  - Establish baseline: latency at low load. Increase concurrency and measure the latency-throughput curve. The inflection point is the maximum safe throughput.
+  - **Avoid when:** you only test at a single load level — the shape of the latency-throughput curve is more informative than any single data point.
+
 ---
 
 ## Scenario-Based Questions

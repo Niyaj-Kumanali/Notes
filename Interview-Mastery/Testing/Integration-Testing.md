@@ -192,6 +192,28 @@ describe('OrderService -> PaymentService contract', () => {
 ### Scenario 3: Third-Party API Contract Break
 - Your e-commerce app integrates with Stripe for payments. Stripe releases a new API version that changes the `charge` response format. Your integration tests mock Stripe and still pass, but production starts failing. **Fix:** Don't mock Stripe in integration tests — use Stripe's test mode (real sandbox). Better: use consumer-driven contract tests where your app (consumer) publishes its expectations. When Stripe changes their API, your contract tests fail before deployment. Additionally, pin your Stripe API version and upgrade on your schedule, not Stripe's.
 
+## Use Cases
+
+- **Database migration testing** — verifying schema changes work with production-scale data patterns
+  - Test migrations against realistic data volumes. Verify both forward migration and rollback. Test with `LOCK_TIMEOUT` and concurrent queries.
+  - **Avoid when:** the migration is additive only (new nullable column, new index) — schema-only tests are sufficient.
+
+- **Service boundary integration** — testing interactions between services with real serialization
+  - Test `OrderService` + real database + HTTP calls to `PaymentService`. Use test containers for dependencies. Verify data flow and format correctness.
+  - **Avoid when:** services are tightly coupled and always deployed together — component tests may provide more value than full integration tests.
+
+- **Third-party API integration** — verifying external service contracts (Stripe, Twilio, SendGrid)
+  - Use the provider's sandbox/test mode for real integration testing. Don't mock external APIs for integration tests — contract tests with consumer-driven contracts catch API changes.
+  - **Avoid when:** the external API charges per sandbox call — mock for unit tests, limit integration tests to critical paths.
+
+- **Message queue integration** — testing asynchronous processing pipelines end-to-end
+  - Publish a message to the queue, wait for processing, and verify the expected side effect (database state change, external API call, event emission).
+  - **Avoid when:** message delivery timing is unpredictable — use polling with timeout and `await().untilAsserted()` for assertions.
+
+- **Database compatibility testing** — ensuring the application works with the production database, not an in-memory substitute
+  - Use Testcontainers to spin up real PostgreSQL/MySQL/SQL Server instances. Run repository tests against the real database. Catch dialect differences and deadlock scenarios.
+  - **Avoid when:** the application uses only basic SQL (SELECT, INSERT, UPDATE, DELETE with no database-specific features) — H2 or SQLite in-memory may be adequate.
+
 ---
 
 ## Scenario-Based Questions

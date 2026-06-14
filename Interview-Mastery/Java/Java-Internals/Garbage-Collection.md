@@ -110,6 +110,26 @@
 
 - Disabling adaptive TLAB resizing (`-XX:-ResizeTLAB`) and setting a fixed size stabilized allocation behavior. Combined with allocating in batches (reusing mutable objects), minor GC frequency dropped by 40%.
 
+## Use Cases
+
+GC tuning and collector selection depend on the application's tolerance for pause time, allocation rate, and throughput requirements.
+
+- **Throughput-sensitive batch processing** — Maximize total computation time over GC time.
+  - Use Parallel GC (`-XX:+UseParallelGC`) for offline analytics, ETL jobs, or report generation where occasional long pauses are acceptable. Example: an overnight aggregation job processing gigabytes of data.
+  - **Avoid when:** pauses of multiple seconds cause SLAs to fail — switch to G1, ZGC, or Shenandoah.
+
+- **Low-latency online services** — Keep GC pauses below the application's response-time budget.
+  - Use ZGC (`-XX:+UseZGC`) for heaps up to multiple TB with sub-millisecond pauses, or G1 with `-XX:MaxGCPauseMillis=50` for moderate latency requirements. Example: a real-time trading or ad-serving platform.
+  - **Avoid when:** throughput is the overriding concern — concurrent collectors trade some CPU overhead for lower pause times.
+
+- **Memory-constrained or containerized environments** — Fit the application's live-set and allocation rate within a limited heap.
+  - Tune young generation sizing (`-Xmn`, `-XX:NewRatio`) and tenuring thresholds so that minor GCs keep Eden clean without promoting short-lived objects. Example: a microservice running in a 256 MB container.
+  - **Avoid when:** the allocation rate is low and stable — default JVM ergonomics usually suffice.
+
+- **Diagnosing memory leaks** — Identify objects that are unintentionally retained, causing heap growth and frequent GC.
+  - Capture a heap dump (`jmap -dump:live,format=b,file=heap.hprof <pid>`) and analyze with Eclipse MAT or JProfiler to find the GC root chain. Example: a request-scoped cache that never evicts entries.
+  - **Avoid when:** the issue is clearly a sizing problem — adjust heap size before investigating leaks.
+
 ## Scenario-Based Questions
 
 **Q: A team runs a Java 8 web service with default GC settings. Under load, response times spike every few seconds. What is likely happening and how do you fix it?**

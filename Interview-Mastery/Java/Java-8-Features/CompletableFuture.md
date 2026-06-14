@@ -378,6 +378,31 @@ CompletableFuture.anyOf(geoFutures.toArray(new CompletableFuture[0]))
     .thenAccept(location -> map.show(location));
 ```
 
+## Use Cases
+
+Reach for `CompletableFuture` when you need non-blocking asynchronous computation with declarative composition and error recovery.
+
+- **Parallel independent API calls** — Fire multiple requests simultaneously with `allOf` or `thenCombine`, combining results once all complete.
+  - Reduces total latency to the slowest call instead of the sum.
+  - **Avoid when:** calls have data dependencies and must execute sequentially — `thenCompose` chains them.
+
+- **Resilient async pipelines with error recovery** — Use `exceptionally` or `handle` to provide fallback values when an upstream stage fails.
+  - Keeps the pipeline alive instead of propagating exceptions.
+  - **Avoid when:** synchronous try-catch with `future.get()` is sufficient and the calling thread can block.
+
+- **Non-blocking callback chaining** — `thenApply` transforms results, `thenAccept` consumes them, and `thenRun` runs side-effects — all without blocking the calling thread.
+  - The calling thread returns to the pool immediately after registering the callback.
+  - **Avoid when:** the transformation is trivial and the caller can wait — chaining adds complexity.
+
+- **Timeout protection for external calls** — `orTimeout()` or `completeOnTimeout()` prevent indefinite blocking on slow or hung services.
+  - **Avoid when:** you already use a circuit breaker library (Resilience4j) that provides richer timeout semantics.
+
+- **Multi-step async workflow orchestration** — `thenCompose` chains dependent async operations, `allOf` waits for all to complete, `anyOf` completes on the first success.
+  - Expresses complex async workflows in readable, declarative code.
+  - **Avoid when:** the workflow has complex branching and stateful decisions — a reactive framework (Project Reactor) may be more expressive.
+
+---
+
 ## Scenario-Based Questions
 
 - **Question: You need to call three external APIs in parallel, each taking 2–5 seconds, then merge results. How?**

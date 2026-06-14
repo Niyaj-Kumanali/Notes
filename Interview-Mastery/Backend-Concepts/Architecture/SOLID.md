@@ -190,6 +190,30 @@ public class UserService {
 - **Resolution**
   - Apply DIP. `OrderConfirmationService` depends on the `NotificationSender` interface, not `SmtpEmailSender`. The concrete implementation is injected via constructor. Spring's DI makes this seamless. Testing injects a `MockNotificationSender`. Switching providers requires only a new implementation class.
 
+## Use Cases
+
+- Reach for SOLID when your classes have more than one reason to change, when adding a feature requires modifying existing tested code, or when substituting implementations breaks the system. These principles give you concrete diagnostics for common design smells.
+
+- **Single Responsibility Principle (SRP)** — one reason to change per class
+  - When a `ReportService` generates reports, emails them, and archives them, a change to email formatting forces recompilation and retesting of the entire class. Extract each responsibility into its own class — `ReportGenerator`, `EmailSender`, `ReportArchiver`.
+  - **Avoid when:** the class is a thin orchestration layer (e.g., a controller that delegates to services) — splitting it further adds indirection without reducing change impact.
+
+- **Open/Closed Principle (OCP)** — extend behavior without modifying source
+  - Use interfaces or abstract classes when you anticipate new variants. A `DiscountStrategy` interface lets you add student, holiday, and loyalty discounts by writing new classes. The existing `OrderService` never changes.
+  - **Avoid when:** the number of variants is small and stable (≤ 3, no new ones expected) — an enum with a switch is simpler and easier to read.
+
+- **Liskov Substitution Principle (LSP)** — subtypes must be substitutable
+  - A subclass that overrides a method to throw `UnsupportedOperationException` (e.g., `ReadOnlyFile` extending `WritableFile`) violates LSP. The caller expecting write capability crashes. Redesign: have `ReadOnlyFile` not extend `WritableFile` — share a read-only interface instead.
+  - **Avoid when:** the base class is a sealed hierarchy you control — add precondition checks in the base class and document them clearly.
+
+- **Interface Segregation Principle (ISP)** — many specific interfaces over one general interface
+  - A `Worker` interface with `work()`, `eat()`, `sleep()` forces a robot implementation to have meaningless `eat()` and `sleep()` methods. Split into `Workable`, `Eatable`, `Sleepable` — each class implements only what it needs.
+  - **Avoid when:** the client uses the full interface anyway (e.g., a `HumanWorker` that needs all three) — the split adds interfaces without reducing coupling.
+
+- **Dependency Inversion Principle (DIP)** — depend on abstractions, not concretions
+  - `OrderConfirmationService` should depend on a `NotificationSender` interface, not `SmtpEmailSender`. Spring's DI injects the concrete implementation. Testing injects a mock. Switching providers requires only a new implementation class — zero changes to the service.
+  - **Avoid when:** the dependency is stable (e.g., `java.util.logging.Logger` or `String`) — abstracting every concrete class creates unnecessary indirection.
+
 ---
 
 ## Scenario-Based Questions

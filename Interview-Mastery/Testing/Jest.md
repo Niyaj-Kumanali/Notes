@@ -170,6 +170,28 @@ test('matches snapshot', () => {
 ### Scenario 3: Migrating Mocha to Jest
 - A legacy project uses Mocha + Chai + Sinon + Istanbul. The team wants Jest for better DX, but has 3000 existing tests. **Migration:** Create a Jest config that uses the same `test` directory. Run both frameworks in parallel initially. Use `jest-codemods` for automated migration of `expect` syntax. Run the full suite with both runners for 2 weeks to catch regressions. Remove Mocha config only after all tests pass identically for 2 consecutive weeks.
 
+## Use Cases
+
+- **Unit testing React components** — testing component rendering, state changes, and user interactions
+  - React Testing Library with Jest tests components from the user's perspective. `screen.getByText()`, `fireEvent.click()`, and `waitFor()` for async assertions.
+  - **Avoid when:** the component is tightly coupled to the DOM — snapshot testing may be a better fit for complex rendering logic.
+
+- **API mocking in tests** — testing components that depend on API calls without making real network requests
+  - `jest.mock()` or `msw` (Mock Service Worker) intercepts HTTP requests. Return controlled responses. Test loading, error, and success states.
+  - **Avoid when:** the API contract is unstable — contract tests should catch API changes; API mock tests complement, not replace, integration tests.
+
+- **Snapshot testing for UI consistency** — detecting unintended UI changes in React or Vue components
+  - `toMatchSnapshot()` captures rendered output. Snapshot diff on CI shows what changed. Review and update snapshots when changes are intentional.
+  - **Avoid when:** snapshots are large or change frequently — 300 snapshot failures from one shared component change defeats the purpose; use targeted assertions.
+
+- **Timer and async testing** — testing code that uses `setTimeout`, `setInterval`, or promises
+  - `jest.useFakeTimers()` simulates time passage without waiting real time. `jest.advanceTimersByTime()` fast-forwards for timer-dependent code.
+  - **Avoid when:** the async code has real I/O dependencies — use real async/await with `expect.assertions()` for promise-based tests.
+
+- **Code coverage enforcement** — ensuring new code is adequately tested before merging
+  - Collect coverage with `--coverage`. Enforce minimum thresholds per file or overall. Branch coverage catches untested conditional paths.
+  - **Avoid when:** coverage is gamed — 100% coverage doesn't guarantee quality. Focus on meaningful assertions, not coverage percentages.
+
 ---
 
 ## Scenario-Based Questions

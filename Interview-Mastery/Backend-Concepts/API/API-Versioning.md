@@ -644,6 +644,26 @@ public class CompatibilityGate {
 }
 ```
 
+## Use Cases
+
+- API versioning strategies trade off client convenience against server flexibility. The right approach depends on who your clients are, how frequently they update, and whether you control them.
+
+- **Public API with hundreds of external clients** — mobile apps, third-party integrations, and partner systems
+  - When to use: You cannot coordinate upgrades with clients. Use URI versioning (`/api/v2/orders`) for clear, discoverable version identities. Communicate deprecation via `Sunset` and `Deprecation` headers. Example: a payment processor API that maintains v1 for 18 months while offering v2 with improved fraud detection.
+  - **Avoid when:** You control all clients and can coordinate rollouts — no versioning or header-based versioning reduces URL pollution.
+
+- **Mobile apps with slow update cycles** — clients that may take months to upgrade
+  - When to use: Mobile users don't update apps immediately, so old API versions must remain available for extended periods. Support at least two major versions concurrently and use feature detection via capability headers. Example: a ride-sharing app whose iOS/Android v3 still calls `/api/v1/rides` while v4 uses `/api/v2/rides`.
+  - **Avoid when:** All users are on the latest version (e.g., a web SPA that refreshes on load) — you can deprecate faster without breaking clients.
+
+- **Internal service contract evolution** — microservice-to-microservice API changes within the same organization
+  - When to use: You need to evolve an internal API without breaking consuming services owned by other teams. Query parameter versioning (`?version=2026-06-01`) or custom header versioning (`Accept-Version: 2026-06-01`) suits internal use where clients can update their configuration easily. Example: the `inventory-service` adds a new stock-checking algorithm and publishes a new contract version consumed by `order-service`.
+  - **Avoid when:** The API surface is small and changes are additive only — backward-compatible additions don't require a version bump.
+
+- **Breaking changes for security or compliance fixes** — urgent changes that cannot wait for normal deprecation cycles
+  - When to use: A security vulnerability requires immediate API changes. Create a parallel v2, apply the fix, and communicate an accelerated sunset with clear justification. Example: a user data API must remove SSN fields from responses due to new privacy regulations — deploy v2 with the fix, redirect sensitive clients, and set a 3-month v1 sunset.
+  - **Avoid when:** The change is backward-compatible and could be deployed without versioning — unnecessary versioning fragments the client base.
+
 ---
 
 ## Scenario-Based Questions

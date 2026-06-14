@@ -86,6 +86,28 @@
 - KrakenD aggregated 8–12 separate microservice calls per mobile screen into a single JSON response, reducing mobile client latency from 800ms to 120ms.
 - The absence of a plugin system was a benefit: teams could not add complex logic to the gateway, forcing them to push business logic into backend services.
 
+## Use Cases
+
+- An API gateway centralizes cross-cutting concerns that would otherwise need to be implemented in every service. These patterns cover the most common gateway responsibilities.
+
+- **Centralized security gateway for microservices** — handling authentication, authorization, and TLS termination in one place
+  - When to use: You have multiple microservices that all need the same security checks (validate JWT, enforce scope, terminate TLS). The gateway performs these checks once before routing, so individual services don't need to re-implement them. Example: a Spring Cloud Gateway that validates a JWT token, extracts the user ID and roles, and injects `X-User-Id` and `X-User-Roles` headers before forwarding to downstream services.
+  - **Avoid when:** Security requirements differ significantly per service — pushing auth logic into the gateway creates a bottleneck and violates the principle of least surprise.
+
+- **BFF for mobile, web, and third-party clients** — creating separate API surfaces for each client type
+  - When to use: Different clients need different data shapes and aggregation patterns. A Backend for Frontend gateway per client type handles client-specific transformations and reduces payload size. Example: a mobile BFF that aggregates user profile, recent orders, and notifications into a single response, while the web BFF fetches a different set of data for the desktop checkout flow.
+  - **Avoid when:** All clients consume the same data — a single gateway with generic endpoints is simpler.
+
+- **Protocol translation** — bridging between different communication protocols (REST → gRPC, HTTP → WebSocket)
+  - When to use: External clients use REST/JSON but internal services communicate via gRPC/Protobuf. The gateway translates between the two, so clients don't need to implement gRPC. Example: Kong gateway accepts a REST `POST /api/orders` and translates it to a gRPC call to the internal `order-service`, then translates the Protobuf response back to JSON.
+  - **Avoid when:** All clients and services use the same protocol — the translation layer adds latency without benefit.
+
+- **Rate limiting and throttling at the edge** — protecting backend services from traffic spikes and abusive clients
+  - When to use: You need to enforce request quotas per client (API key, IP, user ID) before traffic reaches individual services. The gateway applies rate limiting centrally, so services stay simple. Example: an API gateway with a Redis-backed rate limiter that allows 1000 requests per minute per API key, returning `429 Too Many Requests` when exceeded.
+  - **Avoid when:** Rate limiting rules are service-specific — implementing them in each service provides more granular control.
+
+---
+
 ## Scenario-Based Questions
 
 **Q: A team deploys a new version of a microservice that has a bug causing 5-second response times on 10% of requests. The API Gateway's thread pool is soon exhausted and all routes become slow. What went wrong?**

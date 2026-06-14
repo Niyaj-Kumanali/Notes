@@ -306,6 +306,26 @@ message Order {
 
 - The `reserved` keyword prevents field numbers and names from being reused, catching the error at compile time.
 
+## Use Cases
+
+- gRPC is the go-to choice for internal service-to-service communication where performance, strong contracts, and streaming matter. These patterns cover the most common scenarios.
+
+- **Internal microservice communication** — high-throughput, low-latency calls between backend services
+  - When to use: Services communicate frequently and performance matters. Protocol Buffers' binary serialization is faster and smaller than JSON, and HTTP/2 multiplexing reduces connection overhead. Example: an e-commerce platform where `order-service` calls `inventory-service` via gRPC unary RPC to reserve stock in under 5ms, with code generated from a shared `.proto` contract.
+  - **Avoid when:** External clients or browsers consume the API directly — gRPC-Web has limitations; REST or GraphQL are more accessible.
+
+- **Real-time streaming** — continuous data flow from server to client or between services
+  - When to use: You need server streaming (driver location updates), client streaming (uploading a large file in chunks), or bidirectional streaming (real-time chat, multiplayer game sync). gRPC's native streaming over a single HTTP/2 connection with flow control is ideal. Example: a food delivery app streaming live driver GPS coordinates to the customer via a server-streaming RPC.
+  - **Avoid when:** The client is a browser or mobile app with limited HTTP/2 support — WebSockets or Server-Sent Events may be simpler.
+
+- **Polyglot environments** — services written in different languages that need to communicate
+  - When to use: Teams use different languages (Go, Java, Python, Rust) and need a shared contract. Define the API once in a `.proto` file and generate idiomatic client/server code for each language. Example: a company where the payment service is in Java, the recommendation engine is in Python, and the API gateway is in Go — all communicate via gRPC using shared Protobuf schemas.
+  - **Avoid when:** The team uses only one language and the contract is trivially maintained — a shared library with REST clients may be simpler.
+
+- **Low-latency, high-throughput systems** — where every millisecond of serialization overhead matters
+  - When to use: Systems processing thousands of requests per second where JSON parsing becomes a bottleneck. Protobuf serialization is 3–10x faster than JSON and produces significantly smaller payloads. Example: an ad-serving platform that must evaluate bids and return a response in under 10ms, handling 100K+ QPS.
+  - **Avoid when:** Throughput is modest (< 1000 req/s) and developer familiarity with Protobuf is low — the performance gains may not justify the learning curve.
+
 ---
 
 ## Scenario-Based Questions

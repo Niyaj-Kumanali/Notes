@@ -90,6 +90,28 @@
 - Initially they implemented dual writes (write to accounts DB and publish to Kafka), which caused frequent inconsistencies (writes succeeded but publishes failed).
 - Switching to the transactional outbox (write the outbox event in the same DB transaction as the account update) eliminated 99% of data inconsistency incidents. Debezium streamed the outbox events from the WAL to Kafka with sub-second latency.
 
+## Use Cases
+
+- Distributed transactions are necessary when atomicity must span services, but they come with significant trade-offs. These patterns guide when to use each approach and when to avoid distributed transactions altogether.
+
+- **Financial transactions across services** — ensuring atomicity for money movement between account services
+  - When to use: A funds transfer must debit one account service and credit another atomically. If one operation fails, both must roll back. Use 2PC for short-lived (seconds) high-value transactions where strong atomicity is non-negotiable. Example: a bank transfer from `checking-account-service` to `savings-account-service` coordinated by a 2PC transaction with both databases supporting XA.
+  - **Avoid when:** The transaction can be redesigned as a saga — most financial transfers can use eventual consistency with compensating transactions, which scales better and avoids blocking locks.
+
+- **Order management workflows** — coordinating inventory, payment, and fulfillment across services
+  - When to use: An order must reserve inventory, capture payment, and create a shipment. If any step fails, the entire operation must be undone. Use the saga pattern with compensating transactions instead of 2PC, because locks on inventory would block other customers during the entire multi-step process. Example: orchestration-based saga where the order service coordinates `ReserveInventory` → `ProcessPayment` → `CreateShipment`, with compensating actions for each step on failure.
+  - **Avoid when:** The order workflow is a single service responsibility — keep it as a local transaction.
+
+- **Data consistency between bounded contexts** — synchronizing state across domain boundaries
+  - When to use: Two bounded contexts need consistent state (e.g., an order status in the "Ordering" context must match the payment status in the "Payment" context). Use the outbox pattern with CDC (Change Data Capture) to ensure events are reliably published from the source context. Example: the `ordering` service writes both the order status change and an outbox event in the same database transaction; Debezium streams the outbox event to Kafka, which the `payment` service consumes.
+  - **Avoid when:** Eventual consistency is acceptable without strict guarantees — a simple event publish after the transaction (with retry on failure) may be sufficient.
+
+- **Migrating from 2PC to Saga for scalability** — replacing blocking distributed transactions with asynchronous compensation
+  - When to use: Your 2PC-based system is hitting scalability limits because participants hold locks for too long under load. Migrate to a saga with compensating transactions to release locks quickly and improve throughput. Example: a travel booking system that originally used 2PC for hotel + flight + car reservations — migrated to orchestration-based sagas where each reservation is a local transaction, and cancellations serve as compensating actions.
+  - **Avoid when:** The transaction must be strongly atomic (e.g., transferring money between accounts in the same bank) — 2PC guarantees atomicity that sagas cannot provide.
+
+---
+
 ## Scenario-Based Questions
 
 **Q: A 2PC transaction between Service A and Service B hangs for 5 minutes. You discover that the coordinator crashed in the middle of Phase 1. What is the state of Service A and Service B?**

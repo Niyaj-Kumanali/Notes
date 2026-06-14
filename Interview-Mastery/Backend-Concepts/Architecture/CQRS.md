@@ -132,6 +132,26 @@ public class OrderSummaryProjector {
 
 **Resolution:** Team A owns the command model: accounts, transfers, validations — the write database. Team B owns the query model: account statements, spending analysis, PDF exports — the read database. They agree on event schemas as their contract. Team A publishes `TransactionProcessed` events; Team B consumes them to build materialized views. Each team deploys independently, with their own schema and scaling strategy.
 
+## Use Cases
+
+- CQRS shines when read and write workloads have fundamentally different characteristics — different shapes, different frequencies, or different performance requirements. These patterns cover when to split them.
+
+- **High-traffic e-commerce platforms** — separating order placement (write) from order history/search (read)
+  - When to use: Order placement must be fast and transactional; order history queries are frequent and need aggregated, denormalized data. The write model uses a normalized schema with constraints; the read model uses pre-joined `order_summary` tables optimized for display. Example: an e-commerce site where the checkout flow writes to a normalized order database while the "My Orders" page queries a read-only replica with pre-computed totals, item counts, and status badges.
+  - **Avoid when:** Read and write workloads are balanced and simple — a single model with read replicas is easier to maintain.
+
+- **Reporting and analytics dashboards** — providing fast, aggregated views over operational data
+  - When to use: The operational database is normalized for transactions but reporting queries require joins and aggregations that are too slow. CQRS maintains materialized view read models that are pre-computed for specific dashboard queries. Example: a SaaS platform where the write model stores individual billing events and the read model maintains real-time MRR dashboards, aggregated by plan, region, and cohort.
+  - **Avoid when:** Reports can be generated from the operational database with acceptable latency — a nightly batch job or database view may suffice.
+
+- **Systems with asymmetric read/write ratios** — services that are read 100x more than written
+  - When to use: A resource is created or updated infrequently but queried constantly. The write model can be simple (just persistence and validation) while the read model is heavily optimized, cached, and independently scalable. Example: a content management system where articles are written by editors a few times per day but read by millions of users — CQRS lets the read model use a CDN-cached, denormalized format while the write model enforces editorial workflows.
+  - **Avoid when:** Read and write rates are similar — the overhead of maintaining two models isn't justified.
+
+- **Event sourcing integration** — deriving read models from a stream of domain events
+  - When to use: Your system already uses event sourcing (every state change is stored as an event). CQRS naturally follows: the event store is the write model, and projections consume events to build read models optimized for different queries. Example: a banking application where every account transaction is stored as an event, and separate projections build a balance read model (current balance), a statement read model (transaction history), and a fraud detection read model (unusual patterns).
+  - **Avoid when:** The domain does not require the auditability and traceability of event sourcing — CQRS without event sourcing adds complexity without the corresponding benefits.
+
 ---
 
 ## Scenario-Based Questions

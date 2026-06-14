@@ -224,6 +224,28 @@ public class OrgChartService
 }
 ```
 
+## Use Cases
+
+- **In-memory data transformations** — filtering, sorting, grouping, and projecting collections in application code
+  - LINQ to Objects provides a declarative API over `IEnumerable<T>`. Lazy evaluation with deferred execution. Chain operations without intermediate allocations.
+  - **Avoid when:** performance is critical and collections are very large (>1M items) — manual loops with `for`/`foreach` avoid LINQ's delegate allocation overhead.
+
+- **Database querying (LINQ to SQL/EF Core)** — querying relational databases with strongly-typed C# expressions
+  - LINQ to Entities translates expression trees to SQL. Compile-time type checking catches column name errors. `IQueryable<T>` defers execution for server-side filtering.
+  - **Avoid when:** the query requires database-specific features (window functions, full-text search) — raw SQL via `FromSqlRaw` or Dapper is more flexible.
+
+- **Parallel processing of large datasets** — CPU-bound operations on multi-core machines
+  - PLINQ (`AsParallel()`) automatically partitions data across threads. Use `WithDegreeOfParallelism` to control concurrency. `AsOrdered()` preserves ordering at a cost.
+  - **Avoid when:** the operation is I/O-bound — PLINQ blocks threads; use async/await with `Task.WhenAll` for I/O-bound work.
+
+- **XML/JSON data querying** — extracting structured data from semi-structured formats
+  - LINQ to XML provides in-memory XML manipulation. `System.Text.Json` with `JsonDocument` enables LINQ queries over JSON.
+  - **Avoid when:** you only need to read a single value — direct property access or XPath is simpler.
+
+- **Expression tree analysis** — building dynamic queries based on user input (filtering, sorting, searching)
+  - Build `Expression<Func<T, bool>>` trees at runtime. Compose predicates with `AndAlso`/`OrElse`. Useful for advanced search and reporting UIs.
+  - **Avoid when:** the set of query combinations is small and known — hardcoding a few methods is simpler and avoids expression tree complexity.
+
 ---
 
 ## Scenario-Based Questions

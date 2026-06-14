@@ -256,6 +256,32 @@
 
 ---
 
+## Use Cases
+
+- Spring's `@Scheduled` annotation covers a wide range of periodic task needs. These use cases help choose the right scheduling mode and handle common pitfalls like duplicate execution and blocking.
+
+- **Fixed-rate heartbeat or polling** — A service must send a health signal to a monitoring dashboard every 30 seconds, regardless of how long the signal send takes.
+  - Use `@Scheduled(fixedRate = 30000)`. Execution starts every 30 seconds even if the previous run is still running. This guarantees minimum throughput.
+  - **Avoid when:** Overlapping executions could corrupt shared state — use `fixedDelay` to ensure only one runs at a time.
+
+- **Fixed-delay for sequential processing** — A task polls a job queue and processes one job at a time. The next poll must wait 5 seconds after the previous one finishes.
+  - Use `@Scheduled(fixedDelay = 5000)`. The delay counts from completion, not start, preventing overlap and backpressure.
+  - **Avoid when:** You need predictable wall-clock timing — `fixedRate` or `cron` is better for time-of-day scheduling.
+
+- **Cron-driven nightly batch jobs** — A report must be generated every weekday at 2:00 AM Eastern Time, skipping weekends.
+  - Use `@Scheduled(cron = "0 0 2 ? * MON-FRI", zone = "America/New_York")`. The zone parameter handles DST transitions correctly.
+  - **Avoid when:** The schedule changes frequently (user-configurable) — use `TaskScheduler.schedule()` with a `CronTrigger` at runtime instead.
+
+- **Distributed singleton scheduling across pods** — A Kubernetes deployment runs 10 replicas, but a nightly data-sync task must execute on only one pod.
+  - Use `@Scheduled` with a distributed lock (Redis, ZooKeeper, ShedLock). The task acquires the lock before executing; other pods skip the run.
+  - **Avoid when:** The task is idempotent and safe to run on multiple pods — clean up duplicates on the read side instead of coordinating locks.
+
+- **Dynamic job scheduling for user-configurable tasks** — A SaaS platform lets each user pick when to receive their weekly report (e.g., Monday 9 AM, Wednesday 3 PM).
+  - Use `TaskScheduler.schedule(Runnable, CronTrigger)` instead of `@Scheduled`. Store user preferences and register/cancel `ScheduledFuture` handles per user.
+  - **Avoid when:** All schedules are fixed at compile time — `@Scheduled` with `cron` is simpler and requires less code.
+
+---
+
 ## Scenario-Based Questions
 
 **Q: You have a `@Scheduled(fixedRate = 5000)` task that sends heartbeat signals. The task sometimes takes 10 seconds due to network latency. What happens to the execution schedule?**

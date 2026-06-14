@@ -250,6 +250,28 @@ public class DashboardService
 }
 ```
 
+## Use Cases
+
+- **CRUD application with change tracking** — line-of-business apps where tracking object changes and generating SQL updates is valuable
+  - EF Core tracks entity states (Added, Modified, Deleted, Unchanged). `SaveChangesAsync()` generates `INSERT`/`UPDATE`/`DELETE` SQL for only changed entities.
+  - **Avoid when:** performance is paramount and every microsecond counts — Dapper has 4–10× lower overhead for simple queries.
+
+- **Complex object graph querying** — loading entities with their related entities (invoices with line items, orders with products and shipments)
+  - `Include()`/`ThenInclude()` eager loads related data. `AsSplitQuery()` prevents Cartesian explosion from multiple collection joins.
+  - **Avoid when:** you only need flat projections — `Select()` to an anonymous/DTO type generates efficient SQL without tracking overhead.
+
+- **Database migrations** — evolving the schema as the application evolves
+  - EF Migrations generate C# code for schema changes. `Update-Database` applies pending migrations. Rollback with `Remove-Migration`.
+  - **Avoid when:** the database is managed by a separate DBA team — hand-written SQL migration scripts give DBAs more control.
+
+- **Value conversions and shadow properties** — mapping custom types to database columns or tracking metadata transparently
+  - `HasConversion()` stores enum as string or custom struct as JSON. Shadow properties (`LastUpdated`) are managed by EF without polluting domain classes.
+  - **Avoid when:** the mapping logic is complex — a dedicated repository layer with Dapper for complex mappings separates concerns.
+
+- **Global query filters for multi-tenancy** — automatically scoping queries to the current tenant without per-query filtering
+  - `HasQueryFilter(e => e.TenantId == _currentTenantId)` adds the filter to every LINQ query. Prevents accidental cross-tenant data leaks.
+  - **Avoid when:** tenants share data or filtering is conditional — dynamic filters add complexity; explicit query filtering may be clearer.
+
 ---
 
 ## Scenario-Based Questions

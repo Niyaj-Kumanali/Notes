@@ -174,6 +174,26 @@
 
 - This approach adds a one-time startup cost proportional to the number of entity classes (typically under 100ms for 500 entities). The generated metadata is then used in the hot path (result set mapping) via direct code generation rather than reflection.
 
+## Use Cases
+
+Reflection and annotations are the backbone of Java frameworks — they enable generic infrastructure code to operate on types unknown at compile time.
+
+- **Dependency injection containers** — Inspect constructors, fields, and methods to wire object graphs automatically.
+  - Scan classpath for `@Inject` or `@Autowired` annotations, resolve dependencies, and instantiate beans reflectively. Example: Spring `ApplicationContext` startup.
+  - **Avoid when:** compile-time DI (Dagger, Micronaut, Quarkus) can provide the same wiring with faster startup and no reflective overhead.
+
+- **Serialization and deserialization** — Convert between Java objects and wire formats (JSON, XML, binary) without per-class boilerplate.
+  - Use `ObjectMapper` (Jackson) or `Gson` to read/write fields via reflection or generated `MethodHandle` accessors. Example: REST API request/response body mapping.
+  - **Avoid when:** the data model is fixed and performance-critical — use compile-time code generation (record codecs, proto buffers) instead.
+
+- **Annotation processing for code generation** — Generate sources, metadata, or validation code at compile time.
+  - Write an `AbstractProcessor` that reads annotations and emits Java files. Example: Lombok's `@Data`, MapStruct's `@Mapper`, or Spring's `@ConfigurationProperties`.
+  - **Avoid when:** runtime reflection is acceptable and the annotation API is small — APT adds build-time complexity.
+
+- **Dynamic proxies for AOP** — Wrap an interface with cross-cutting behavior (logging, transactions, security) without modifying the target class.
+  - Use `java.lang.reflect.Proxy` or `MethodInterceptor` to intercept all method calls on an interface. Example: Spring's `@Transactional` or `@Cacheable`.
+  - **Avoid when:** the target is a class, not an interface — use `cglib` / `ByteBuddy` subclass proxies or `MethodHandle` proxies instead.
+
 ## Scenario-Based Questions
 
 **Q: A Spring Boot application takes 30 seconds to start. Profiling shows most of the time is in reflection-based classpath scanning. How can you reduce it?**

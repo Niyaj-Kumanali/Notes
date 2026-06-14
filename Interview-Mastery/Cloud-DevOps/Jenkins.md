@@ -216,6 +216,28 @@ def call(String serviceName, goVersion = '1.21', testFlags = '') {
 
   - An enterprise with 500+ freestyle jobs accumulated over 4 years needs to migrate to pipeline-as-code. The migration follows a phased plan. Phase 1: Extract common build patterns into a shared library repository — identify recurring build steps (Maven builds, Docker packaging, deployment scripts) and implement them as reusable library functions. Phase 2: Create template Declarative Pipelines for each application type — one for Java/Maven apps, one for Node.js apps, one for Go apps — using the shared library functions. Phase 3: Migrate teams one by one, starting with the least complex jobs and progressing to the most complex. Each team's migration takes one sprint: convert the old freestyle configuration to a Jenkinsfile, test it in a branch, merge to main, and decommission the freestyle job. Phase 4: Enforce "Pipeline from SCM" for all new jobs using the Job DSL plugin, which auto-generates pipeline jobs from YAML configuration files. The Job DSL script reads a YAML file per service with metadata and generates a Multibranch Pipeline job pointing to that service's repository. Total migration takes 6 months, but value is delivered incrementally as each team completes their migration.
 
+## Use Cases
+
+- **Enterprise CI/CD with complex requirements** — multi-stage pipelines, custom toolchains, and on-premise deployment
+  - Jenkins' plugin ecosystem (1800+ plugins) integrates with virtually every tool. Declarative Pipeline (Jenkinsfile) defines stages as code.
+  - **Avoid when:** the team is small and uses a single cloud provider — managed CI services (GitHub Actions, GitLab CI) require less operational overhead.
+
+- **Freestyle job migration to pipeline-as-code** — modernizing hundreds of manually configured build jobs
+  - Shared library extracts common build patterns into reusable functions. Template Jenkinsfiles per application type. Phased migration with dual-running during transition.
+  - **Avoid when:** there are fewer than 10 jobs — manually rewriting a handful of jobs is faster than building a shared library.
+
+- **Multi-branch pipeline automation** — building, testing, and deploying every branch the same way
+  - Multibranch Pipeline automatically discovers branches and creates a pipeline per branch. Branch-based deployment (dev, staging, production) by branch name convention.
+  - **Avoid when:** all work happens on a single main branch — a single pipeline configuration is sufficient.
+
+- **Shared library for 50+ teams** — standardizing CI/CD practices across a large organization
+  - Shared library repository with versioned releases (`v1.0`, `v2.0`). Teams pin to a specific version. Centralized updates with migration documentation.
+  - **Avoid when:** each team uses different tech stacks — a shared library is most valuable when patterns are common; heterogeneous stacks may need multiple libraries.
+
+- **Declarative Pipeline with conditional stages** — running security scans only on release branches or performance tests only on staging
+  - `when` conditions and `environment` blocks control stage execution. Input steps add manual approval gates. Post-build actions handle notifications and cleanup.
+  - **Avoid when:** pipeline logic is extremely simple — a single-stage freestyle job is faster to create and maintain.
+
 ---
 
 ## Scenario-Based Questions

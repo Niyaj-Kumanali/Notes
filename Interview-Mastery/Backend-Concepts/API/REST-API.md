@@ -545,6 +545,30 @@ public ResponseEntity<FeedResponse> getFeed(
 }
 ```
 
+## Use Cases
+
+- REST APIs are the default choice for building web services that need broad interoperability, simplicity, and leverage of existing HTTP infrastructure. These patterns cover the most common scenarios.
+
+- **Public-facing web APIs** — exposing business resources to third-party developers, mobile apps, and web frontends
+  - When to use: You need a simple, well-understood API that works across languages and platforms. Use standard HTTP methods with JSON payloads and meaningful status codes. Example: a social media platform exposing posts and user profiles via `/api/v1/posts`, `/api/v1/users/{id}`.
+  - **Avoid when:** Clients need flexible querying (prefer GraphQL), real-time streaming (use WebSockets/gRPC), or strict contracts with code generation (use gRPC).
+
+- **Mobile app backends** — serving structured data to iOS/Android clients over HTTP
+  - When to use: The client fetches well-defined resources with predictable shapes. Use cursor-based pagination for large datasets, resource expansion via `?include=author,comments`, and conditional requests with `ETag`/`If-None-Match` to reduce bandwidth. Example: a food delivery app serving restaurant menus, cart state, and order history.
+  - **Avoid when:** A single mobile screen needs data from 5+ endpoints — one GraphQL query reduces N round trips to one.
+
+- **Internal microservice communication** — synchronous data exchange between backend services
+  - When to use: The caller needs an immediate response, e.g., validating a user's existence before placing an order. REST is simple to implement, test, and debug. Example: `order-service` calls `user-service` via `GET /api/users/{id}` to validate a shipping address.
+  - **Avoid when:** Latency or throughput requirements exceed REST's capabilities — gRPC's binary serialization and HTTP/2 multiplexing serve better. Also avoid when the response is not immediately needed (use async messaging instead).
+
+- **Admin dashboards and CRUD interfaces** — data management UIs with standard create/read/update/delete operations
+  - When to use: The UI directly manipulates resources (user management, content moderation, product catalog). REST's one-to-one mapping between HTTP methods and CRUD makes this intuitive. Example: an admin panel managing blog posts via `/api/posts`.
+  - **Avoid when:** The dashboard requires complex aggregations or reporting queries — consider CQRS with a dedicated read model.
+
+- **Cache-friendly read-heavy workloads** — public content delivery with high read-to-write ratios
+  - When to use: Resources are read far more often than written (blog posts, product listings, documentation). REST leverages HTTP caching (`Cache-Control`, `ETag`, `Expires`) and edge CDN caching out of the box. Example: a news website serving articles with 5-minute CDN TTL.
+  - **Avoid when:** Data changes frequently and staleness is unacceptable — use WebSockets, SSE, or polling for real-time updates.
+
 ---
 
 ## Scenario-Based Questions

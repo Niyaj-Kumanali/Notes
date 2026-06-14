@@ -488,6 +488,30 @@ public class OrderValidator {
 - The `VALIDATION_RULES` constant composes multiple predicates at initialization time, avoiding re-composition per request.
 - The `Predicate::and`, `::or`, `::negate` default methods work seamlessly with method references because they operate on the predicates themselves, not on the method references.
 
+## Use Cases
+
+- Reach for method references when a lambda would simply call an existing method — they are shorter, more readable, and signal that the behavior is already defined elsewhere. Method references are not faster (they are syntactic sugar), but they make the intent clearer.
+
+- **Static method references** — `Class::staticMethod`
+  - Use `Integer::parseInt` instead of `s -> Integer.parseInt(s)`. The method reference is immediately recognizable and eliminates the parameter boilerplate. Common in stream `map()` operations.
+  - **Avoid when:** you need to transform the argument before calling the method — a lambda with the transformation is clearer.
+
+- **Instance method of a particular object** — `instance::method`
+  - Use `System.out::println` instead of `s -> System.out.println(s)`. The instance is captured at the point of the method reference and remains fixed.
+  - **Avoid when:** the instance changes per element — use a lambda `item -> item.process(processor)` or a bound method reference on the element.
+
+- **Instance method of an arbitrary object of a particular type** — `Class::instanceMethod`
+  - Use `String::toUpperCase` instead of `s -> s.toUpperCase()`. The first argument becomes the receiver. Used heavily in stream `map()` and `filter()` pipelines.
+  - **Avoid when:** the method returns `void` and you need the result — use a `Consumer` lambda instead.
+
+- **Constructor references** — `Class::new`
+  - Use `ArrayList::new` instead of `() -> new ArrayList<>()`. Constructor references are clean factory arguments for `Collectors.toCollection()`, stream suppliers, and DI frameworks.
+  - **Avoid when:** the constructor takes parameters that are not directly derivable from the stream element — a lambda with explicit arguments is clearer.
+
+- **Array constructor references** — `int[]::new`
+  - Use `.toArray(int[]::new)` instead of `.toArray(size -> new int[size])`. The method reference is the standard idiom for Java stream-to-array conversion.
+  - **Avoid when:** you need a custom length calculation — a lambda gives you full control over array sizing.
+
 ---
 
 ## Scenario-Based Questions

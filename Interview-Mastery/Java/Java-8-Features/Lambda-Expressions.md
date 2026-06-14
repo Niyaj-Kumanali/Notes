@@ -396,6 +396,30 @@ CircuitBreaker cb = new CircuitBreaker(
   - Lambdas let the caller supply behavior inline at construction, keeping the circuit breaker generic and reusable.
   - The allocation cost of the lambdas (a few objects per request) is dwarfed by the HTTP connection overhead, so optimizing the lambda allocation here would be premature.
 
+## Use Cases
+
+- Reach for lambda expressions when you need to pass behavior as a value — typically as an argument to a method that expects a functional interface. Lambdas reduce boilerplate compared to anonymous classes and make functional-style code (streams, optionals) readable.
+
+- **Replacing anonymous inner classes** — concise single-method implementations
+  - Replace `button.addActionListener(new ActionListener() { public void actionPerformed(ActionEvent e) { ... } })` with `button.addActionListener(e -> ...)`. The lambda is shorter and focuses on the behavior, not the ceremony.
+  - **Avoid when:** the anonymous class has multiple methods or state — lambdas can only implement single-method interfaces (functional interfaces).
+
+- **Stream pipeline operations** — mapping, filtering, reducing
+  - Pass lambdas to `Stream.map()`, `filter()`, `reduce()`, `forEach()` to transform collections declaratively. `orders.stream().filter(o -> o.isActive()).map(Order::getTotal).reduce(0, BigDecimal::add)` is more readable than an imperative loop.
+  - **Avoid when:** the lambda body is longer than 3–5 lines — extract it into a named method and use a method reference instead.
+
+- **Custom sorting and comparison** — inline comparators
+  - Use `list.sort((a, b) -> a.getName().compareTo(b.getName()))` instead of implementing a separate `Comparator` class. For composite comparators, chain `Comparator.comparing(...).thenComparing(...)`.
+  - **Avoid when:** the comparator is reused across multiple call sites — extract it as a static field or constant.
+
+- **Lazy evaluation and deferred execution** — suppliers and callbacks
+  - Pass a lambda to `Optional.orElseGet(() -> expensiveComputation())` to compute the default only when needed. Also serves as callbacks in async frameworks, retry logic, and circuit breakers.
+  - **Avoid when:** the computation is trivial or already computed — use `orElse(value)` (eager) to avoid the lambda allocation overhead.
+
+- **Threads and concurrency** — replacing Runnable
+  - Replace `new Thread(new Runnable() { public void run() { ... } }).start()` with `new Thread(() -> ...).start()`. The lambda is significantly shorter.
+  - **Avoid when:** the thread body is complex enough to warrant a named class — readability trumps conciseness.
+
 ---
 
 ## Scenario-Based Questions

@@ -656,6 +656,26 @@ public class ReviewAggregationService {
 
 - Beyond the code fix, implement a circuit breaker for the third-party integration: if ReviewHub returns malformed responses repeatedly, fail closed (return cached reviews) rather than propagating potentially malicious data. Monitor third-party response quality and alert on anomalies. Consider using a separate, sandboxed network segment for external API calls.
 
+## Use Cases
+
+- API security spans authentication, authorization, rate limiting, and input validation. Choose the right controls based on who your clients are and what they can access.
+
+- **Securing public-facing REST/GraphQL APIs** — protecting endpoints exposed to the internet from unauthorized access and abuse
+  - When to use: Your API is accessible from the open internet and handles sensitive data. Implement OAuth2 with short-lived access tokens, enforce TLS 1.3, apply rate limiting per client, and validate all inputs. Example: a payment gateway API that uses OAuth2 client credentials for machine-to-machine auth and tokenized card data.
+  - **Avoid when:** The API is internal-only on a trusted network — mutual TLS or a service mesh with mTLS may be simpler than full OAuth2 flows.
+
+- **Implementing OAuth2 / OIDC for SSO** — delegating authentication to a trusted identity provider
+  - When to use: Users need to log in via Google, GitHub, or a corporate IdP. Use the Authorization Code flow with PKCE for public clients and the Client Credentials flow for server-to-server communication. Example: a SaaS platform that lets users sign in with their company's Okta account via OIDC.
+  - **Avoid when:** You control both the client and the server on the same backend — a simpler API key or session-based auth may suffice.
+
+- **Rate limiting and abuse prevention** — protecting APIs from excessive or malicious traffic
+  - When to use: You need to ensure fair usage, prevent DDoS, or protect downstream databases from request spikes. Implement token bucket or sliding window rate limiting per API key or IP. Example: a weather API that allows 1000 requests/hour for free tier and 100,000/hour for enterprise.
+  - **Avoid when:** The API is consumed only by internal services with predictable traffic patterns — rate limiting adds unnecessary complexity.
+
+- **API key management for third-party developers** — issuing, rotating, and revoking credentials for external consumers
+  - When to use: You provide an API for external developers to build integrations. Generate unique API keys per developer, support key rotation, and allow instant revocation. Example: a mapping service that issues API keys to mobile apps and tracks usage per key for billing.
+  - **Avoid when:** You have only one or two known consumers — static credentials with IP whitelisting may be simpler.
+
 ---
 
 ## Scenario-Based Questions

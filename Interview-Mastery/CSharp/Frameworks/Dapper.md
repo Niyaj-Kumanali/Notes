@@ -225,6 +225,28 @@ public class SqlGeographyHandler : SqlMapper.TypeHandler<SqlGeography>
 }
 ```
 
+## Use Cases
+
+- **High-performance read APIs** — REST endpoints serving thousands of requests per second
+  - Dapper executes raw SQL with minimal overhead (~2–10µs per query). Maps results to objects with IL-generated mappers. No change tracking, no proxy generation.
+  - **Avoid when:** the endpoint does complex CRUD with multiple entity relationships — EF Core's change tracking may be worth the overhead.
+
+- **Bulk data operations** — importing millions of rows, batch updates, or large report queries
+  - Dapper's `ExecuteAsync` with `SqlBulkCopy` for massive inserts. Raw SQL allows database-specific bulk operations. No object tracking overhead.
+  - **Avoid when:** the data volume is small (<1000 rows) — the performance difference is negligible, and EF's expressiveness is more valuable.
+
+- **Complex SQL queries** — queries with window functions, CTEs, full-text search, or database-specific features
+  - Write the exact SQL you need. Dapper executes it without translation or interpretation. Map results to POCOs or dynamic types.
+  - **Avoid when:** the query is simple CRUD — EF Core's LINQ generates the same SQL with less string manipulation risk.
+
+- **CQRS read models** — dedicated read-side optimized for query performance
+  - Separate read models (denormalized DTOs) designed for specific query patterns. Dapper queries populate them efficiently. Write side uses EF Core for change tracking.
+  - **Avoid when:** you only have CRUD without separate read/write models — a single ORM approach reduces cognitive load.
+
+- **Custom type mapping** — handling geography types, enums, or complex value objects that EF struggles to map
+  - `SqlMapper.AddTypeHandler()` registers custom type handlers. Maps database types to C# types without EF's complex value conversion infrastructure.
+  - **Avoid when:** the mapping is simple (int to enum) — EF Core handles this natively; adding Dapper for just this is overkill.
+
 ---
 
 ## Scenario-Based Questions

@@ -254,6 +254,40 @@
 
 ---
 
+## Use Cases
+
+- Spring's caching abstraction reduces latency and backend load with minimal code changes. These use cases cover cache placement, invalidation strategies, and multi-level caching patterns.
+
+- **Read-heavy data with `@Cacheable`** — A product catalog is queried thousands of times per second and data changes infrequently (price updates a few times daily).
+  - Add `@Cacheable(value = "products", key = "#id")` on the lookup method. Use `sync = true` to prevent cache stampede on concurrent misses.
+  - **Avoid when:** Data changes every few seconds — the invalidation overhead may exceed the caching benefit.
+
+- **Write-through with `@CachePut`** — A product price update must immediately refresh the cache so subsequent reads see the new value.
+  - Use `@CachePut(value = "products", key = "#product.id")` on the update method. The method always executes and the return value replaces the cached entry.
+  - **Avoid when:** The update rarely happens and stale data is acceptable — periodic `@CacheEvict` with a scheduler is simpler.
+
+- **Cache eviction on delete** — A `ProductService.delete(id)` must remove the product from cache so deleted products are not returned on subsequent lookups.
+  - Use `@CacheEvict(value = "products", key = "#id")`. For clearing entire cache groups, use `@CacheEvict(value = "products", allEntries = true)`.
+  - **Avoid when:** The cache has a short TTL — letting the entry expire naturally may be good enough and avoids an explicit eviction code path.
+
+- **Distributed cache invalidation across services** — A product service updates a price, and a search service that caches product data must learn about the change.
+  - After updating the local cache with `@CachePut`, publish an invalidation event to a message queue. The search service listens and evicts its own cache entry.
+  - **Avoid when:** All services share the same cache store (e.g., Redis) — evicting from the shared store invalidates it for all consumers automatically.
+
+- **Multi-level caching (L1 local + L2 distributed)** — A high-traffic API needs sub-millisecond reads for hot data and fallback to a shared Redis cache for colder data.
+  - Configure a custom `CacheManager` that checks Caffeine (L1) first, then Redis (L2), then the database. Writes populate both levels.
+  - **Avoid when:** The application is single-instance — local Caffeine alone is simpler and avoids serialization overhead.
+
+- **Distributed caching with Redis** — sharing cache state across multiple application instances in a cluster
+  - Spring Cache with Redis as the backing store. Cache entries stored in Redis hashes or JSON serialized. TTL, eviction policies, and cluster configuration at the Redis level.
+  - **Avoid when:** cache size is small (<10K entries) and instances are few (<3) — local cache with cache-aside pattern is simpler.
+
+- **Conditional caching for selective optimization** — caching only expensive operations or frequently accessed keys
+  - `@Cacheable(condition = "#result.expensive")` caches only if the condition is true. Combine with `unless` to skip caching error results.
+  - **Avoid when:** the condition evaluation itself is expensive — cache miss detection overhead may negate benefits.
+
+---
+
 ## Scenario-Based Questions
 
 **Q: Your `@Cacheable` method returns a `List<Product>`. You update one product in the database. The cached list still contains the old data. How do you ensure the list cache is invalidated when any product in that list is updated?**

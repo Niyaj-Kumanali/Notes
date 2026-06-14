@@ -286,6 +286,28 @@
   ```
 - Also added monitoring: HikariCP metrics exposed via Actuator for Grafana dashboards. After tuning, the service handles 1500 TPS without connection exhaustion.
 
+## Use Cases
+
+- **Startup time reduction** — speeding up Spring Boot application initialization in production
+  - Exclude unused auto-configurations, enable lazy initialization, use `@ConditionalOn*` annotations judiciously, and consider AOT compilation (Spring Native / GraalVM).
+  - **Avoid when:** the application starts once and runs for weeks — startup time matters less for long-lived processes.
+
+- **Database connection pool tuning** — preventing connection exhaustion under high load
+  - Size the pool based on concurrent requests and query duration. HikariCP's `maximumPoolSize` should account for database max connections across all application instances.
+  - **Avoid when:** the application rarely touches the database — a small pool (5–10 connections) is sufficient.
+
+- **HTTP client optimization** — reducing latency for outbound API calls from Spring services
+  - Use connection pooling (HttpClient, RestTemplate with PoolingHttpClientConnectionManager). Enable keep-alive. Set socket and connection timeouts. Use async non-blocking I/O with WebClient.
+  - **Avoid when:** the service calls only one external API with low volume — a simple RestTemplate with default settings is adequate.
+
+- **Caching with Spring Cache abstraction** — reducing repeated expensive computations or database calls
+  - `@Cacheable` with TTL and eviction policies. Multi-tier caching (Caffeine L1 + Redis L2). Cache-aside pattern. Avoid cache stampede with mutex-based reload.
+  - **Avoid when:** the data changes on every request — caching adds overhead without benefit.
+
+- **JVM tuning and GC optimization** — reducing pause times and memory churn in latency-sensitive services
+  - Choose the right GC (G1GC for predictable pause times, Shenandoah/ZGC for sub-10ms pauses). Tune heap size, young generation sizing, and GC threads. Use JMH for microbenchmarks.
+  - **Avoid when:** the service has no latency SLO — default JVM settings may be adequate for background processing services.
+
 ---
 
 ## Scenario-Based Questions

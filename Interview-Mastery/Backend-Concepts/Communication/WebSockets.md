@@ -356,6 +356,28 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 }
 ```
 
+## Use Cases
+
+- **Real-time data streaming** — live stock tickers, cryptocurrency prices, or sports scores
+  - Server pushes updates as they happen. Clients receive sub-second updates without polling. Bandwidth-efficient compared to HTTP polling.
+  - **Avoid when:** updates are infrequent (every 30+ seconds) — Server-Sent Events or periodic HTTP polling is simpler.
+
+- **Collaborative applications** — Google Docs-style editing, Figma, or multiplayer cursors
+  - Bidirectional communication enables real-time synchronization of operations (OT/CRDT). Low-latency binary frames for efficient state sync.
+  - **Avoid when:** conflict resolution is not needed — do clients only need read-only updates? Consider SSE instead.
+
+- **Live chat and messaging** — customer support chat, team collaboration, or social media messaging
+  - Persistent connection for instant message delivery. STOMP or MQTT sub-protocols add topic-based routing and subscription management.
+  - **Avoid when:** messages must be delivered to offline users — combine WebSocket with push notifications and message persistence.
+
+- **Real-time notifications and alerts** — dashboard updates, system monitoring, or deployment status
+  - Server pushes alerts to connected clients immediately. Filters and subscriptions allow clients to receive only relevant notifications.
+  - **Avoid when:** the client is a mobile app that frequently disconnects — use WebSocket with reconnection logic and fallback to SSE or long-polling.
+
+- **Multiplayer game state sync** — browser games, virtual events, or interactive experiences
+  - Low-latency bidirectional messages for player actions, state updates, and synchronization. Binary format (Protocol Buffers, MessagePack) for efficiency.
+  - **Avoid when:** the game is turn-based with seconds between moves — HTTP-based APIs are sufficient and simpler to debug.
+
 ---
 
 ## Scenario-Based Questions

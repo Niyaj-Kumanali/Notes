@@ -307,6 +307,26 @@ public class PaymentGateway {
 
 ---
 
+## Use Cases
+
+Multithreading applies whenever an application needs to execute multiple tasks concurrently, whether for CPU throughput, I/O responsiveness, or background processing.
+
+- **CPU-bound computation** — Split a large mathematical or data-processing task across cores to reduce wall-clock time.
+  - Partition the input, submit each chunk to a thread pool, aggregate results. Example: parallel image filtering.
+  - **Avoid when:** task granularity is too fine — thread creation and context-switch overhead can exceed the parallel speedup.
+
+- **I/O-bound background processing** — Keep the main thread responsive while file/network operations run in the background.
+  - Offload logging, file writes, or external API calls to a separate thread. Example: saving a large document without freezing the UI.
+  - **Avoid when:** Java 21+ virtual threads are available — they handle the same pattern with far simpler code and lower overhead.
+
+- **Thread-local request context** — Pass per-request data (user ID, trace ID) through a call chain without polluting every method signature.
+  - Store context in `ThreadLocal` before processing, retrieve it in downstream services. Example: MDC logging in a web server.
+  - **Avoid when:** threads are pooled — always call `remove()` after each request to prevent leaking stale data across requests.
+
+- **Structured task decomposition (fork/join)** — Recursively divide a problem into sub-tasks and combine results, especially for algorithms that do not parallelize evenly.
+  - Use `ForkJoinPool` and `RecursiveTask` for divide-and-conquer. Example: merge sort on a large array.
+  - **Avoid when:** the decomposition depth is very shallow or sub-tasks are I/O-bound — the management overhead of fork/join adds little value.
+
 ## Scenario-Based Questions
 
 **Q: A production application using `ThreadLocal` for request-scoped data (user ID, transaction ID) develops a slow memory leak. Thread dumps show hundreds of pooled threads holding references to stale request data. The objects are never garbage collected. What is the root cause and how do you fix it?**

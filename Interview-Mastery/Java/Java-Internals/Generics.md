@@ -131,6 +131,26 @@
 
 - A utility method that transforms a `Map<K, V>` into a `Map<K, R>` needs both `? extends V` (producer) and careful handling of the result type. Using bounded wildcards on parameters while keeping the return type exact prevents callers from accidentally receiving raw types.
 
+## Use Cases
+
+Generics shine when you need type-safe, reusable abstractions over different data types — the compiler enforces contracts that would otherwise require manual casts and runtime checks.
+
+- **Type-safe collections** — Eliminate `ClassCastException` by letting the compiler verify element types at compile time.
+  - Declare `List<String>` instead of raw `List` so that adding an `Integer` is rejected immediately. Example: any JDK collection used in production code.
+  - **Avoid when:** the collection must hold heterogeneous types — consider a sealed interface or a union type pattern instead.
+
+- **Generic APIs and utility methods** — Write one method that works across many types without duplicating code.
+  - Define `<T> T requireNonNull(T obj)` or `Collections.emptyList()` with type inference. Example: a JSON parser that deserializes into `<T> T fromJson(String, Class<T>)`.
+  - **Avoid when:** the algorithm depends on concrete type capabilities (e.g., arithmetic) — use bounded type parameters with a specific superclass.
+
+- **Wildcard-based API flexibility** — Accept inputs and produce outputs in a way that respects subtyping relationships.
+  - Apply PECS: `? extends T` for producers (read from), `? super T` for consumers (write to). Example: `void copy(List<? extends T> src, List<? super T> dest)`.
+  - **Avoid when:** the method both reads and writes the same parameter — use an exact type parameter instead.
+
+- **Type-safe builders** — Carry compile-time type information through a fluent builder chain.
+  - Parameterize the builder class so that `build()` returns the exact type without casting. Example: `HttpClientBuilder<Req, Res>` that ends with `.build()` yielding `HttpClient<Req, Res>`.
+  - **Avoid when:** the builder is simple (1-2 fields) — a constructor or static factory is clearer.
+
 ## Scenario-Based Questions
 
 **Q: Your team's library exposes a `Transformer<A, B>` interface. Users report ClassCastException when passing a `Transformer<String, Object>` where `Transformer<Object, String>` is expected. How do you fix this?**

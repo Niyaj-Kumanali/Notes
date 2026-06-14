@@ -98,6 +98,28 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 
 **Resolution:** Switch to Caffeine cache with `maximumSize(10000)` and `expireAfterWrite(1, TimeUnit.HOURS)`. Enable `recordStats()` to monitor hit ratio. The cache stays at ~500MB. GC pauses drop to <50ms. The bottleneck shifts from memory/GC to the database (which is the right place).
 
+## Use Cases
+
+- **Database query optimization** — slow API endpoints caused by inefficient queries or N+1 problems
+  - Profile with database monitoring tools. Look for sequential queries in loops, missing indexes, or Cartesian products from excessive JOINs.
+  - **Avoid when:** the database is well-tuned and queries are simple — the bottleneck may be network, memory, or CPU.
+
+- **Thread pool / connection pool exhaustion** — services become unresponsive even though CPU and memory are low
+  - Threads blocked waiting for external resources (database, HTTP calls). All pool threads consumed, new requests queue. Add timeouts, async I/O, and circuit breakers.
+  - **Avoid when:** the pool is correctly sized and all threads are doing useful CPU work — CPU becomes the bottleneck, not the pool.
+
+- **Memory leaks and GC pressure** — growing memory usage, increasing GC pause times, eventual OOM
+  - Unbounded caches, event handler leaks, or large object heap fragmentation. Use heap profiling to identify. Set cache size limits, unsubscribe event handlers.
+  - **Avoid when:** memory usage is stable and GC pauses are within acceptable thresholds — premature optimization adds complexity.
+
+- **CPU-bound computation** — video transcoding, encryption, or complex data processing consuming all cores
+  - Profile to identify hotspots. Optimize algorithms, add caching, parallelize across cores. Consider moving CPU-intensive work to dedicated worker services.
+  - **Avoid when:** CPU usage is evenly distributed and latency is acceptable — optimizing a non-bottleneck wastes effort.
+
+- **I/O-bound operations** — file reads, network calls, or disk writes blocking request processing
+  - Switch to async I/O to free threads while waiting. Batch operations for throughput. Use buffered streams and connection pooling.
+  - **Avoid when:** the I/O volume is low and thread utilization is the priority — synchronous I/O may be simpler and sufficient.
+
 ---
 
 ## Scenario-Based Questions

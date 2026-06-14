@@ -242,6 +242,30 @@ public void goOffCall(Long doctorId, LocalDate date) {
 
 Fix with `SELECT ... FOR UPDATE` or SERIALIZABLE isolation.
 
+## Use Cases
+
+Reach for isolation levels to control the consistency-vs-concurrency trade-off — higher levels prevent more anomalies but reduce throughput.
+
+- **Financial transactions (banking, payments)** — Use SERIALIZABLE to prevent write skew and ensure account invariants (e.g., total balance never negative).
+  - **Avoid when:** maximum throughput is needed and the specific anomaly is tolerable.
+
+- **E-commerce inventory management** — Use REPEATABLE READ with `SELECT FOR UPDATE` to prevent phantom reads and overselling.
+  - The `FOR UPDATE` lock serializes access to the inventory row.
+  - **Avoid when:** read-only reporting — a consistent snapshot (MVCC) is sufficient.
+
+- **Social media feeds (read-heavy)** — READ COMMITTED is sufficient — an occasional non-repeatable read on a like count is harmless.
+  - Default in PostgreSQL, Oracle, and SQL Server for good reason.
+  - **Avoid when:** displaying critical financial or medical data where every read must be consistent.
+
+- **Reporting and analytics** — Snapshot isolation (MVCC) gives each report a consistent point-in-time view without blocking concurrent writers.
+  - **Avoid when:** the report must reflect the absolute latest committed state — use READ COMMITTED or lock the relevant rows.
+
+- **Booking and reservation systems** — Use SERIALIZABLE or `SELECT FOR UPDATE` to prevent double-booking under high contention.
+  - Be prepared to retry serialization failures with exponential backoff.
+  - **Avoid when:** the system can tolerate eventual consistency and reconcile conflicts later (e.g., waitlists).
+
+---
+
 ## Scenario-Based Questions
 
 - **Q:** Your booking system uses READ COMMITTED. Two users simultaneously book the last seat. Both see "available" and both book successfully — overselling by 1. How do you prevent this?

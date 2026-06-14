@@ -266,6 +266,30 @@ hash("banana") = 200 → arr[200 % 16] = "banana"  // index 8 — collision hand
 
 - **Interview follow-up:** How do you handle trending or new queries that were not in last night's training data — what data structure supports real-time suggestion additions without rebuilding the entire index?
 
+## Use Cases
+
+- Reach for DSA knowledge whenever you need to make software predictable in time and memory under load. The right data structure can turn an O(n²) operation into O(log n), and the right algorithm determines whether a feature works at 10 users or 10 million.
+
+- **Efficient lookups** — choose the right map or set
+  - Use a hash map (`HashMap`, `Dictionary`) for O(1) average lookups when keys are unordered. Use a tree map (`TreeMap`, `std::map`) when you need sorted iteration or range queries. For ~1M+ entries, measure the hash function quality — a poorly distributed hash degrades to O(n) buckets.
+  - **Avoid when:** a simple array or list suffices (fewer than 100 items, dense integer keys) — the overhead of hashing and boxing is wasted.
+
+- **Fast insertion and deletion** — list vs. linked list vs. array
+  - Use `ArrayList` for index-based access and when the size is known ahead of time. Use `LinkedList` or a `Deque` when you need constant-time inserts/removals at both ends (queue, stack, sliding window). For arbitrary insertions in the middle, consider a balanced tree or a skip list.
+  - **Avoid when:** you need both fast random access and fast middle insertions — no single structure excels at both; consider a hybrid approach (e.g., a B-tree or an array of chunks).
+
+- **Priority processing** — heaps and priority queues
+  - Use a min-heap or max-heap when you repeatedly need the smallest (or largest) element from a dynamic set: task scheduling, Dijkstra's algorithm, top-K queries. Insertion and extraction are both O(log n).
+  - **Avoid when:** you need to frequently update the priority of existing elements — a Fibonacci heap or a bucket queue may be better, or a sorted list if updates are rare.
+
+- **Graph traversal** — BFS vs. DFS
+  - Use BFS (breadth-first) for shortest path in unweighted graphs and level-order processing. Use DFS (depth-first) for topological sorting, cycle detection, and exploring all paths. For weighted shortest paths, use Dijkstra (non-negative weights) or Bellman-Ford (negative weights).
+  - **Avoid when:** the graph is implicit and infinite (e.g., a game tree for chess) — iterative deepening DFS or A* with a good heuristic limits exploration.
+
+- **String searching** — pattern matching at scale
+  - Use KMP or Boyer-Moore for searching a pattern in a long text (log parsing, DNA sequence matching). Use a Trie (prefix tree) for autocomplete, spell-check, or IP routing tables. Use Rabin-Karp for multi-pattern search in a single pass.
+  - **Avoid when:** simple `indexOf` or regex suffices (text < 10K characters, simple pattern) — the implementation cost of advanced algorithms outweighs the gain.
+
 ---
 
 ## Scenario-Based Questions

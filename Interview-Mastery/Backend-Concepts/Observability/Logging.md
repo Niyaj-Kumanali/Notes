@@ -102,6 +102,28 @@ public class LoggingFilter implements Filter {
 
 **Resolution:** Stream logs to a real-time analysis pipeline. Logs → Filebeat → Kafka → Logstash → Elasticsearch. A Watcher rule detects patterns: `url:*union*select*` OR `url:*or*1=1*` with status `403`. Alert sent to PagerDuty within 30 seconds of detection. Similar patterns detect brute force attempts, JNDI lookups, and excessive 404s.
 
+## Use Cases
+
+- **Incident debugging and root cause analysis** — investigating production outages, errors, or performance regressions
+  - Structured logs with trace IDs, service names, and error categories enable centralized search across distributed systems.
+  - **Avoid when:** the service is stateless and the error is easily reproducible — local reproduction may be faster than log analysis.
+
+- **Security auditing and compliance** — tracking access to sensitive data, authentication attempts, or admin actions
+  - Immutable audit logs with user IDs, timestamps, and action details. Log retention policies satisfy regulatory requirements (SOC2, PCI-DSS, HIPAA).
+  - **Avoid when:** logging sensitive data (PII, passwords, credit cards) — configure log masking or redaction rules.
+
+- **Business analytics and user behavior** — feature adoption, funnel analysis, or usage patterns
+  - INFO-level logs capture business events (user signed up, order placed). Aggregated in a data warehouse for product analytics.
+  - **Avoid when:** high-cardinality user-level tracking is needed — use dedicated analytics tools (Amplitude, Mixpanel) instead.
+
+- **Alerting and proactive monitoring** — detecting error spikes, slow responses, or suspicious patterns in real-time
+  - Logs streamed through a real-time analysis pipeline (Filebeat → Kafka → Logstash → Elasticsearch). Watcher rules trigger alerts on patterns.
+  - **Avoid when:** the alerting metric is rate-based (e.g., requests per second) — metrics systems (Prometheus) are more efficient for numeric thresholds.
+
+- **Distributed tracing correlation** — connecting logs across service boundaries during a single request flow
+  - MDC propagates `trace_id` and `span_id` through all services. Logs from each service are correlated in the log aggregator by trace ID.
+  - **Avoid when:** your system is a monolith — a single trace_id is still useful but easier to implement without distributed context propagation.
+
 ---
 
 ## Scenario-Based Questions

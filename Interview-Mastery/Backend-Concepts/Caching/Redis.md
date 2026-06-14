@@ -109,6 +109,28 @@ public class LeaderboardService {
 
 **Resolution:** Deploy Redis Sentinel with 3 Sentinel nodes and a master-replica setup. When the master fails, Sentinel promotes a replica to master within seconds. The application uses Lettuce (which supports Sentinel) and reconnects automatically. Session data on the promoted replica is preserved (asynchronous replication may lose the last few writes, but sessions are short-lived).
 
+## Use Cases
+
+- **Real-time leaderboards and counters** — gaming scores, social media likes, or trending hashtags
+  - Sorted Sets (`ZINCRBY`, `ZREVRANK`) provide O(log N) ranked queries. Single-digit millisecond latency for millions of entries.
+  - **Avoid when:** strong durability is required — Redis is primarily in-memory; use a database for authoritative storage.
+
+- **Session store for distributed apps** — user sessions across microservices or multiple server instances
+  - Hash or String with TTL. Stateless servers share session state via Redis. Sliding expiration auto-cleans stale sessions.
+  - **Avoid when:** sessions are extremely large (>1 MB) — consider external blob storage with Redis as a cache index.
+
+- **Distributed locking** — coordinating access to shared resources across service instances
+  - Use Redlock algorithm (`SET key NX EX 10`) for distributed mutexes. Lua scripting ensures atomic acquire-and-set-TTL.
+  - **Avoid when:** lock duration is unpredictable — prefer a lease-based mechanism with heartbeats.
+
+- **Rate limiting** — API throttling per user, IP, or API key
+  - Sliding window via Sorted Sets or `INCR` with TTL. Lua scripts ensure atomic window checks under high concurrency.
+  - **Avoid when:** rate limits are coarse — local in-memory counters with async Redis sync are more performant.
+
+- **Pub/Sub for real-time messaging** — live chat, notifications, or event broadcasting within a service
+  - Lightweight publish/subscribe with `PUBLISH`/`SUBSCRIBE`. Sub-second delivery to all subscribers.
+  - **Avoid when:** delivery guarantees matter — Redis Pub/Sub is fire-and-forget; use Redis Streams or a message queue for at-least-once delivery.
+
 ---
 
 ## Scenario-Based Questions

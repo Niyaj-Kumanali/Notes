@@ -193,6 +193,30 @@ public class TaxCalculator {
 - **Fix**
   - Identify bounded contexts (e.g., Billing, Shipping, Auth). Extract each into a Maven/Gradle module with strict dependency rules. Use ArchUnit tests to enforce that Billing never imports Shipping classes. Result: build time drops from 45 min to 8 min, teams own modules independently.
 
+## Use Cases
+
+- Coupling and cohesion are the two dials you turn when a system becomes hard to change, test, or reason about. Reaching for these concepts helps you diagnose why a module is fragile and what to refactor.
+
+- **Module extraction** — breaking a monolith into services or libraries
+  - When a change in one area forces recompilation or retesting across the whole project, you have high coupling. Identify bounded contexts (Billing, Shipping, Auth) and extract each into its own module with strict dependency rules.
+  - **Avoid when:** the system is a small script or prototype less than ~1K lines — the overhead of module boundaries exceeds the benefit.
+
+- **Improving testability** — decoupling for unit tests
+  - Tight coupling between business logic and infrastructure (SQL, HTTP, filesystem) makes tests slow and brittle. Use dependency injection to pass in test doubles, decoupling the module under test from its dependencies.
+  - **Avoid when:** mocking becomes more complex than the code under test — consider an integration test against the real dependency instead.
+
+- **Refactoring god classes** — increasing cohesion
+  - A class that "does everything" (parses input, validates, processes, persists, emails) has low cohesion — every responsibility is a reason to change it. Extract each responsibility into its own class, then compose them. The result is a set of highly cohesive, independently testable units.
+  - **Avoid when:** the extracted classes are trivially small (one-liner methods) — keep them merged until a clear boundary emerges.
+
+- **API and library design** — controlling surface area
+  - Public APIs that expose internal types create coupling with consumers. Design your public interface to hide implementation details. Internal refactors become safe because no external code depends on the hidden types.
+  - **Avoid when:** premature abstraction — hiding everything behind interfaces before there's a second consumer adds indirection without payoff.
+
+- **Legacy code rescue** — strangling a tangled system
+  - In a system where every module imports every other module, add a dependency rule (e.g., "UI never imports DataAccess") and enforce it with architecture tests (ArchUnit, ArchTest). Fix violations one by one until the system is navigable again.
+  - **Avoid when:** the system is scheduled for replacement — focus on stabilizing the interface for the replacement rather than refactoring the old code.
+
 ---
 
 ## Scenario-Based Questions

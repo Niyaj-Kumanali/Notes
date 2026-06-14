@@ -162,6 +162,30 @@ CREATE INDEX idx_unread_notifications ON notifications(user_id, created_at) WHER
 SELECT * FROM notifications WHERE read = FALSE AND user_id = 123 ORDER BY created_at DESC LIMIT 50;
 ```
 
+## Use Cases
+
+Reach for indexes when queries scan more rows than necessary — a well-placed index turns full table scans into targeted lookups.
+
+- **Accelerating SELECT queries with WHERE filters** — B-Tree indexes on filtered columns reduce O(n) full table scans to O(log n) indexed lookups.
+  - Most effective when the filter selects < 5–10% of rows.
+  - **Avoid when:** the table is small (< 1000 rows) or the query selects most rows — a full scan is faster.
+
+- **Enforcing unique constraints** — A unique index (implicitly created by UNIQUE constraint) prevents duplicate values on columns like email or order number.
+  - **Avoid when:** duplicates are allowed and no uniqueness guarantee is needed.
+
+- **Supporting ORDER BY and range queries** — B-Tree indexes store values in sorted order, making ORDER BY, <, >, and BETWEEN efficient.
+  - The index can return rows in sorted order without an explicit sort step.
+  - **Avoid when:** the sort column has very few distinct values (low cardinality) — sorting is cheap anyway.
+
+- **Covering queries with index-only scans** — Composite indexes with INCLUDE clauses hold all needed columns, avoiding heap access entirely.
+  - The fastest scan type — no table I/O at all.
+  - **Avoid when:** the table has many wide columns — a covering index may be too large to be practical.
+
+- **Full-text search** — GIN or GiST indexes power efficient text search on large text columns (product descriptions, articles, messages).
+  - **Avoid when:** a dedicated search engine (Elasticsearch) is already available for complex search requirements.
+
+---
+
 ## Scenario-Based Questions
 
 **Q: You are building an e-commerce product listing where users filter by any combination of 8 optional attributes. How do you index without creating 256 indexes?**

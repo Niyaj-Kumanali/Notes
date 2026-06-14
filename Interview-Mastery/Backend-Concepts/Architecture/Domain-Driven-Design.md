@@ -160,6 +160,26 @@ public class LegacyOrderTranslator {
 }
 ```
 
+## Use Cases
+
+- DDD is most valuable in complex domains where business rules, invariants, and workflows are too intricate for simple CRUD models. These patterns cover when and how to apply DDD.
+
+- **Complex business domains** — finance, insurance, healthcare, logistics with intricate rules and invariants
+  - When to use: The domain has non-trivial business rules (e.g., "a margin call cannot be issued if the account has pending settlements"). DDD's aggregates enforce invariants, value objects encapsulate domain logic, and domain events capture meaningful business occurrences. Example: an insurance system where `Policy` is an aggregate root that enforces premium calculation rules, coverage limits, and claim validation — all through domain methods like `policy.submitClaim(claim)` rather than setters.
+  - **Avoid when:** The application is simple CRUD (blog, content management, admin panels) — DDD's tactical patterns add complexity without benefit.
+
+- **Microservice decomposition** — finding service boundaries aligned with business capabilities
+  - When to use: You are splitting a monolith or designing a new microservices architecture. Use bounded contexts to define service boundaries — each bounded context becomes a candidate microservice. The context map documents inter-service relationships. Example: an e-commerce platform with bounded contexts for `Ordering`, `Payment`, `Inventory`, and `Shipping` — each owned by a different team with its own data store and deployment pipeline.
+  - **Avoid when:** The system is small (one team, few modules) — a modular monolith with well-defined packages is sufficient.
+
+- **Multi-team enterprise systems** — aligning software boundaries with team structures and reducing coordination overhead
+  - When to use: Multiple teams work on the same system but own different domains. Bounded contexts give each team autonomy over its model and data, reducing cross-team dependencies. The anti-corruption layer translates between contexts. Example: a retail company where the "Catalog" team (product data, pricing) and the "Ordering" team (cart, checkout, fulfillment) each own their bounded context and communicate through well-defined integration events.
+  - **Avoid when:** The team is small and everyone can maintain a shared understanding of the entire domain — a single unified model is simpler.
+
+- **Replacing anemic CRUD models with rich domain logic** — evolving a transaction script architecture into a domain model
+  - When to use: The current codebase has services full of procedural logic (check status, update status, save) and the business rules are scattered across multiple layers. DDD brings those rules into entities and value objects where they belong. Example: a legacy order system where `OrderService.setStatus()` is called from five places with different validation logic — refactored to `order.submit()`, `order.approve()`, `order.ship()` with invariants enforced inside the aggregate.
+  - **Avoid when:** The business rules are simple and unlikely to grow — a transaction script with a service layer and simple data objects may be adequate.
+
 ---
 
 ## Scenario-Based Questions

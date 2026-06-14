@@ -213,6 +213,28 @@ public class RollingMetricsAggregator
 }
 ```
 
+## Use Cases
+
+- **High-performance lookups** — finding products by ID in a product catalog, or users by email
+  - `Dictionary<TKey,TValue>` provides O(1) lookups. Use `ConcurrentDictionary` for thread-safe access. Key selection should have good hash distribution.
+  - **Avoid when:** iteration order matters — `Dictionary` is unordered; use `SortedDictionary` or `List` with sorting.
+
+- **FIFO work queues** — task processing, message buffering, or request queuing for background workers
+  - `Queue<T>` provides O(1) enqueue/dequeue. `ConcurrentQueue<T>` for producer-consumer patterns. `Channel<T>` for async producer-consumer with backpressure.
+  - **Avoid when:** priority matters — use `PriorityQueue<TElement, TPriority>` (available in .NET 6+) or a custom heap.
+
+- **Unique element tracking** — deduplicating incoming data, tracking visited URLs, or managing user permissions
+  - `HashSet<T>` provides O(1) add/contains. `ImmutableHashSet<T>` for read-only sets. No duplicates allowed by definition.
+  - **Avoid when:** elements must maintain insertion order — `List<T>` with manual duplicate checking is needed.
+
+- **LIFO undo/redo operations** — command history, expression evaluation stack, or backtracking in games
+  - `Stack<T>` provides O(1) push/pop. Useful for depth-first search, expression parsing, and undo stacks.
+  - **Avoid when:** random access is required — `Stack` only provides top-of-stack access; use `List` for random indexing.
+
+- **Thread-safe collections** — shared state across multiple threads in a server application
+  - `ConcurrentDictionary`, `ConcurrentQueue`, `ConcurrentBag`, `BlockingCollection<T>`. Each provides lock-free or fine-grained locking implementations.
+  - **Avoid when:** contention is extremely high — consider partitioning the data across multiple collections to reduce lock contention.
+
 ---
 
 ## Scenario-Based Questions

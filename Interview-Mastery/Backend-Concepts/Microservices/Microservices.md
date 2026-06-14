@@ -120,6 +120,26 @@ public RouteLocator customRouteLocator(RouteLocatorBuilder builder) {
 
 **Resolution:** Implement resilience patterns at each layer. The order service wraps the payment call with a circuit breaker (50% failure rate, open after 10 failures, 30s wait). The API Gateway has per-service rate limits and circuit breakers. When the payment circuit opens, the order service returns "Payment pending" instead of blocking. Other services (catalog, search) remain fully functional.
 
+## Use Cases
+
+- Microservices adoption is driven by the need for independent scalability, deployment autonomy, and team ownership. These patterns guide when and how to apply the architecture.
+
+- **Scaling large applications by team ownership** — enabling multiple teams to develop and deploy independently
+  - When to use: Your organization has multiple teams working on the same product, and coordination overhead (merge conflicts, shared CI pipelines) is slowing delivery. Each team owns one or more services end-to-end, from development to deployment. Example: an e-commerce platform where the "Checkout" team owns the order and payment services, the "Catalog" team owns the product and inventory services, and each team deploys independently without waiting for the other.
+  - **Avoid when:** The team is small (fewer than 8–10 developers) — a modular monolith provides similar organizational benefits without distributed systems complexity.
+
+- **Independent deployment frequencies** — services that need to ship at different cadences
+  - When to use: Some parts of the system change daily (web frontend API) while others change quarterly (payment reconciliation). Microservices let each team deploy on their own schedule. Example: the recommendation engine deploys daily with new ML models, while the billing service deploys monthly after compliance reviews — they share no deployment lockstep.
+  - **Avoid when:** All services change at the same cadence — deploying them together is simpler and avoids version compatibility issues.
+
+- **Heterogeneous technology stacks** — using the best tool for each job
+  - When to use: Different parts of the system benefit from different languages, databases, or runtimes. A data-intensive service might use Python + Redis, a transaction service uses Java + PostgreSQL, and a real-time service uses Go + NATS. Example: a social media platform where the feed service uses Node.js (async I/O), the recommendation service uses Python (ML libraries), and the core API uses Java (Spring ecosystem).
+  - **Avoid when:** The team has a strong preference for a uniform stack — polyglot microservices require expertise in multiple technologies and increase operational overhead.
+
+- **Incremental modernization of monoliths** — extracting services one at a time via the strangler fig pattern
+  - When to use: You have an existing monolith that is hard to scale or deploy, but a full rewrite is too risky. Extract one bounded capability at a time into a microservice while routing traffic between old and new implementations. Example: a ticket-monolith where the payments module is extracted first into a standalone payment service, running alongside the monolith with a shared customer-facing interface.
+  - **Avoid when:** The monolith is stable and meeting current needs — the cost of extraction (network latency, distributed debugging, operational complexity) may not be justified.
+
 ---
 
 ## Scenario-Based Questions

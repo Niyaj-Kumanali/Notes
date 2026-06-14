@@ -165,6 +165,26 @@
   }
   ```
 
+## Use Cases
+
+Switch expressions improve upon switch statements by making every arm an expression that produces a value, removing fall-through bugs and forcing exhaustiveness.
+
+- **Enum-based dispatch** — Map each enum constant to a corresponding result or action without a `break` statement.
+  - Write `return switch (day) { case MON, TUE, WED, THU, FRI -> "work"; case SAT, SUN -> "rest"; }`. Example: mapping `DayOfWeek` to business hours or employee shift labels.
+  - **Avoid when:** the logic per enum constant is large enough to warrant separate methods — the switch body becomes hard to read.
+
+- **Exhaustive type matching over sealed hierarchies** — Process every subtype of a sealed class with compile-time safety and no `default` branch.
+  - Return a derived value for each permitted type: `case Circle c -> area(c); case Rect r -> area(r);`. Example: computing area for a sealed `Shape` hierarchy.
+  - **Avoid when:** the hierarchy is open (not sealed) — you must include a `default` branch, and new subtypes may be silently mishandled by the default.
+
+- **Expression-oriented logic** — Replace `if-else` chains that compute a value with a single, readable switch expression.
+  - `int quarters = switch (months) { case 1,2,3 -> 1; case 4,5,6 -> 2; ... }`. Example: mapping a month number to its fiscal quarter.
+  - **Avoid when:** the condition is a boolean or range check — `if-else` or ternary is more natural for binary decisions.
+
+- **Arrow syntax for concise cases** — Eliminate boilerplate by using `->` instead of colon + `break`/`yield`.
+  - Each arm is a single expression or block, and fall-through is impossible. Example: parsing a token enum into parser actions with `->` syntax.
+  - **Avoid when:** the same expression appears in every arm — extract it before or after the switch to keep each arm focused on the varying part.
+
 ## Scenario-Based Questions
 
 **Q: You are reviewing a pull request where the developer used a switch expression to replace an if-else chain that maps user roles to permissions. There are three roles (ADMIN, USER, GUEST) and the enum is not sealed. What exhaustiveness issue might exist?**

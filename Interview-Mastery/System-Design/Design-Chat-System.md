@@ -81,6 +81,28 @@
 - Large servers use a pull-based model with caching layers
 - Voice and video are handled separately via WebRTC
 
+## Use Cases
+
+- **Team collaboration chat** — Slack/Discord-style workspaces with channels, DMs, and file sharing
+  - Fan-out on write for small channels (message written once, delivered to all online members via WebSocket). Pull-based history for offline members.
+  - **Avoid when:** most channels have thousands of members — use pull-based delivery with client-side polling for large channels.
+
+- **Customer support live chat** — real-time messaging between support agents and website visitors
+  - WebSocket or long-polling for bidirectional messaging. Message persistence for conversation history. Agent routing assigns conversations to available agents.
+  - **Avoid when:** response time can be minutes (email-style) — asynchronous messaging with push notifications is sufficient.
+
+- **Gaming chat** — in-game voice and text chat with low-latency requirements
+  - UDP-based protocols or WebRTC for voice. Text chat uses persistent TCP connections with binary framing for efficiency.
+  - **Avoid when:** chat is not real-time critical — a REST API with polling is simpler and more reliable.
+
+- **Social media messaging** — Instagram/Twitter DMs with read receipts and typing indicators
+  - WebSocket for real-time delivery. Database persistence for message history. Typing indicators and read receipts are ephemeral events, not stored.
+  - **Avoid when:** the system must support message editing and deletion — soft deletes and versioning add complexity to the data model.
+
+- **Broadcast/announcement channels** — CEO all-hands announcements, system outage notifications, or product launch updates
+  - One-to-many fan-out. Delivery guarantees vary: at-most-once for non-critical, at-least-once with retry for critical announcements.
+  - **Avoid when:** recipients need to reply — use a separate discussion thread hierarchy instead.
+
 ## Scenario-Based Questions
 
 **Q: Users in a group chat see messages in different orders. Some users claim replies reference messages they cannot see. How do you fix ordering?**

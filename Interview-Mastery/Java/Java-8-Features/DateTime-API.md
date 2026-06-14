@@ -637,6 +637,31 @@ record Event(String id, Instant timestamp, String source, String payload) {}
 
 ---
 
+## Use Cases
+
+Reach for the Java 8 Date and Time API whenever you need to handle dates, times, or timezones in a safe, immutable, and unambiguous way.
+
+- **User-local date/time display** — Use `ZonedDateTime` or `OffsetDateTime` to store both the instant and the zone, converting to the user's timezone only at presentation time.
+  - Prevents the classic "stored LocalDateTime and displayed wrong time" bug.
+  - **Avoid when:** timezone is irrelevant (e.g., birthdate) — use `LocalDate` for simplicity.
+
+- **Machine timestamps and scheduling** — Use `Instant` for a linear, timezone-free point on the timeline. Combine with `Duration` for elapsed time and `Period` for calendar-based intervals.
+  - `Instant` is the natural choice for logging, timestamps, and distributed systems.
+  - **Avoid when:** you need human-readable relative times ("2 hours ago") — format separately with a library.
+
+- **JSON serialization in REST APIs** — Use `Instant` or `OffsetDateTime` serialized to ISO-8601 strings (e.g., `2025-06-13T14:30:00Z`) for unambiguous, timezone-aware API contracts.
+  - Jackson supports `java.time` types natively with `jackson-datatype-jsr310`.
+  - **Avoid when:** clients only need a date (YYYY-MM-DD) — use `LocalDate` to avoid timezone confusion.
+
+- **Database column mapping** — Map `Instant` to `TIMESTAMPTZ` (timezone-aware) and `LocalDateTime` to `TIMESTAMP` (timezone-naive) based on whether the application or the database owns timezone semantics.
+  - **Avoid when:** you are unsure which side owns timezone logic — prefer `TIMESTAMPTZ` / `Instant` as the safer default.
+
+- **Date arithmetic for business logic** — `LocalDate.plusDays()`, `ChronoUnit.between()`, and `TemporalAdjusters` handle calendar arithmetic correctly across month/year/month boundaries.
+  - Much safer than manually adding milliseconds to `java.util.Date`.
+  - **Avoid when:** you need exact second precision — use `Instant` and `Duration` for machine-time arithmetic.
+
+---
+
 ## Scenario-Based Questions
 
 **Q: A team stores `LocalDateTime` in a database for a global event schedule. Users in different timezones see wrong event times. What is the root cause and how do you fix it?**

@@ -304,6 +304,30 @@ REVOKE ALL ON invoices FROM app_role;
 GRANT EXECUTE ON FUNCTION get_own_invoices TO app_role;
 ```
 
+## Use Cases
+
+Reach for stored procedures when data-intensive logic must run close to the database and network round trips are a bottleneck.
+
+- **Complex data validation and transformation** — Encapsulate multi-step business rules that require set-based operations and referential integrity checks server-side.
+  - Avoids moving large intermediate result sets to the application.
+  - **Avoid when:** the logic involves HTTP calls, file I/O, or email — stored procedures cannot access external services.
+
+- **Batch processing and bulk operations** — Process millions of rows without transferring data to the application layer. A single `CALL` can update, insert, and aggregate.
+  - **Avoid when:** the batch logic changes frequently — application code is easier to version, review, and deploy.
+
+- **Reporting and aggregation** — Pre-compute summaries and statistical calculations on the server, returning only the final result.
+  - **Avoid when:** the report needs to be cached or served offline — application caching is more flexible.
+
+- **Security-enforced data access** — Revoke direct table access and grant `EXECUTE` on procedures only, providing a controlled, auditable API for data operations.
+  - Prevents arbitrary SQL from application users.
+  - **Avoid when:** row-level security (RLS) or application-layer authorization is sufficient — procedures add indirection.
+
+- **Transactional orchestration of multi-step DML** — Wrap related inserts, updates, and deletes in a single procedure with explicit `COMMIT`/`ROLLBACK` control.
+  - Ensures consistency without relying on the application to manage transaction boundaries.
+  - **Avoid when:** the orchestration spans multiple databases or external services — use a distributed Saga pattern.
+
+---
+
 ## Scenario-Based Questions
 
 - **Q:** You are designing a payment processing system. The team proposes putting all business logic in stored procedures for "performance." The system needs to call external payment APIs, send emails, and integrate with fraud detection. What do you advise?

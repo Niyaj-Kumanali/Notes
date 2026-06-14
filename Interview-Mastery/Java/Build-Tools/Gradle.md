@@ -54,6 +54,32 @@
 
 - A company with a 100-module Java monorepo experiences 20-minute CI build times. The team enables the local build cache on developer machines and sets up a shared remote build cache using an HTTP server. They configure parallel execution (`org.gradle.parallel=true`) and use the `--build-cache` flag in CI. Modules that change infrequently are cached and reused across builds. CI times drop to 6 minutes, and developer rebuilds after small changes take seconds.
 
+## Use Cases
+
+Reach for Gradle when build speed, flexibility, and a programmable build model matter more than a rigid, declarative lifecycle.
+
+- **Large monorepo builds** — Build cache, daemon, incremental compilation, and parallel execution keep 100+ module projects fast.
+  - CI times drop from minutes to seconds for unchanged modules.
+  - **Avoid when:** the project is small/simple — Maven's predictability may be a better fit.
+
+- **Android application development** — Gradle is the official Android build system with product flavors, build variants, and APK/AAB packaging.
+  - Declare different build types (debug/release), signing configs, and resource sets per variant.
+  - **Avoid when:** you build a pure-Java library that doesn't need Android-specific features.
+
+- **Custom build logic and code generation** — Gradle's Kotlin/Groovy DSL handles custom tasks, annotation processing, and code generation inline.
+  - Write a `Task` class or add `doFirst`/`doLast` hooks without leaving the build script.
+  - **Avoid when:** the team prefers a purely declarative, XML-based build configuration.
+
+- **Migrating from Maven** — `gradle init --type pom` converts an existing Maven project to Gradle, translating POM structure into Kotlin DSL.
+  - Ideal when Maven builds have become unacceptably slow or the team needs more flexibility.
+  - **Avoid when:** the existing Maven setup is fast and the team is comfortable with it.
+
+- **Polyglot multi-language builds** — A single Gradle build can compile Java, Kotlin, Groovy, Scala, C++, and JavaScript.
+  - Useful for full-stack JVM projects that span multiple JVM languages.
+  - **Avoid when:** the project uses only Java — Maven's simplicity may be preferable.
+
+---
+
 ## Scenario-Based Questions
 
 **Q: Your Gradle build is noticeably slow on developer machines. What steps do you take to diagnose and fix the performance issue?**

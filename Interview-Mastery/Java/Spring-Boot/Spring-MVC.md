@@ -351,6 +351,32 @@ public class AuditLogInterceptor implements HandlerInterceptor {
 
 ---
 
+## Use Cases
+
+- Spring MVC powers both server-rendered web apps and REST APIs. These use cases cover common patterns for controllers, interceptors, and content negotiation.
+
+- **Building a stateless REST API** — A mobile app backend returns JSON for all endpoints and does not use server-side sessions.
+  - Use `@RestController` with `@RequestMapping`. Leverage content negotiation via `Accept` header. Configure `@ExceptionHandler` globally for consistent error payloads.
+  - **Avoid when:** You need server-rendered pages — use `@Controller` with a `ViewResolver` (Thymeleaf, JSP) instead.
+
+- **API versioning via URL path** — A breaking change to `GET /api/orders` requires supporting both old and new clients during a migration window.
+  - Create separate `@RestController` classes under `/api/v1/orders` and `/api/v2/orders`. After migration, remove v1 and set up redirect rules.
+  - **Avoid when:** The change is additive (new fields only) — extend the response DTO with `@JsonInclude(Include.NON_NULL)` instead.
+
+- **File upload with validation and progress** — A document management system accepts PDFs up to 500MB and must report upload progress.
+  - Use `MultipartFile` with `@RequestParam`. Configure `spring.servlet.multipart.max-file-size` and `max-request-size`. Return `202 Accepted` for async processing and provide a status endpoint.
+  - **Avoid when:** Files are larger than 500MB — consider presigned S3 URLs or chunked uploads outside the request thread.
+
+- **Audit logging via HandlerInterceptor** — A fintech app must log every request (method, URI, status, duration, user) for compliance.
+  - Implement `HandlerInterceptor` — `preHandle` captures the start time and user context, `afterCompletion` records the result and duration. No controller code changes needed.
+  - **Avoid when:** You only need to log errors — use `@ControllerAdvice` + `@ExceptionHandler` for a simpler, error-focused solution.
+
+- **CORS configuration for cross-origin SPA clients** — A React frontend on `app.example.com` needs to call APIs on `api.example.com:8080`.
+  - Use `@CrossOrigin` on controllers or define a global `WebMvcConfigurer.addCorsMappings()` to allow specific origins, methods, and headers.
+  - **Avoid when:** The frontend is served from the same origin — CORS is unnecessary and adds risk if misconfigured.
+
+---
+
 ## Scenario-Based Questions
 
 - **Q: You are building a REST API for an e-commerce platform. A `GET /api/orders` endpoint that previously returned 20 fields now needs to return 35 fields. Some are N+1-loaded from lazy associations. The response time has grown from 200ms to 4s. How do you fix this without breaking existing clients?**

@@ -83,6 +83,28 @@
 - Aggregation window: 30 seconds — notifications within the window are grouped
 - Reduces push notification volume by 90% while keeping users informed
 
+## Use Cases
+
+- **Push notifications for mobile apps** — iOS (APNS) and Android (FCM) notifications for engagement, alerts, and reminders
+  - Service sends targeted push notifications via platform-specific gateways. Batched delivery respects rate limits. Handles device token refresh and unregistered devices.
+  - **Avoid when:** the user is actively using the app — consider in-app notifications or WebSocket delivery instead of push.
+
+- **Email notification delivery** — transactional emails (order confirmations, password resets) and marketing campaigns
+  - Email sending via SMTP or third-party services (SendGrid, SES). Rate limiting prevents blacklisting. Template engine renders per-user content.
+  - **Avoid when:** email is not time-sensitive — batch in a daily digest to reduce sending volume and cost.
+
+- **SMS and WhatsApp messaging** — time-sensitive alerts (OTP codes, delivery status, appointment reminders)
+  - Integration with Twilio or similar providers. Rate limits per number and per campaign. Delivery status callbacks for tracking.
+  - **Avoid when:** the message can be delivered via push or email — SMS is expensive and should be reserved for high-priority or authentication messages.
+
+- **In-app notification feed** — social media likes, comments, follows, or system announcements shown inside the app
+  - Notification feed stored in database. Real-time delivery via WebSocket for active users. Pull-based loading for offline users when they reconnect.
+  - **Avoid when:** notifications must be delivered to the user regardless of app state — combine with push notification fallback.
+
+- **Notification batching and preference management** — daily digest emails, notification silencing, or per-channel opt-in/opt-out
+  - Users configure which notification types they want and how often. Batched notifications reduce volume (e.g., "You have 5 new messages") while keeping users informed.
+  - **Avoid when:** every notification is critical — all critical notifications should bypass batching and be delivered immediately.
+
 ## Scenario-Based Questions
 
 **Q: A celebrity joins your platform and 1 million users follow them. When the celebrity posts, your notification system tries to send 1 million push notifications simultaneously. APNS and FCM start returning 429 errors. What do you do?**

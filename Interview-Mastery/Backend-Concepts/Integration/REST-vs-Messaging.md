@@ -97,6 +97,26 @@ public class OrderProcessingConsumer {
 
 **Resolution:** Use event-driven CQRS. Each service publishes events for every state change (order placed, payment completed, error occurred). A dashboard projection service consumes all events and maintains materialized views of current metrics. The dashboard queries these pre-computed views via REST with sub-10ms response times.
 
+## Use Cases
+
+- Choosing between REST and messaging depends on whether the caller needs an immediate response, how tolerant the system is to temporal coupling, and whether load leveling is required.
+
+- **Payment processing** — synchronous validation + authorization, asynchronous fulfillment
+  - When to use: The customer needs immediate confirmation that the payment was authorized (sync via REST). Downstream steps (capture, settlement, receipt email) happen asynchronously via messaging. This hybrid gives the user a fast response while the backend processes at its own pace. Example: an e-commerce checkout where `POST /api/payments/authorize` returns a token synchronously, then a Kafka event triggers the actual capture and fulfillment pipeline.
+  - **Avoid when:** The entire payment flow completes in under 200ms and there's no need for decoupling — keep it all synchronous.
+
+- **Real-time vs batch workloads** — separating time-sensitive from background processing
+  - When to use: Some operations must complete immediately (user login, search results) — use REST. Others can be deferred (email notifications, report generation, data sync) — use messaging. Example: a ride-sharing app where finding nearby drivers is synchronous (REST) but sending the receipt and rating reminder is asynchronous (messaging).
+  - **Avoid when:** There's no clear distinction between time-sensitive and background work — adding async infrastructure prematurely increases complexity.
+
+- **Decoupling microservices** — preventing failures in one service from blocking others
+  - When to use: Service A initiates a workflow that involves Service B, C, and D, but A doesn't need their responses immediately. Messaging buffers requests, allowing B, C, and D to process independently and at their own rate. Example: when a user uploads a video, the upload service publishes `VideoUploaded` and the transcoding, thumbnail, and notification services consume it asynchronously — if transcoding is slow, uploads are not affected.
+  - **Avoid when:** Service A needs the response from B before it can proceed (e.g., validating a credit card before creating an order) — synchronous REST is required.
+
+- **Workflow orchestration** — coordinating multi-step processes across services
+  - When to use: A business process spans multiple services with conditional logic and error handling. An orchestrator (REST) or choreography (messaging) coordinates the steps. Messaging-based choreography is better for long-running workflows where each step takes minutes or hours. Example: an order saga where `OrderPlaced` → `InventoryReserved` → `PaymentProcessed` → `ShipmentCreated` is orchestrated via events, allowing each step to take seconds or minutes without holding HTTP connections open.
+  - **Avoid when:** The workflow has two steps and completes instantly — synchronous orchestration is simpler to implement and debug.
+
 ---
 
 ## Scenario-Based Questions

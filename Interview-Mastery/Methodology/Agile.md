@@ -111,6 +111,28 @@
 ### Scenario 3: Velocity Drop After Microservices Migration
 - A team's velocity dropped 50% after migrating from a monolith to microservices. Sprints used to deliver 30 story points; now they deliver 12. **Diagnosis:** The team underestimated the learning curve for new tech (Docker, Kubernetes, event-driven patterns). DevOps overhead (CI/CD pipelines, service discovery, monitoring) was not accounted for. **Fix:** Dedicate one sprint to infrastructure (observability, deployment automation, developer experience). Reduce Definition of Done temporarily. Track velocity trend over 4 sprints — it should recover as the team gains proficiency.
 
+## Use Cases
+
+- **Startup product development** — building a new product where requirements are uncertain and change rapidly
+  - Short iterations (1–2 weeks) deliver incremental value. Customer feedback after each iteration adjusts priorities. Pivot based on validated learning.
+  - **Avoid when:** requirements are fixed and well-understood — Waterfall or a phased approach provides predictable plans and budgets.
+
+- **Legacy system modernization** — incrementally rewriting or refactoring a large legacy system
+  - Each sprint replaces a small slice of functionality. Continuous delivery of working software. Avoid big-bang rewrites. Risk reduction through incremental deployment.
+  - **Avoid when:** the legacy system is stable and not causing business pain — "if it ain't broke, don't fix it."
+
+- **Distributed teams across timezones** — coordinating development across San Francisco, London, Bangalore, and Sydney
+  - Async daily updates via Slack for non-overlap hours. Rotating standup times. Recorded sprint reviews and retros. Quarterly face-to-face.
+  - **Avoid when:** the team is co-located — synchronous communication is more efficient; distributed practices add overhead.
+
+- **Maintenance and support teams** — handling bug fixes, tech debt, and operational improvements for an existing product
+  - Kanban-style continuous flow (no fixed sprint cadence) for unpredictable work. Separate streams for planned work and urgent support. SLOs for response time.
+  - **Avoid when:** the work is entirely project-based with clear scope — Scrum with sprint goals organizes project work effectively.
+
+- **Cross-functional feature teams** — teams with design, backend, frontend, QA, and DevOps collaborating on features
+  - End-to-end ownership of features. Vertical slicing delivers user value in each sprint. No handoffs between teams. All skills needed are within the team.
+  - **Avoid when:** specialists are shared across teams (e.g., one DBA for 5 teams) — a component team for database work may be necessary.
+
 ---
 
 ## Scenario-Based Questions

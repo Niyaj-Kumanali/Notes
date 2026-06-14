@@ -363,6 +363,42 @@ for (String line : lines) {
 
 ---
 
+## Use Cases
+
+- Reach for `Optional` when you are designing a method return type and need to tell callers "this call may not produce a result" in a way the compiler enforces. It sits in a specific sweet spot: the result may be absent, and when it is absent it means the same thing every time. If absence has multiple meanings (not found vs. forbidden vs. rate-limited), a sealed result type or dedicated exception is clearer.
+
+- **Repository and service layer returns** — `findById(id)`, `findByEmail(email)`, `lookupConfig(key)`
+  - The most natural use: a query that might return nothing. `Optional` forces every caller to handle the absent case, eliminating the `NullPointerException` that occurs when a developer forgets to check for null.
+  - Example pattern: `userRepository.findById(id).orElseThrow(() -> new UserNotFoundException(id))` at the service boundary.
+  - **Avoid when:** the method has multiple failure modes (not found, forbidden, expired). Use a result type like `sealed interface UserResult { record Found(User u); record NotFound(); record Forbidden(); }` instead.
+
+- **API boundary (controller layer)** — mapping absence to HTTP status codes
+  - Use `orElseThrow` with a custom exception at the boundary between your domain and the outside world. A resource that returns `Optional<User>` gets converted to 404 (not found) or 200 (found) automatically by Spring's `ResponseEntity` or JAX-RS's `Response`.
+  - Pattern: `return userService.find(id).map(ResponseEntity::ok).orElse(ResponseEntity.notFound().build())`.
+  - **Avoid when:** the API contract says the response always includes the field (e.g., `"balance": 0` instead of omitting the field). Null or a default value is clearer in that case.
+
+- **Chaining with flatMap** — traversing nullable object graphs
+  - When every step of a chain may be absent (`getUser()` → `getAddress()` → `getCity()`), `flatMap` keeps the chain functional and short-circuits on the first empty result.
+  - `Optional` replaces deeply nested `if (user != null && user.getAddress() != null ...)` blocks with a flat pipeline.
+  - **Avoid when:** the chain has side effects at each step (logging, metrics, audit). Use `ifPresent` with explicit null checks instead to make the side effects visible.
+
+- **orElseGet vs. orElse** — choosing the right default
+  - `orElse(default)` evaluates the default eagerly — always, even when the value is present. If the default is expensive (a database call, network request, or large object allocation), this cost is paid on every invocation.
+  - `orElseGet(supplier)` evaluates lazily — the supplier runs only when the value is absent. Use this when the default is non-trivial to compute.
+  - Rule of thumb: use `orElse` for constants, primitives, and pre-computed values. Use `orElseGet` for everything else.
+  - **Avoid when:** the default computation has a timeout or deadline that should start ticking on absence, not on invocation.
+
+- **Stream processing with flatMap(Optional::stream)** — filtering and unwrapping in one pass
+  - When a stream of items produces `Optional` results (e.g., parsing a list of strings where some may be invalid), `flatMap(Optional::stream)` keeps only present values and unwraps them in a single operation — no separate `filter(Optional::isPresent).map(Optional::get)` chain.
+  - **Avoid when:** you need to report or log which items were skipped. Handle the absent case explicitly with `map` and a side-effect instead.
+
+- **Avoid Optional in fields, method parameters, and collections**
+  - `Optional` is not serializable — using it in a field breaks Java serialization, JPA, and most serialization frameworks silently.
+  - `Optional` as a parameter makes the API harder to read and leads to `Optional.ofNullable(arg)` at every call site. Method overloading or `@Nullable` annotations are clearer.
+  - `Optional` in a collection (`List<Optional<T>>`) defeats the purpose of the container — every consumer must unwrap each element. Filter out empty values before storing.
+
+---
+
 ## Scenario-Based Questions
 
 **Q: A method returns `Optional<BigDecimal>` for a user's account balance. The caller writes `BigDecimal balance = account.getBalance().orElse(BigDecimal.ZERO)`. The balance is never actually zero in the system — zero means "no account." The UI shows "Balance: $0.00" for users who have never created an account, causing customer confusion. What is the design error?**

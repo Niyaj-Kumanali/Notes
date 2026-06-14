@@ -265,6 +265,28 @@ class DatabaseResilienceTest {
 
 Toxiproxy sits between the application and PostgreSQL, injecting latency or cutting the connection entirely. The `latency` toxic simulates a slow database (5s response time) to test client-side timeouts. The `connectionCut` toxic simulates a network partition. The circuit breaker test verifies that after enough failures, the application stops calling the database entirely (fail-fast). This tests resilience patterns without needing actual network failures.
 
+## Use Cases
+
+- **Integration testing with real databases** — testing repository code against PostgreSQL, MySQL, or SQL Server
+  - `@Container PostgreSQLContainer` spins up a disposable database instance. Tests connect to it via JDBC. Schema is created by Flyway/Liquibase or Hibernate DDL.
+  - **Avoid when:** the database query is trivial (simple CRUD) — H2 in-memory is faster for basic tests; use Testcontainers for realistic behavior.
+
+- **Testing with message brokers** — verifying producer-consumer patterns with Kafka or RabbitMQ
+  - `KafkaContainer` creates a real Kafka broker. Tests publish messages and verify consumption. Covers serialization, partition assignment, and offset management.
+  - **Avoid when:** message handling logic is simple — an in-memory event bus mock is sufficient for unit testing.
+
+- **Integration testing with dependent services** — testing against Redis, Elasticsearch, or other data stores
+  - `GenericContainer` with the official Docker image. Configure via environment variables and exposed ports. Use `@Testcontainers` class-level annotation for lifecycle management.
+  - **Avoid when:** the service is expensive to containerize or has complex initialization — consider a dedicated test environment for such services.
+
+- **Resilience testing with Toxiproxy** — simulating network failures, latency, and connection drops
+  - `ToxiproxyContainer` sits between the app and a dependency. Inject latency, cut connections, or simulate packet loss. Test circuit breakers, retries, and timeouts.
+  - **Avoid when:** resilience logic is trivial (no retries, no circuit breakers) — such tests add complexity without value.
+
+- **Database migration compatibility** — testing migrations against the production database type
+  - Spin up a container with the exact production database version. Run migrations programmatically. Verify schema and test queries. Catch incompatibilities early.
+  - **Avoid when:** the migration is purely additive (new columns, no data transformations) — H2 may be sufficient for schema validation.
+
 ---
 
 ## Scenario-Based Questions

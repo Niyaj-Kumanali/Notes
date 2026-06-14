@@ -87,6 +87,28 @@ String token = Jwts.builder()
 
 **Resolution:** Switch from opaque tokens to JWTs signed with RS256. Each service fetches the public key from the JWKS endpoint once (caching for 24 hours). JWT validation is local and takes <1ms. The Auth Server is no longer in the request path — it only handles token issuance. Benefits: no network call for validation, no central bottleneck, each service can validate independently. Trade-off: token revocation is not immediate — valid until JWT's `exp`. For immediate revocation, use a Redis-based blacklist that each service checks in <5ms.
 
+## Use Cases
+
+- **Stateless authentication for microservices** — API gateways validating tokens across 20+ services
+  - Each service validates JWT locally using cached JWKS public keys (<1ms validation). No centralized session store or auth server bottleneck.
+  - **Avoid when:** instant token revocation is required — JWTs are valid until `exp`. Combine with short TTLs (15 min) and a distributed blacklist.
+
+- **OAuth 2.0 access tokens** — authorization for third-party applications or mobile apps
+  - JWT as the access token format allows resource servers to validate without calling the authorization server each time. Self-contained user claims and scopes.
+  - **Avoid when:** tokens are large (>8KB) and bandwidth is constrained — opaque tokens are more compact.
+
+- **Single sign-on (SSO) tokens** — cross-domain authentication across multiple applications in an organization
+  - ID tokens (OpenID Connect) carry user identity claims (name, email, roles). One login authenticates the user across all apps in the federation.
+  - **Avoid when:** applications have dramatically different security requirements — use separate issuers or audience restrictions per domain.
+
+- **Service-to-service authentication** — internal API calls between backend services
+  - JWT signed with a service account's private key. Each service validates the token's signature, issuer, and audience before accepting the request.
+  - **Avoid when:** services are in the same trust boundary (e.g., same Kubernetes cluster) — mutual TLS or network policies may be simpler.
+
+- **Information exchange with verifiable integrity** — password reset tokens, email verification links, or invitation links
+  - Signed JWT carries the user ID and purpose. The signature prevents tampering. Expiration limits the validity window.
+  - **Avoid when:** the payload contains sensitive data — encrypt the JWT (JWE) or use a server-side session reference instead.
+
 ---
 
 ## Scenario-Based Questions

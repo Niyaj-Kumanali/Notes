@@ -58,6 +58,31 @@
 
 - An organization uses a private Nexus repository for internal artifact storage. Developers publish snapshot builds to the Nexus snapshots repository via `mvn deploy`, and the release manager publishes release versions to the Nexus releases repository using the maven-release-plugin. settings.xml defines server credentials for both repositories, and a corporate mirror in settings.xml redirects all Maven Central requests through Nexus for caching and security scanning.
 
+## Use Cases
+
+Reach for Maven when you need a predictable, declarative build system that enforces conventions across a team or organization.
+
+- **Multi-module project coordination** — Maven's reactor build orders modules by dependency, compiling, testing, and packaging in a single command.
+  - Parent POM with `<dependencyManagement>` centralizes versions across dozens of modules.
+  - **Avoid when:** you need dynamic or conditional build logic; Gradle's DSL is more flexible.
+
+- **Standardized builds across teams** — Convention-over-configuration ensures every developer and CI system builds identically with `mvn clean install`.
+  - No scripting decisions — the lifecycle (validate → compile → test → package → verify → install → deploy) is fixed and well-understood.
+  - **Avoid when:** your build has unusual steps that don't fit the standard lifecycle phases.
+
+- **Publishing artifacts to a repository** — `mvn deploy` pushes versioned artifacts to Nexus/Artifactory with full metadata, enabling downstream consumption.
+  - Essential for library distribution across microservices or external consumers.
+  - **Avoid when:** you only need local builds with no artifact sharing.
+
+- **Reproducible CI/CD builds** — POM files and the Maven Wrapper (mvnw) pin exact plugin versions and Maven distributions for deterministic builds.
+  - Critical for audit compliance and debugging production issues.
+  - **Avoid when:** the team prioritizes fast, incremental builds over strict determinism.
+
+- **Microservice project scaffolding** — Multi-module POMs structure shared libraries, domain models, and service modules under one parent, enforcing consistent dependency versions.
+  - **Avoid when:** the project is a single-module application — Maven's boilerplate may be unnecessary overhead.
+
+---
+
 ## Scenario-Based Questions
 
 **Q: Your multi-module build fails at runtime with a "Duplicate class found" error, but compilation and tests pass without issues. How do you diagnose and fix the problem?**

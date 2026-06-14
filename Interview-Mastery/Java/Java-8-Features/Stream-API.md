@@ -439,6 +439,30 @@ public class MetricsAggregator {
   - The grouping is done by the framework rather than manual `Map.computeIfAbsent()` calls, reducing boilerplate.
   - The cost is two passes over the same data — acceptable for 24K elements (sub-millisecond each), but for 24M elements, a single pass with a custom collector would be warranted.
 
+## Use Cases
+
+- Reach for the Stream API when you need to process collections declaratively with operations like filter, map, reduce, and collect. Streams encourage a pipeline style that separates what you do from how you iterate.
+
+- **Filter-map-reduce pipelines** — transforming data in stages
+  - The most common pattern: `list.stream().filter(condition).map(transformer).collect(collector)`. Each stage is a separate, testable, and potentially parallelizable operation. More readable than nested loops with mutable accumulators.
+  - **Avoid when:** the pipeline has more than 5 intermediate operations — break it into two streams or extract intermediate methods for readability.
+
+- **Finding and matching** — checking for existence
+  - Use `anyMatch()`, `allMatch()`, `noneMatch()` to test conditions without materializing the entire collection. These are short-circuiting — they stop processing as soon as the answer is known.
+  - **Avoid when:** you need the matching element itself — use `filter().findFirst()` or `filter().findAny()` which return `Optional`.
+
+- **Aggregation with reduce** — combining elements into one value
+  - Use `reduce(identity, accumulator, combiner)` for custom aggregations that don't fit `sum()`, `count()`, or `collect()`. The combiner merges partial results in parallel.
+  - **Avoid when:** a built-in collector exists — `Collectors.summingInt()`, `Collectors.joining()` are more intention-revealing.
+
+- **Parallel processing** — leveraging multicore CPUs
+  - Replace `.stream()` with `.parallelStream()` when your pipeline is CPU-bound, stateless, and operates on large datasets (10K+ elements). Splits the source across the common fork-join pool.
+  - **Avoid when:** the source is inherently sequential (network I/O, file I/O) or operations have state — parallelizing a bottlenecked or stateful pipeline slows it down.
+
+- **Infinite streams and lazy generation** — unbounded sequences
+  - Use `Stream.iterate(seed, unaryOperator)` or `Stream.generate(supplier)` for sequences where the length is data-driven (e.g., reading from a socket, generating IDs). Pair with `limit()` or `takeWhile()` to make them finite.
+  - **Avoid when:** the data fits in memory — a collection is simpler and supports reuse (streams can be traversed only once).
+
 ---
 
 ## Scenario-Based Questions

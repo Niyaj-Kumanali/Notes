@@ -95,6 +95,28 @@
 - They built an ACL that wrapped the monolith's SOAP APIs into REST endpoints, allowing new microservices to call legacy functionality without depending on the monolith's internal model.
 - The ACL became a bottleneck after 2 years because every new feature required ACL changes; they eventually split the ACL into per-domain ACL services.
 
+## Use Cases
+
+- Migration to microservices is a high-risk, high-reward endeavor. These patterns help de-risk the process and guide when extraction is worth the cost.
+
+- **Incrementally extracting high-change-frequency modules** — separating the parts of the monolith that change most often
+  - When to use: Certain modules (payments, orders, user profiles) change frequently and their deployments require the entire monolith to be redeployed. Extracting these into independent services reduces deployment risk and cycle time. Example: extracting the `payment` module from an e-commerce monolith first because payment logic changes every sprint (new gateways, fraud rules, compliance updates), while the catalog module changes quarterly.
+  - **Avoid when:** The module's business logic is tightly coupled to the rest of the monolith through shared database tables and transactions — decouple the data first.
+
+- **Replatforming legacy systems** — modernizing a legacy monolith without a full rewrite
+  - When to use: The legacy system works but is hard to scale, deploy, or maintain. Use the strangler fig pattern to build new microservices around the legacy system, routing traffic incrementally. Example: a 15-year-old Java travel booking system where the booking engine is extracted first as a new Go microservice, with a proxy routing `/api/bookings/*` to the new service while all other traffic still hits the monolith.
+  - **Avoid when:** The legacy system is stable, meeting business needs, and there's no immediate pain — the migration cost may not be justified.
+
+- **Introducing CI/CD for independent deployability** — enabling teams to deploy without coordinating
+  - When to use: The monolith's deployment process is slow (hours) and risky (touching many modules at once). Extracting services lets each team own its CI/CD pipeline and deploy independently. Example: after extracting the `recommendation` service, the ML team can deploy new models on their own schedule (multiple times per day) without waiting for the monolith's weekly release train.
+  - **Avoid when:** The team is not ready to manage the operational burden of running multiple services (monitoring, logging, deployment pipelines) — build DevOps maturity first.
+
+- **Scaling team ownership** — aligning service boundaries with team structure (Conway's Law)
+  - When to use: The organization is growing and multiple teams need to work independently. Extract services such that each service is owned by one team, with clear APIs as contracts between teams. Example: an online marketplace where the "Payments" team owns the payment service, the "Fulfillment" team owns the shipping service, and the "Search" team owns the search service — each team sets its own roadmap and deploys independently.
+  - **Avoid when:** The monolith team is fewer than 10 developers — the coordination overhead of microservices (API compatibility, integration testing, shared schemas) may exceed the monolith's merge conflicts.
+
+---
+
 ## Scenario-Based Questions
 
 **Q: Your team extracts the payment service from the monolith. After extraction, some orders are processed correctly but others show "payment pending" indefinitely. What is the likely cause?**

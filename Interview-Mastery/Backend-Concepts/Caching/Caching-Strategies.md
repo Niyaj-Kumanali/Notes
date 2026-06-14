@@ -122,6 +122,28 @@ public class ProductCacheService {
 
 **Resolution:** Use write-through cache invalidation. When the user service updates a user's role, it publishes a `UserRoleChanged` event. A cache service consumes the event and invalidates the session cache for that user. The next request loads the fresh session from the database. For critical consistency requirements, use a CQRS approach where writes go to both the database and cache synchronously.
 
+## Use Cases
+
+- **Cache-Aside for read-heavy APIs** — product catalogs, user profiles, or reference data
+  - Application checks cache first; on miss, loads from DB and populates cache. Simple, resilient, and the most common pattern.
+  - **Avoid when:** data changes frequently and stale reads are unacceptable — use write-through instead.
+
+- **Write-Through for critical config** — feature flags, pricing rules, or access control policies
+  - Every write updates cache and DB synchronously, ensuring consistency at the cost of higher write latency.
+  - **Avoid when:** write volume is high — write-behind provides better throughput.
+
+- **Cache stampede prevention for hot keys** — trending products, live event pages, or breaking news
+  - Use mutex locks (distributed lock via Redis) or stale-while-revalidate so only one process regenerates the cache on expiry.
+  - **Avoid when:** key set is large and uniform — stampede risk is low.
+
+- **Negative caching for non-existent keys** — user lookups by email, SKU validation, or ID checks
+  - Cache a short-lived "not found" entry (TTL 30–60s) to prevent cache penetration from hitting the database repeatedly.
+  - **Avoid when:** the set of valid keys is bounded and enumerable — a Bloom filter is more space-efficient.
+
+- **Multi-tier caching for scale** — high-traffic e-commerce, social feeds, or recommendation engines
+  - L1 (in-app, small, fast) for hottest keys, L2 (Redis/Memcached, larger) for warm keys. Reduces L2 load and network round-trips.
+  - **Avoid when:** cache coherence is critical — multi-tier complicates invalidation.
+
 ---
 
 ## Scenario-Based Questions

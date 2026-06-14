@@ -77,6 +77,28 @@
 - Payment at kiosk before returning to car or at exit gate
 - Lost ticket handling with verification (license plate lookup)
 
+## Use Cases
+
+- **Multi-level parking garage management** — commercial parking structures with multiple floors, entry/exit gates, and payment kiosks
+  - System tracks spot occupancy in real-time. Displays available spots per floor at entrance. Handles peak-hour traffic with queue management at gates.
+  - **Avoid when:** parking is unstructured (open lots, no gates) — a simple ticket-based system without spot-level tracking is cheaper.
+
+- **Airport parking** — long-term and short-term zones with different rates, lost ticket handling, and valet services
+  - Zone-specific pricing and availability. License plate lookup for lost tickets. Reservation system for guaranteed spots during holiday seasons.
+  - **Avoid when:** the lot is small (<50 spots) — manual tracking with a whiteboard is simpler and more cost-effective.
+
+- **Event parking** — concert venues, stadiums, or convention centers with pre-paid reservations
+  - Pre-booking with time slots. Variable pricing based on event proximity. QR code validation at entry gates. Overflow lot management for sell-out events.
+  - **Avoid when:** parking is free and first-come-first-served — a simple count of available spots is sufficient.
+
+- **Residential/commercial building parking** — apartment complexes or office buildings with assigned spots and visitor parking
+  - Tenant spot assignments with vehicle registration. Visitor parking with time limits. Guest pass generation via web/mobile app.
+  - **Avoid when:** parking is unassigned and first-come — a simple permit system without digital assignment is cheaper.
+
+- **Automated valet parking systems** — robotic parking where a machine parks the car in a dense storage grid
+  - System tracks exact car location in the grid. Optimizes placement for retrieval time. Handles staging area for drop-off and pick-up.
+  - **Avoid when:** the cost of automation exceeds the land value — traditional parking is more economical for most locations.
+
 ## Scenario-Based Questions
 
 **Q: During peak hours, 3 cars arrive at 3 entry gates simultaneously. All 3 gates see the same spot as available and assign it. How do you fix this?**

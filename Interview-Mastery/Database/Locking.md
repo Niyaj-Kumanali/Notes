@@ -281,6 +281,30 @@ public class LikeService {
 }
 ```
 
+## Use Cases
+
+Reach for database locks when concurrent transactions must coordinate access to shared resources to prevent data corruption.
+
+- **Preventing lost updates on counters** — Use optimistic locking (`@Version`) to detect conflicts when two threads increment a like count. The second committer gets a `OptimisticLockException` and retries.
+  - Good for low-to-moderate contention scenarios.
+  - **Avoid when:** contention is very high — frequent retries degrade throughput; use pessimistic locking instead.
+
+- **Reserving inventory or seats** — Pessimistic locking with `SELECT ... FOR UPDATE SKIP LOCKED` locks only selected rows, allowing other transactions to book different seats concurrently.
+  - `SKIP LOCKED` prevents queueing — a transaction simply skips rows locked by others.
+  - **Avoid when:** the reservation window is long — holding row locks for minutes blocks other transactions.
+
+- **Deadlock prevention** — Access tables in a consistent, documented order (e.g., always update Account A before Account B) to avoid circular wait conditions.
+  - **Avoid when:** the access pattern across tables is unpredictable — consider deadlock detection with retry + backoff.
+
+- **Application-level locking** — Use `java.util.concurrent.locks.ReentrantLock` for critical sections that span non-database resources (e.g., a file or an external API call).
+  - **Avoid when:** the critical resource is a database row — database-level locking is simpler and safer.
+
+- **High-contention queue processing** — `SELECT ... FOR UPDATE SKIP LOCKED` pops messages from a queue without blocking workers on already-locked rows.
+  - Each worker locks and processes exactly one unprocessed message.
+  - **Avoid when:** the queue is very small — polling with a simple processed flag and no lock may be sufficient.
+
+---
+
 ## Scenario-Based Questions
 
 - **Q:** You are building a concert ticket booking system with 10,000 concurrent users. Seats are limited. How do you prevent overselling while maintaining throughput?

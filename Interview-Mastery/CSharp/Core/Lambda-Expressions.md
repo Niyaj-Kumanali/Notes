@@ -225,6 +225,28 @@ var pipeline = new ImagePipeline()
 var result = pipeline.Process(sourceImage);
 ```
 
+## Use Cases
+
+- **Functional composition in LINQ** — passing predicates, selectors, and aggregators to LINQ methods
+  - Lambda expressions (`x => x.Property > 5`) are the standard way to define LINQ query logic. Concise inline syntax for simple transformations.
+  - **Avoid when:** the logic spans multiple lines or has side effects — a named method or local function improves readability.
+
+- **Event handlers and callbacks** — subscribing to events with minimal boilerplate
+  - Inline lambda handlers (`button.Click += (s, e) => DoSomething();`) avoid creating separate handler methods for trivial logic.
+  - **Avoid when:** the handler must be unsubscribed later — store the delegate in a field for removal with `-=`.
+
+- **Asynchronous task continuation** — defining work to run after a task completes
+  - Lambda passed to `ContinueWith` or used within `async` anonymous methods. Captures closure variables for the continuation's context.
+  - **Avoid when:** the continuation is complex — use `await` with a named async method instead.
+
+- **Pipeline/chaining patterns** — sequential processing of data through transform steps
+  - Compose lambdas into a processing pipeline. Each step is a lambda that transforms the output of the previous step. Enables clean separation of concerns.
+  - **Avoid when:** the pipeline has branching logic (if/else) — a strategy pattern or visitor pattern is more maintainable than conditional lambdas.
+
+- **Capturing local state in delegates** — remembering values from the enclosing scope when the delegate executes later
+  - Closure captures variables by reference. Enables event handlers and callbacks that carry context without needing explicit parameter passing.
+  - **Avoid when:** the captured variable changes before the delegate executes — capture a copy in a local variable to avoid unintended aliasing.
+
 ---
 
 ## Scenario-Based Questions

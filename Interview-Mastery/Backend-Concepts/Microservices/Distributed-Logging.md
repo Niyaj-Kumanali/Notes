@@ -116,6 +116,28 @@
 - They complement each other: traces point you to the service and span where an error occurred, and logs provide the detailed context for that specific event.
 - Correlation IDs bridge the two: the trace ID is used as the correlation ID in logs, allowing seamless navigation between tracing UI (Jaeger, Zipkin) and logging UI (Kibana, Grafana).
 
+## Use Cases
+
+- Distributed logging turns a sea of disconnected log files into a searchable, correlatable system. These patterns cover when and how to invest in centralized logging infrastructure.
+
+- **Debugging cross-service request flows** — tracing a single user request across multiple services
+  - When to use: A customer reports an error, but the issue spans three services (API gateway → order service → payment service). Without correlation IDs, you'd grep each service's logs independently. With a correlation ID propagated via headers, you search one query in Kibana and see the entire request flow. Example: search `correlation_id:abc-123` in Kibana to see the gateway's 200 response, the order service's 2ms processing time, and the payment service's 500 error — pinpointing the failure in seconds.
+  - **Avoid when:** Your system is a single service — one `journalctl` or `tail -f` command suffices.
+
+- **Production incident investigation** — rapidly finding root cause across services during an outage
+  - When to use: An incident occurs and you need to understand what happened across the system. Centralized logging with structured JSON logs lets you filter by service, log level, time range, and error code in seconds. Example: when p99 latency spikes, query `level:ERROR AND service:payment-service` in the last 30 minutes to surface the failing database connection errors clustered around the incident timestamp.
+  - **Avoid when:** You have only 2–3 services and can SSH into each — a centralized log aggregator adds infrastructure cost for limited benefit.
+
+- **Audit trails and compliance** — maintaining immutable, searchable records of security-relevant events
+  - When to use: Regulations (SOC2, PCI-DSS, HIPAA) require tamper-proof audit logs of access to sensitive data. Centralized logging with write-once storage (S3 + Athena, immutable log streams) and access controls satisfies compliance requirements. Example: all `level:AUDIT` events (user login, data access, permission changes) are written to an S3 bucket with Object Lock enabled, queryable via Athena, and retained for 7 years.
+  - **Avoid when:** There are no compliance requirements — append-only logging is simpler and cheaper.
+
+- **Performance troubleshooting with traces and logs** — correlating slow requests with detailed log context
+  - When to use: A request is slow but you don't know which service caused the delay. Distributed tracing points to the slow span, and the correlation ID in the logs provides full contextual details (input parameters, database queries, cache hits/misses) for that specific request. Example: Jaeger trace shows the `payment-service` span took 4.2s; clicking the trace link in Kibana opens logs with `trace_id:xyz-789` showing the database query that timed out.
+  - **Avoid when:** All services respond in under 10ms — the overhead of correlation ID propagation and centralized logging may not reveal actionable insights.
+
+---
+
 ## Scenario-Based Questions
 
 - **Q: A critical production incident occurs overnight. The logs are so noisy with DEBUG messages that the relevant ERROR entries are buried. What went wrong and how do you prevent it?**

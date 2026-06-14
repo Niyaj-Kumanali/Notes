@@ -68,6 +68,28 @@
 - When a cache node fails, only content mapped to that range is fetched from origin
 - New nodes are gradually populated without a global cache flush
 
+## Use Cases
+
+- **Distributed caching** — sharding cache keys across a Memcached or Redis cluster
+  - Adding or removing cache nodes only moves keys in the affected range (1/N fraction), not all keys. Minimizes cache stampede during scaling.
+  - **Avoid when:** cache size is small enough to fit on one node — a single-node cache with replication is simpler.
+
+- **Database sharding** — partitioning data across multiple database instances
+  - Consistent hashing on shard key (user_id, tenant_id) distributes data evenly. Adding a new shard only remaps a fraction of data, not a full rehash.
+  - **Avoid when:** data can be partitioned naturally (by region, by date range) — range-based sharding is simpler for time-series data.
+
+- **CDN content routing** — mapping content URLs to edge cache servers
+  - When a cache node fails, only content mapped to that node's range is fetched from origin. New nodes are gradually populated without a global cache flush.
+  - **Avoid when:** your CDN is a managed service (CloudFront, CloudFlare) — the provider handles routing transparently.
+
+- **Load-balanced task distribution** — distributing processing tasks across worker nodes
+  - Workers claim responsibility for hash ranges. When a worker joins or leaves, only its tasks are redistributed. Minimal task reassignment.
+  - **Avoid when:** tasks have heterogeneous processing times — consistent hashing doesn't account for load; use weighted or least-loaded distribution.
+
+- **Avoiding hot spots with virtual nodes** — preventing a few physical nodes from handling disproportionate traffic
+  - Each physical node is represented by multiple virtual nodes on the ring. This smooths out load distribution, especially with small clusters.
+  - **Avoid when:** the cluster is large (>100 nodes) — the law of large numbers distributes load evenly without virtual nodes.
+
 ## Scenario-Based Questions
 
 **Q: Your distributed cache experiences high latency because one node handles 40% more requests than others. How do you redistribute the load?**

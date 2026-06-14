@@ -230,6 +230,28 @@ public class WorkStealingScheduler
 }
 ```
 
+## Use Cases
+
+- **Parallel CPU-bound computation** — image processing, data analysis, or video encoding on multi-core machines
+  - `Parallel.For`/`Parallel.ForEach` partition data across threads automatically. `PLINQ` with `AsParallel()` for declarative parallel processing.
+  - **Avoid when:** the work is I/O-bound — async/await frees threads instead of blocking them.
+
+- **Background task processing** — periodic cleanup, log rotation, or cache maintenance
+  - `BackgroundService` in ASP.NET Core runs long-lived background loops. `System.Threading.Timer` for periodic execution. Use `CancellationToken` for graceful shutdown.
+  - **Avoid when:** the task is triggered by an external event — use a message queue or channel to signal instead of polling.
+
+- **Thread-safe shared state** — updating counters, caches, or shared data from multiple threads
+  - `Interlocked` for atomic operations. `lock` statement for critical sections. `ReaderWriterLockSlim` for read-heavy, write-infrequent access.
+  - **Avoid when:** the state can be partitioned — thread-local storage or `ThreadLocal<T>` avoids synchronization entirely.
+
+- **Producer-consumer workloads** — logging, metrics collection, or work dispatch from request handlers
+  - `BlockingCollection<T>` or `Channel<T>` provides thread-safe producer-consumer queues. Bounded capacity provides backpressure. Multiple consumers process items in parallel.
+  - **Avoid when:** order doesn't matter and items are independent — `Parallel.ForEach` with `Partitioner` distributes items without explicit queueing.
+
+- **Work stealing for dynamic load** — task parallelism where subtasks create more subtasks
+  - `Task` with `TaskCreationOptions.AttachedToParent`. The thread pool's work-stealing queue balances load across worker threads automatically.
+  - **Avoid when:** the workload is predictable and stable — `Parallel.For` with static partitioning simplifies load distribution.
+
 ---
 
 ## Scenario-Based Questions

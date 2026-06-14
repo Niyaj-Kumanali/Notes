@@ -340,6 +340,28 @@ class OrderEventTest {
 
 Mockito's `timeout()` verifier polls the mock until the verification passes or the timeout expires. This is more reliable than `Thread.sleep()` which either waits too long (slow tests) or not long enough (flaky tests). The `timeout(2000)` means "wait up to 2 seconds, but return as soon as the method is called." For negative verification, `timeout(1000).times(0)` waits up to 1 second to confirm the method was NEVER called.
 
+## Use Cases
+
+- **Isolating unit tests from dependencies** — testing a service class without real database or API calls
+  - `@Mock` creates implementations that return default values. `when(mock.method()).thenReturn(value)` defines behavior. `verify(mock).method()` checks interactions.
+  - **Avoid when:** the dependency is simple and side-effect-free — use a real or fake implementation instead of a mock for simpler maintenance.
+
+- **Stubbing external API responses** — simulating different HTTP response scenarios (200, 404, 500, timeout)
+  - `when(restTemplate.exchange(...)).thenReturn(responseEntity)` for success. `thenThrow(new HttpClientErrorException(...))` for errors. Test retry and fallback logic.
+  - **Avoid when:** the mock becomes too complex — use an HTTP test server (WireMock, MockWebServer) instead of mocking `RestTemplate` directly.
+
+- **Verifying side effects** — confirming that a method was called with the right arguments
+  - `verify(emailService, times(1)).send(order.getCustomerEmail(), "Order Confirmation")`. Check exact parameters, call count, and order of invocations.
+  - **Avoid when:** the test asserts the result, not the implementation — prefer state verification over behavior verification for better refactoring resilience.
+
+- **Argument captors for complex assertions** — capturing method arguments for detailed inspection
+  - `ArgumentCaptor<EmailRequest>.class` captures the argument passed to a mock method. Inspect all fields of the captured object. Useful when the argument is constructed inside the method under test.
+  - **Avoid when:** the argument is a simple value — direct `verify` with `eq()` matchers is simpler and more readable.
+
+- **Spying on real objects** — testing legacy code that doesn't use dependency injection
+  - `@Spy` creates a partial mock: real methods execute but can be stubbed selectively. Useful for testing specific methods without rewriting the class to extract dependencies.
+  - **Avoid when:** you control the code — refactor to use dependency injection instead of relying on spies for testability.
+
 ---
 
 ## Scenario-Based Questions

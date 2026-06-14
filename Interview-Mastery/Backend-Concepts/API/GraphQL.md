@@ -331,6 +331,26 @@ public class OrderSubscriptionController {
 
 WebSocket configuration: enable heartbeats every 15 seconds (Spring's `WebSocketHandler`), set max idle timeout to 60 seconds, and ensure the load balancer/proxy is configured to not drop long-lived connections.
 
+## Use Cases
+
+- GraphQL excels when clients have diverse or evolving data requirements and when over-fetching / under-fetching with REST becomes painful. These patterns cover the most common entry points.
+
+- **Complex data aggregation across multiple sources** — a single client screen that needs data from 5+ backend services
+  - When to use: A mobile feed or dashboard page displays data that lives in different services (user profile, posts, comments, likes, recommendations). GraphQL resolves all in one round trip with a single query. Example: a social media feed query that fetches posts, author avatars, comment counts, and whether the current user liked each post — all in one request.
+  - **Avoid when:** The UI maps trivially to individual REST resources — GraphQL's resolver complexity and query cost analysis overhead aren't justified.
+
+- **Mobile apps with varied data needs** — iOS and Android clients that need different subsets of the same data
+  - When to use: The mobile team controls its queries and can request exactly the fields needed, reducing payload size and bandwidth. Apollo Client with normalized caching handles offline and optimistic updates. Example: a news app where the home screen requests article titles and thumbnails, the detail screen requests full body and author bio, and the search screen requests snippets — all from the same API.
+  - **Avoid when:** All clients need the same data shape — REST's fixed responses are simpler to cache at the CDN level.
+
+- **Real-time updates with subscriptions** — live data pushed to clients over WebSockets
+  - When to use: Clients need to receive live updates (chat messages, stock prices, order status changes) without polling. GraphQL subscriptions maintain a persistent WebSocket connection and push only the fields the client specified. Example: a trading platform that subscribes to `stockPrice(symbol: "AAPL")` and receives real-time price updates.
+  - **Avoid when:** You need high-throughput, low-latency streaming — gRPC bidirectional streaming is more performant and has better backpressure support.
+
+- **Rapidly evolving frontend requirements** — when the client team iterates faster than the backend team
+  - When to use: The frontend adds new features that require different data combinations without waiting for backend endpoint changes. The frontend team writes its own queries; the backend only needs to maintain the schema and resolvers. Example: a product dashboard where the UI team adds a new "compare products" feature by writing a query that fetches price, reviews, and specs — no backend changes needed.
+  - **Avoid when:** The data access patterns are stable and unlikely to change — static REST endpoints reduce complexity.
+
 ---
 
 ## Scenario-Based Questions

@@ -367,6 +367,30 @@ public class CsvExporter {
   - The manual loop also allows field-level escaping that would require a library like OpenCSV to achieve with `PrintWriter`.
   - For production CSV exports with millions of records, the difference between buffered and unbuffered writes is seconds versus hours.
 
+## Use Cases
+
+- Reach for Java I/O streams when you need to read from or write to data sources or sinks (files, network sockets, pipes, in-memory buffers). The decorator pattern used in the stream classes lets you compose behavior like buffering, filtering, and compression.
+
+- **File I/O** — reading and writing text and binary files
+  - Use `Files.readString()` / `Files.writeString()` for small text files (≤ a few MB). Use `BufferedReader` / `BufferedWriter` with explicit charset for larger files or line-by-line processing. For binary files, use `FileInputStream` / `FileOutputStream` wrapped in `BufferedInputStream` / `BufferedOutputStream`.
+  - **Avoid when:** you are processing structured data (CSV, JSON) — use a dedicated parser instead of raw streams.
+
+- **Character encoding** — reading non-UTF-8 files correctly
+  - Never use `FileReader` or the no-arg `Files.readString()` for files that may not be UTF-8 — both use the platform default charset. Always specify the charset explicitly: `new FileReader(file, StandardCharsets.ISO_8859_1)`.
+  - **Avoid when:** all your files are guaranteed to be UTF-8 (e.g., internal logs) — being explicit is still safer.
+
+- **Buffering for performance** — wrapping unbuffered streams
+  - Wrapping a `FileInputStream` in a `BufferedInputStream` (default buffer size 8 KB) reduces system calls from one per byte to one per buffer. For writing millions of records, the difference is seconds vs. hours.
+  - **Avoid when:** you read or write small amounts of data (a few KB) infrequently — the buffer allocation overhead outweighs the savings.
+
+- **Object serialization** — persisting Java objects
+  - Use `ObjectOutputStream` / `ObjectInputStream` to serialize entire object graphs into a byte stream for caching, RMI, or deep cloning. Objects must implement `Serializable`.
+  - **Avoid when:** you need cross-language or long-term storage — JSON, Protocol Buffers, or Avro are more portable and schema-evolution friendly.
+
+- **Piping between streams** — connecting producer and consumer threads
+  - Use `PipedInputStream` / `PipedOutputStream` to connect two threads: one writes into the output end, another reads from the input end. This avoids intermediate files or buffers.
+  - **Avoid when:** both ends are in the same thread — a direct method call or an in-memory buffer avoids deadlock and is simpler.
+
 ---
 
 ## Scenario-Based Questions

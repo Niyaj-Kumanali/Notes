@@ -148,6 +148,28 @@ describe('GraphQL - getUsers', () => {
 ### Scenario 3: API Version Migration
 - You're deprecating v1 of your REST API (removing a deprecated field). Consumers have 30 days to migrate to v2. You need to ensure the v2 contract is correct and v1 deprecation is communicated properly. **Fix:** Maintain both versions with different URL prefixes. Use consumer-driven contract tests (Pact) where each consumer publishes their expectations. The provider verifies against all consumer contracts before deploying v1 deprecation. Test: v2 backward compatibility, correct `Deprecation` and `Sunset` headers on v1, proper 410 Gone after sunset date.
 
+## Use Cases
+
+- **Functional contract verification** — ensuring API endpoints return correct responses for given inputs
+  - Test each endpoint's status codes, response body structure, headers, and error responses. Automate with REST Assured (Java), Supertest (Node), or HttpClient (C#).
+  - **Avoid when:** the API is still in design phase — wait until the contract stabilizes to avoid constant test rewrites.
+
+- **Security testing** — verifying authentication, authorization, and input validation
+  - Test unauthenticated requests (should return 401). Test unauthorized access to endpoints (should return 403). Test SQL injection, XSS, and parameter tampering.
+  - **Avoid when:** security testing is covered by dedicated security tools (OWASP ZAP, Burp Suite) integrated into CI — API tests focus on functional correctness.
+
+- **Idempotency verification** — ensuring retries don't create duplicate resources
+  - Send the same request with the same idempotency key twice. Verify the second request returns the same result without creating duplicate state.
+  - **Avoid when:** the API doesn't support idempotency keys — test is irrelevant; advocate for adding idempotency support.
+
+- **API versioning compatibility** — verifying backward compatibility when releasing new API versions
+  - Run the same test suite against v1 and v2 endpoints. Verify v1 behavior hasn't changed. Test deprecation headers. Test sunset dates return proper errors.
+  - **Avoid when:** API versions are completely separate codebases — each version can have its own independent test suite.
+
+- **Rate limit testing** — verifying rate limits are enforced correctly
+  - Send requests at a rate exceeding the limit. Verify `429 Too Many Requests` response. Verify `Retry-After` header. Verify limits reset after the window.
+  - **Avoid when:** rate limits are very high (10K+ req/s) — testing at scale requires dedicated load testing tools, not API tests.
+
 ---
 
 ## Scenario-Based Questions

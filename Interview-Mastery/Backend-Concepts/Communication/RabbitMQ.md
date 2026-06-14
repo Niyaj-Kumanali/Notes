@@ -291,6 +291,28 @@ public Queue notificationQueue() {
 }
 ```
 
+## Use Cases
+
+- **Complex routing with exchanges** — e-commerce order processing where orders must route to inventory, payment, and shipping
+  - Topic and direct exchanges route messages based on routing keys. Fanout exchanges broadcast to all bound queues. Flexible binding patterns.
+  - **Avoid when:** routing logic is unnecessary point-to-point — a simple queue with one producer and one consumer is sufficient.
+
+- **Task queues with acknowledgments** — image processing, report generation, or email dispatch
+  - Workers consume tasks from a queue with manual ACK. If a worker crashes, the unacknowledged message is re-queued to another worker for retry.
+  - **Avoid when:** task ordering matters — RabbitMQ guarantees order within a queue but not across consumers.
+
+- **RPC-style request/reply** — Service A needs a computed result from Service B without tight coupling
+  - The reply-to queue and correlation ID pattern enables async RPC. The requesting service listens on a private reply queue and matches responses by correlation ID.
+  - **Avoid when:** the RPC call is latency-sensitive — synchronous HTTP/gRPC is simpler and faster for request-reply patterns.
+
+- **Dead letter queues for error handling** — failed payment processing or invalid message formats
+  - Messages that fail processing (after max retries) or expire (TTL) are routed to a DLQ. Operators inspect, fix, and requeue.
+  - **Avoid when:** message processing is idempotent and retries are always safe — just retry with exponential backoff.
+
+- **Priority queues for tiered processing** — premium customer orders before standard orders, or critical alerts before routine logs
+  - Per-message priority (0–255). Higher priority messages are consumed before lower ones. Enables differentiated SLAs within a single queue.
+  - **Avoid when:** strict FIFO ordering is required — priority queues break FIFO semantics within the same priority level.
+
 ---
 
 ## Scenario-Based Questions

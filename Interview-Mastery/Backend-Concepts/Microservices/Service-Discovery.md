@@ -91,6 +91,28 @@
 - Initial rollout caused 3x CPU increase on proxy sidecars due to per-request mTLS handshakes.
 - They mitigated by enabling connection pooling, increasing persistent connection idle timeout, and using SPIFFE-based short-lived certificates.
 
+## Use Cases
+
+- Service discovery is essential in dynamic environments where instances come and go — container orchestration, auto-scaling, and rolling deployments make static host:port configuration impractical.
+
+- **Kubernetes-native service discovery** — using DNS and endpoints for pod-to-pod communication
+  - When to use: Your services run on Kubernetes. Use the built-in DNS-based discovery: a service named `order-service` is reachable at `order-service.namespace.svc.cluster.local`. Kubernetes kube-proxy or CoreDNS handles routing and load balancing automatically. Example: a microservices deployment on EKS where `payment-service` calls `user-service.default.svc.cluster.local:8080` without any external registry.
+  - **Avoid when:** You need advanced health checking, custom routing rules, or multi-datacenter discovery — Consul or Eureka provide richer semantics.
+
+- **Cloud migration with dynamic addressing** — services that scale up/down and change IPs frequently
+  - When to use: Auto-scaling groups or spot instances mean service IPs change constantly. A service registry (Eureka, Consul) lets instances register on startup and deregister on shutdown, while clients query the registry for live instances. Example: an AWS-deployed application where `inventory-service` runs on a spot fleet and instances are replaced hourly — Eureka clients discover the new instances within 30 seconds of registration.
+  - **Avoid when:** Your instances have stable IPs (bare metal, fixed VMs) — a simple configuration file or environment variable with host:port values is sufficient.
+
+- **Multi-region deployments** — routing requests to the nearest healthy instance
+  - When to use: Services are deployed across multiple data centers or cloud regions for latency and availability. The registry stores region metadata, and clients prefer instances in the same region, falling back to another region if none are healthy. Example: a global SaaS with deployments in us-east-1, eu-west-1, and ap-southeast-1 — Consul's prepared queries route users to their nearest region and fail over automatically.
+  - **Avoid when:** All instances are in a single region — the cross-region routing logic adds complexity with no benefit.
+
+- **Canary deployments and blue-green testing** — routing a percentage of traffic to a new version
+  - When to use: You deploy a new service version and want to test it with a small percentage of traffic before full rollout. The registry (or a smart client) can filter instances by version metadata and route traffic proportionally. Example: deploying `order-service:v2` alongside `order-service:v1` with 5% of traffic going to v2 — Consul's service-resolver with weighted subsets enables this without a service mesh.
+  - **Avoid when:** You already have a service mesh (Istio, Linkerd) — traffic splitting is better handled at the mesh layer with virtual services and destination rules.
+
+---
+
 ## Scenario-Based Questions
 
 **Q: Your team notices that after a network partition heals, some services continue to route to instances that were terminated during the partition. What is the most likely cause?**

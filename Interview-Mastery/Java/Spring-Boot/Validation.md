@@ -298,6 +298,40 @@
 
 ---
 
+## Use Cases
+
+- Declarative validation with Jakarta Bean Validation keeps input checking concise at the API boundary. These use cases cover single-field, cross-field, and service-layer validation patterns.
+
+- **Field-level input validation on request bodies** — A registration endpoint must reject missing emails, short passwords, and invalid phone numbers before any business logic runs.
+  - Use `@NotBlank`, `@Email`, `@Size(min = 8)`, and `@Pattern` on DTO fields. Add `@Valid` on the `@RequestBody` parameter — Spring automatically returns 400 with field-level errors.
+  - **Avoid when:** Validation requires data from multiple fields — use `@AssertTrue` on a class-level method or a custom `@ValidDateRange`-style annotation.
+
+- **Cross-field validation (password confirmation, date ranges)** — A user registration form requires password/confirmPassword match and birthDate must indicate age >= 18.
+  - Add `@AssertTrue(message = "...")` methods on the DTO for cross-field checks. For more complex cases, write a custom class-level constraint annotation.
+  - **Avoid when:** The validation rule is purely one field — prefer field-level annotations for clearer error messages targeting the specific field.
+
+- **Validation groups for create vs. update** — A `UserRequest` DTO needs `id` to be `@Null` on create and `@NotNull` on update. Duplicating DTOs is wasteful.
+  - Define marker interfaces (`Create`, `Update`). Annotate fields with `groups = {Create.class}` / `groups = {Update.class}`. Use `@Validated(Create.class)` at the controller method.
+  - **Avoid when:** The create and update DTOs differ significantly — separate classes are clearer and avoid confusion.
+
+- **Service-layer validation for database-dependent rules** — A bulk product import must validate that category names exist in the DB and SKUs are unique — constraints that annotations alone cannot express.
+  - Perform DB-backed validation in the service layer. Collect all errors and return them in a single result object rather than throwing on the first violation.
+  - **Avoid when:** The rule can be expressed with annotations — keep validation at the boundary to fail fast and reduce service-layer complexity.
+
+- **Nested object validation in collections** — An order API accepts a list of line items, each with its own validation rules (productId not null, quantity between 1 and 100).
+  - Use `@Valid List<@Valid OrderItemRequest> items`. Both the container and each element are validated. Configure `@RestControllerAdvice` to collect all nested errors into a structured response.
+  - **Avoid when:** The list is huge (1000+ items) — validate in chunks or asynchronously to keep the request response time predictable.
+
+- **Custom validation annotations** — business-specific rules that can't be expressed with standard Bean Validation
+  - Create `@ValidOrderStatus` annotation with a `ConstraintValidator` that checks order state transitions. Reusable across multiple DTOs and endpoints.
+  - **Avoid when:** the rule is used only once — inline validation in the service method is simpler and avoids annotation overhead.
+
+- **Cross-field validation** — rules that compare multiple fields (e.g., start date must be before end date)
+  - `@AssertTrue` on a method that checks all fields. Or use `@ScriptAssert` (Hibernate Validator) for cross-field rules expressed in JSR-380 script expressions.
+  - **Avoid when:** there are many cross-field rules — a dedicated validation service method provides clearer logic and better debuggability.
+
+---
+
 ## Scenario-Based Questions
 
 **Q: Your REST endpoint accepts a JSON payload. You add `@Valid @RequestBody` but validation errors are silently ignored — the method executes with an invalid object. What's wrong?**

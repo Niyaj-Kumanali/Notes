@@ -215,6 +215,30 @@ v.start();  // dispatches to Car.start() at runtime
 - **Trade-off**
   - More indirection — you now have to trace through a delegation chain to understand the full flow. The benefit is that changing the email template requires touching exactly one file, with no risk to the database layer.
 
+## Use Cases
+
+- Reach for OOP when you need to bundle data with behavior in a system large enough that uncoordinated changes to shared data structures become a risk. The paradigm shines when you have multiple developers working on the same codebase and need to protect invariants.
+
+- **Modeling domain entities** — encapsulate data and behavior together
+  - Use classes like `Customer`, `Order`, `Product` to keep related fields and methods in one place. Encapsulation prevents callers from corrupting internal state (e.g., a negative `balance`).
+  - **Avoid when:** the object is a pure data carrier (DTO, configuration POJO) with no behavior — a record or a simple struct is clearer.
+
+- **Polymorphic dispatch** — treat different types through a common interface
+  - Define an interface or abstract class when multiple implementations exist (e.g., `PaymentProcessor` with `CreditCardProcessor`, `PayPalProcessor`). Callers work against the abstraction, not the concrete type.
+  - **Avoid when:** the "is-a" relationship is forced — prefer composition over inheritance to avoid fragile base class syndrome.
+
+- **Controlled mutation with invariants** — guard object state transitions
+  - Use private fields with business methods (not bare setters) to ensure valid state transitions. A `Ticket.setStatus(Status)` method can reject invalid transitions that a setter would silently accept.
+  - **Avoid when:** the object's state is simple and trusted (e.g., an in-memory cache entry) — direct field access in a tight loop avoids method dispatch overhead.
+
+- **Code reuse via inheritance** — share common behavior
+  - Extract shared fields and lifecycle methods into a base class (e.g., `BaseEntity` with `id`, `createdAt`, `updatedAt`). Subclasses inherit the boilerplate.
+  - **Avoid when:** the shared behavior is unrelated to the class hierarchy — composition (delegate to a helper object) keeps the coupling looser.
+
+- **Namespace and organization** — group related constants and utilities
+  - A class can serve as a namespace for related static methods and constants when top-level packages would be overkill (e.g., `MathUtils`, `ValidationRules`).
+  - **Avoid when:** the class is just a bag of unrelated static methods — split into focused utility classes.
+
 ---
 
 ## Scenario-Based Questions

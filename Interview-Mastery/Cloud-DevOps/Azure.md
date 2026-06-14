@@ -314,6 +314,28 @@ spec:
           port: 443
 ```
 
+## Use Cases
+
+- **Enterprise application hosting** — running line-of-business applications with Azure App Service or AKS
+  - App Service provides managed hosting with auto-scaling, staging slots, and integrated CI/CD. AKS provides Kubernetes orchestration for containerized microservices.
+  - **Avoid when:** the application is a simple static site — Azure Static Web Apps or Storage static website hosting is cheaper and simpler.
+
+- **Hybrid cloud with on-premise integration** — extending on-premise data centers to the cloud
+  - Azure Arc provides unified management across on-prem and cloud. ExpressRoute establishes dedicated private connections. Azure Stack HCI runs Azure services on-prem.
+  - **Avoid when:** all workloads can migrate to the cloud — a fully cloud-native architecture avoids hybrid complexity.
+
+- **Data and AI workloads** — building machine learning pipelines, data warehouses, and real-time analytics
+  - Azure Synapse Analytics for data warehousing. Azure Databricks for big data processing. Azure Machine Learning for model training and deployment.
+  - **Avoid when:** data volume fits in a single SQL Server database — simpler to use Azure SQL Database with integrated analytics features.
+
+- **Identity and access management** — centralized authentication and authorization across applications
+  - Azure AD provides SSO, MFA, Conditional Access, and device management. Managed identities eliminate credential management for Azure resources.
+  - **Avoid when:** all users are external to the organization (B2C scenarios) — Azure AD B2C is designed for consumer identity but adds configuration complexity.
+
+- **Compliance and governance** — enforcing organizational policies and regulatory compliance at scale
+  - Azure Policy enforces resource configuration rules. Blueprints deploy compliant environments. Microsoft Defender for Cloud provides compliance dashboards and remediation recommendations.
+  - **Avoid when:** there is no regulatory requirement and the organization is small — Azure Policy adds operational overhead; manual review may be acceptable.
+
 ---
 
 ## Scenario-Based Questions

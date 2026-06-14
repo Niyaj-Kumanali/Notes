@@ -351,6 +351,32 @@ public class NotificationRouter {
 
 ---
 
+## Use Cases
+
+- Dependency Injection is the mechanism that makes Spring applications loosely coupled and testable. These use cases guide when to choose each injection style and how to handle real-world wiring challenges.
+
+- **Constructor injection for required dependencies** — A service cannot function without its repository, client, or template (e.g., `OrderService` needs `OrderRepository` and `PaymentGateway`).
+  - Use constructor injection. Dependencies are `final`, guaranteed non-null, and the object is fully initialized at construction time. This is the Spring team's recommended approach.
+  - **Avoid when:** The dependency is optional — use setter injection with a default fallback instead.
+
+- **Setter injection for optional or reconfigurable dependencies** — A file parser can optionally use a decompression filter; if none is configured, parsing works on raw bytes.
+  - Use `@Autowired` on the setter. The bean is created without the dependency, and the setter is called only if the bean exists in the container.
+  - **Avoid when:** The dependency is mandatory — constructor injection will detect missing beans at startup rather than causing NPEs at runtime.
+
+- **Field injection in legacy code during refactoring** — A 50-class codebase uses `@Autowired` fields everywhere and needs incremental migration to constructor injection.
+  - Keep field injection during the refactor phase, then migrate one class at a time. Do not introduce field injection in new code.
+  - **Avoid when:** Writing new production code — field injection hides dependencies, prevents `final` fields, and breaks testing without reflection.
+
+- **Injecting multiple implementations of an interface** — A notification router must send alerts via email, SMS, push, and Slack depending on the channel.
+  - Inject `List<NotificationSender>` or `Map<String, NotificationSender>`. Spring collects all beans of the interface type automatically.
+  - **Avoid when:** You need strict ordering — use `@Order` on each implementation to guarantee iteration order.
+
+- **`@Qualifier` for disambiguating same-type beans** — A service uses two `RestTemplate` beans: one for internal microservices and one for external APIs, each with different timeouts and interceptors.
+  - Define both beans with distinct `@Bean(name = "internalRestTemplate")` names and inject with `@Qualifier("internalRestTemplate")`.
+  - **Avoid when:** A primary bean exists — mark one with `@Primary` and omit `@Qualifier` on the injection point.
+
+---
+
 ## Scenario-Based Questions
 
 **Q: Your team has 200+ Spring beans with field injection. A production outage occurs because a required bean was not injected (field stayed null) — but only on a specific server configuration. The issue passed unit tests because tests use `@InjectMocks`. How do you prevent this class of bugs?**

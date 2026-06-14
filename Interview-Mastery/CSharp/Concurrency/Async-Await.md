@@ -212,6 +212,28 @@ public class GracefulShutdownHostedService : IHostedService
 }
 ```
 
+## Use Cases
+
+- **I/O-bound web API calls** — fetching data from external APIs, databases, or file systems without blocking threads
+  - `await HttpClient.GetStringAsync()` or `await dbContext.Orders.ToListAsync()`. The calling thread returns to the thread pool while waiting, improving scalability.
+  - **Avoid when:** the operation is CPU-bound — async doesn't make CPU work faster; use `Task.Run` for CPU-bound work offloading.
+
+- **Parallel independent operations** — calling multiple external services concurrently
+  - `Task.WhenAll(tasks)` fires all requests simultaneously. Total time equals the slowest operation, not the sum. `ConfigureAwait(false)` avoids capturing synchronization context.
+  - **Avoid when:** operations share a bottleneck (same database or same network connection) — parallel requests may saturate the shared resource.
+
+- **Graceful cancellation** — allowing users to cancel long-running operations or implementing request timeouts
+  - `CancellationTokenSource` creates tokens. Pass to async methods. `ThrowIfCancellationRequested()` aborts the operation. Combine with `CancellationTokenSource.CreateLinkedTokenSource` for multiple cancellation reasons.
+  - **Avoid when:** the operation cannot be safely interrupted mid-way — implement a clean-up / rollback phase after cancellation.
+
+- **Async streams for paged data** — processing large datasets that arrive in chunks (API pagination, streaming data)
+  - `IAsyncEnumerable<T>` with `await foreach`. Yields results as they become available. Enables progressive UI updates or early termination.
+  - **Avoid when:** all data is available immediately — `IEnumerable<T>` with LINQ is simpler and has less overhead.
+
+- **Cooperative concurrency with channels** — producer-consumer patterns where producers and consumers run concurrently
+  - `Channel<T>` provides async read/write with backpressure. Producers call `channel.Writer.WriteAsync()`; consumers call `channel.Reader.ReadAsync()`. Bounded channel blocks producer when full.
+  - **Avoid when:** the pipeline has only one producer and one consumer — a simple `Task` chain or `await` may be sufficient.
+
 ---
 
 ## Scenario-Based Questions

@@ -87,6 +87,28 @@
 - Ensures the cache is always fresh
 - Acceptable because the catalog write rate is low compared to reads
 
+## Use Cases
+
+- **Database query result cache** — caching expensive SQL queries (user feeds, aggregated reports, product searches)
+  - Cache-aside pattern: check cache, miss, query DB, populate cache. TTL based on data freshness requirements. Reduces database load by 80–95%.
+  - **Avoid when:** query results change on every execution (e.g., `NOW()`, random values) — caching is ineffective for non-deterministic queries.
+
+- **Session store** — sharing user session state across multiple application server instances
+  - Distributed cache holds session data with TTL-based expiration. Any server can serve any user. No sticky session requirement.
+  - **Avoid when:** session data is large (>1 MB) — consider storing session data in a database and using the cache only for active session indexes.
+
+- **Rate limiter state** — tracking request counts per user/IP across multiple application instances
+  - Atomic increment operations in Redis provide consistent distributed rate limiting without a single point of contention.
+  - **Avoid when:** rate limit granularity is coarse (e.g., hourly limits) — local in-memory counters with periodic sync reduce Redis load.
+
+- **Real-time leaderboards and counters** — gaming scores, trending hashtags, or live poll results
+  - Sorted sets provide O(log N) ranked queries. Atomic updates ensure consistent counting. Single-digit millisecond read performance.
+  - **Avoid when:** data must survive cache node failures — persist to a database and use cache only for hot data.
+
+- **Distributed locking** — coordinating access to shared resources (file writes, job scheduling, inventory deduction)
+  - Redlock algorithm provides distributed mutexes. Lock acquisition with TTL prevents deadlocks from crashed holders.
+  - **Avoid when:** locks are held for more than a few seconds — lease-based mechanisms with heartbeats (like ZooKeeper) are more suitable for long-held locks.
+
 ## Scenario-Based Questions
 
 **Q: A popular product page goes viral. The cache key expires and 10,000 concurrent requests all hit the database simultaneously, causing a 5-minute outage. How do you prevent this?**

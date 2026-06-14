@@ -257,6 +257,28 @@ fi
   - **Problem:** All PHI data must be encrypted with automatically rotated keys; access restricted by role; data in transit must never traverse public internet; access logs retained for 7 years.
   - **Resolution:** Use S3 with SSE-KMS and automatic key rotation; block all public access at account level; use AWS Glue for ETL with scoped IAM roles; use Lake Formation for column-level and row-level security; set up VPC Endpoints for S3 and Glue; enable CloudTrail with log file validation and AWS Config with HIPAA-security rules.
 
+## Use Cases
+
+- **Web application hosting** — running a scalable web app with EC2, ECS, or Elastic Beanstalk
+  - Auto-scaling groups adjust capacity based on load. ALB distributes traffic. RDS provides managed database. Route 53 for DNS routing.
+  - **Avoid when:** traffic is extremely low (<100 requests/day) — a single t3.micro EC2 or serverless Lambda + API Gateway is more cost-effective.
+
+- **Serverless data processing** — processing files on S3 upload, stream processing with Kinesis, or scheduled batch jobs
+  - Lambda + S3 events + DynamoDB/Step Functions. Pay-per-invocation. Scales to zero when idle. Ideal for variable or unpredictable workloads.
+  - **Avoid when:** execution takes longer than 15 minutes or requires significant CPU/memory — Lambda has hard limits; use ECS/EKS for long-running tasks.
+
+- **Multi-region disaster recovery** — ensuring business continuity with cross-region replication
+  - Aurora Global Database (<1s replication, RPO <1s). DynamoDB Global Tables (multi-master). S3 Cross-Region Replication. Route 53 failover routing.
+  - **Avoid when:** RTO/RPO requirements are lenient (>30 min) — simpler backup-and-restore with CloudFormation templates for infrastructure recreation.
+
+- **Data lake and analytics** — petabyte-scale storage and analysis with S3, Glue, Athena, and Redshift
+  - S3 as the data lake storage. Glue crawlers catalog data. Athena for ad-hoc SQL queries. Redshift Spectrum for querying S3 directly without loading.
+  - **Avoid when:** data volume is <1 TB and query patterns are well-defined — a traditional RDBMS with partitioning is simpler.
+
+- **HIPAA-compliant workloads** — healthcare applications with protected health information (PHI)
+  - All services HIPAA-eligible. S3 with SSE-KMS and automatic key rotation. VPC endpoints prevent data traversing public internet. CloudTrail and Config for audit logging.
+  - **Avoid when:** the workload doesn't require compliance — HIPAA-eligible services are more expensive; skip compliance features where not needed.
+
 ---
 
 ## Scenario-Based Questions

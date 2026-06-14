@@ -336,6 +336,32 @@
 
 ---
 
+## Use Cases
+
+- Spring Security handles everything from basic form login to OAuth2 and fine-grained method security. These use cases address common authentication and authorization patterns in production.
+
+- **JWT-based stateless authentication** — A mobile banking app needs a token-based auth mechanism where the server does not store session state.
+  - Implement a `OncePerRequestFilter` that extracts the JWT from the `Authorization` header, validates it, and sets the `SecurityContext`. Use short-lived access tokens (15 min) with refresh tokens.
+  - **Avoid when:** The client is a server-side web app with server-side rendering — session-based auth is simpler and more secure.
+
+- **Role-based access control (RBAC) for admin UIs** — An admin dashboard has `VIEWER`, `OPERATOR`, and `ADMIN` roles with different endpoint access levels.
+  - Configure `SecurityFilterChain` with `.requestMatchers()` for URL-level authorization and `@PreAuthorize` for method-level fine-grained control. Use `@EnableMethodSecurity` to activate annotations.
+  - **Avoid when:** Permissions are purely role-based and map cleanly to URL patterns — URL-based authorization in the filter chain is sufficient and testable without loading the full context.
+
+- **OAuth2 / OpenID Connect for enterprise SSO** — A B2B SaaS platform must allow customers to log in via their own identity providers (Azure AD, Okta, Google Workspace).
+  - Use Spring Security's OAuth2 client support with `.oauth2Login()`. Configure `application.yml` with client registrations for each provider. The framework handles the redirect and token exchange.
+  - **Avoid when:** You control both the client and server — a simpler password-less login flow (magic link, one-time code) may be better for user experience.
+
+- **Method-level security for data-level permissions** — A hospital system must ensure doctors see only their own patients. URL-level authorization cannot express `patient.assignedDoctorId == currentUserId`.
+  - Use `@PostAuthorize("returnObject.assignedDoctorId == authentication.principal.id")` on the repository or service method. For collections, use `@PostFilter`.
+  - **Avoid when:** The permission check is expensive (database query) — consider a query-level filter (e.g., adding a `WHERE assigned_doctor_id = ?` clause) before applying post-filtering.
+
+- **CSRF protection for state-changing endpoints** — A traditional server-rendered web app must prevent cross-site request forgery attacks on POST/PUT/DELETE endpoints.
+  - CSRF protection is enabled by default in Spring Security. Render the CSRF token in forms using Spring's tag library or Thymeleaf's `th:action`. For REST APIs, disable CSRF and use JWT instead.
+  - **Avoid when:** Building a stateless REST API (mobile app, SPA with token auth) — disable CSRF via `http.csrf(AbstractHttpConfigurer::disable)` since there is no session cookie to steal.
+
+---
+
 ## Scenario-Based Questions
 
 **Q: Your team builds a REST API for a hospital system. Doctors should only see their own patients' data. A `GET /api/patients/{id}` endpoint currently returns any patient if the user is authenticated. How do you enforce that a doctor can only access their own patients?**

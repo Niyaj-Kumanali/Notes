@@ -234,6 +234,28 @@ public class CsvMmFileProcessor
 }
 ```
 
+## Use Cases
+
+- **File read/write for data processing** — reading configuration files, writing logs, or processing data files
+  - `FileStream` with buffering for sequential access. `StreamReader`/`StreamWriter` for text. `BinaryReader`/`BinaryWriter` for structured binary data.
+  - **Avoid when:** files are small (<1 KB) and read infrequently — `File.ReadAllText`/`File.WriteAllText` provide simpler one-shot access.
+
+- **Network stream communication** — reading from HTTP responses, TCP sockets, or named pipes
+  - `NetworkStream` provides a stream abstraction over sockets. `HttpClient.GetStreamAsync` streams responses without buffering the entire body.
+  - **Avoid when:** you need request-response semantics — higher-level abstractions (HttpClient, SignalR) handle framing and error handling.
+
+- **Memory-mapped files for large data** — processing multi-GB files without loading them entirely into memory
+  - `MemoryMappedFile` maps a file region into virtual memory. OS handles paging. Enables random access to large files with low memory footprint.
+  - **Avoid when:** access is strictly sequential — `FileStream` with buffering is simpler and may be faster.
+
+- **Compression/decompression streams** — compressing log files or decompressing downloaded archives on-the-fly
+  - `GZipStream`/`DeflateStream` wrap another stream and apply compression. Chain with file streams for transparent compression during read/write.
+  - **Avoid when:** compression is CPU-bound and blocks the main thread — compress on a background thread or use async I/O.
+
+- **Pipes and inter-process communication** — passing data between processes on the same machine
+  - `NamedPipeServerStream`/`NamedPipeClientStream` for bidirectional IPC. Anonymous pipes for parent-child process communication.
+  - **Avoid when:** processes are on different machines — use TCP/IP sockets or a message queue instead.
+
 ---
 
 ## Scenario-Based Questions

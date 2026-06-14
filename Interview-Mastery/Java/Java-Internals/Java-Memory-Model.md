@@ -97,6 +97,26 @@
 
 - An application built an immutable `Config` object in one thread and passed it to multiple worker threads. Workers sporadically saw default values (0, null) for fields not declared `final`. The runtime allowed the constructor's writes to be reordered after the reference was published, because only `final` fields have guaranteed visibility without synchronization. Adding `final` to all fields eliminated the issue with zero overhead.
 
+## Use Cases
+
+The JMM is not an API you call — it is the contract you rely on whenever threads share data. Understanding it helps diagnose visibility bugs and design lock-free algorithms correctly.
+
+- **Safe publication of immutable objects** — Share a read-only object across threads without synchronization by marking all fields `final`.
+  - Guarantee that a properly constructed object is fully visible to any thread that reads its reference. Example: an immutable `Config` or `Settings` object created at startup and passed to worker threads.
+  - **Avoid when:** the object's state changes after publication — use `volatile`, locks, or `AtomicReference` for mutable shared state.
+
+- **Volatile flag for cancellation or control signals** — Let one thread signal another without a full lock.
+  - Declare a `volatile boolean running` flag; the worker loop checks it on each iteration. Example: graceful shutdown of a background thread.
+  - **Avoid when:** the signal must protect compound actions (e.g., check-then-act) — volatile alone does not provide atomicity.
+
+- **Lock-free data structures with CAS** — Achieve thread safety through hardware-level compare-and-swap instead of locks.
+  - Use `AtomicReference.compareAndSet()` to update a shared pointer atomically. Example: a non-blocking stack or work-stealing queue.
+  - **Avoid when:** contention is very high — CAS retries can degrade throughput; a lock or striping may perform better.
+
+- **Debugging data races** — Apply happens-before reasoning to locate missing synchronization in production heisenbugs.
+  - Trace the execution graph: if thread A's write is not ordered before thread B's read by any happens-before rule, a data race exists. Example: a counter that inconsistently shows stale values under load.
+  - **Avoid when:** you need a quick fix — use `AtomicInteger` or `synchronized` instead of proving correctness from first principles.
+
 ## Scenario-Based Questions
 
 **Q: Two threads increment a shared `volatile int` one million times each. The final value is less than 2,000,000. Why?**

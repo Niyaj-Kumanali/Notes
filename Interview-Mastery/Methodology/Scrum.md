@@ -126,6 +126,28 @@ Dev Team (3-9) — self-organizing, cross-functional
 ### Scenario 3: Sprint Reviews Nobody Attends
 - The team holds sprint reviews on Friday at 4 PM. Stakeholders rarely attend. When they do, they give vague feedback ("looks good"). The team feels demotivated. **Fix:** Move the review to Tuesday at 10 AM. Invite stakeholders individually (not a blanket calendar invite). Prepare a structured demo: show one working feature, share metrics (velocity, quality, customer feedback), then ask specific questions ("Would this feature solve your problem? What's missing?"). Record sessions for absent stakeholders.
 
+## Use Cases
+
+- **Product development with clear priorities** — building a SaaS product where the Product Owner prioritizes features
+  - Fixed-length sprints (2 weeks) deliver a potentially shippable increment. PO prioritizes backlog. Team self-organizes to meet the sprint goal.
+  - **Avoid when:** work is unpredictable or reactive (production support, incident response) — Kanban's continuous flow is better suited.
+
+- **Team building and trust** — new teams learning to work together
+  - Scrum ceremonies (planning, daily standup, review, retro) build communication habits. Retrospectives provide structured improvement. Sprint commitment creates team accountability.
+  - **Avoid when:** the team is fully remote and across 12+ timezones — synchronous ceremonies are harder; consider Scrumban with fewer prescribed meetings.
+
+- **Predictability and transparency** — stakeholders want to know when features will be delivered
+  - Velocity tracking over multiple sprints enables release forecasting. Sprint reviews demonstrate progress. Burndown charts show real-time sprint health.
+  - **Avoid when:** the team is constantly interrupted by urgent requests — Scrum assumes the team has focus; protection from interruptions is the SM's job.
+
+- **Multi-team coordination** — large products requiring multiple Scrum teams
+  - Scrum-of-Scrums coordinates cross-team dependencies. Shared Product Goal aligns teams. Feature teams own end-to-end delivery. Release trains synchronize cadences.
+  - **Avoid when:** teams have no interdependencies — independent Scrum teams without coordination overhead are more efficient.
+
+- **Sprint goal focus** — shielding the team from mid-sprint changes and scope creep
+  - Commitment to the sprint goal prevents distractions. PO may swap items only if the sprint goal is not affected. The team owns how to achieve the goal.
+  - **Avoid when:** stakeholder trust is low — they may resist giving up mid-sprint change authority until they see consistent delivery.
+
 ---
 
 ## Scenario-Based Questions

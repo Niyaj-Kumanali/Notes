@@ -539,6 +539,36 @@ List<String> safeResult = data.stream()
     ));
 ```
 
+## Use Cases
+
+- Reach for `Collectors` when a stream pipeline needs to produce a concrete result — a `List`, `Set`, `Map`, `String`, or any custom container. Collectors encapsulate the accumulation logic that an imperative loop would spread across mutable variables.
+
+- **toList() / toSet() / toCollection()** — materializing a stream
+  - The most common collectors: gather stream elements into a collection. Use `toList()` for read-only lists, `toSet()` for deduplicated sets, and `toCollection(TreeSet::new)` when you need a specific implementation or ordering.
+  - **Avoid when:** you need a mutable list you will modify after collection — copy the result or use `toCollection(ArrayList::new)`.
+
+- **groupingBy** — partitioning elements into groups
+  - Use `groupingBy(classifier)` to create a `Map<K, List<V>>`. Combine with a downstream collector: `groupingBy(Order::getCustomer, summingDouble(Order::getTotal))` groups orders by customer and sums totals in one pass.
+  - **Avoid when:** you need key-value pairs (one value per key) — use `toMap()` with a merge function for finer control over duplicate keys.
+
+- **partitioningBy** — splitting into two groups by a predicate
+  - A specialized `groupingBy` for boolean classifiers. Returns `Map<Boolean, List<V>>`. Use when you need to separate items into "pass" and "fail" buckets (e.g., valid and invalid records).
+  - **Avoid when:** you need more than two groups — use `groupingBy` with an enum classifier instead.
+
+- **joining** — concatenating strings from a stream
+  - Use `joining(delimiter, prefix, suffix)` to combine string elements efficiently. The three-argument form produces results like `[a, b, c]` in a single pass without manual StringBuilder management.
+  - **Avoid when:** you need to join non-string objects — map them to strings first with `map(Object::toString).collect(joining())`.
+
+- **summarizingInt / summarizingDouble** — statistics in one pass
+  - Use `summarizingInt(ToIntFunction)` to compute count, sum, min, average, and max in a single stream traversal. Returns an `IntSummaryStatistics` object. Avoids running separate queries that each traverse the stream.
+  - **Avoid when:** you only need one statistic (e.g., just sum) — `summingInt()` is simpler.
+
+- **Custom collectors** — implementing `Collector<T, A, R>`
+  - Use `Collector.of(supplier, accumulator, combiner, finisher, characteristics)` when the built-in collectors don't fit. Example: a collector for immutable lists without an intermediate ArrayList.
+  - **Avoid when:** a built-in collector or combination of existing collectors works — custom collectors are harder to read and maintain.
+
+---
+
 ## Scenario-Based Questions
 
 - **Question: You have a stream of `Order` objects. Group them by customer and compute the total amount per customer.**

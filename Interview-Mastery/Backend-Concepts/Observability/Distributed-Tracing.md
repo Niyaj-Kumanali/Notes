@@ -106,6 +106,28 @@ public class CheckoutService {
 
 **Resolution:** Configure all services to emit structured JSON logs with `trace_id` and `span_id` in MDC. During the incident, search the log aggregator for the trace ID of an error trace. All logs for that request appear, ordered by span hierarchy, across all services. The root cause is identified in minutes instead of hours.
 
+## Use Cases
+
+- **Latency bottleneck identification** — debugging why a checkout request takes 10 seconds
+  - Trace waterfall shows each span's duration across services. The longest span identifies the bottleneck — a slow database query, a blocked HTTP call, or network latency.
+  - **Avoid when:** your system is a single service with no async calls — application performance monitoring (APM) of a single service is sufficient.
+
+- **Error root cause analysis** — finding which service returns an error and why
+  - Traces capture error context across the entire request path. Drill into the failing span to see the exception, parameters, and state at the point of failure.
+  - **Avoid when:** the error is consistent and easily reproduced locally — local debugging may be faster than tracing analysis.
+
+- **Dependency mapping** — discovering service dependencies, critical paths, and dead or unused services
+  - Auto-instrumentation generates a live dependency graph. Shows which services call which, call frequency, error rates, and latency per edge.
+  - **Avoid when:** service topology is already well-documented and stable — tracing for dependency discovery has diminishing returns.
+
+- **SLA/SLO compliance monitoring** — measuring end-to-end latency for critical user journeys
+  - Traces measure the complete request flow from entry point to response. Compare P50, P95, and P99 latencies against business SLAs.
+  - **Avoid when:** you only need service-level latency — RED metrics (Rate, Errors, Duration) per service are sufficient for SLO tracking.
+
+- **Sampling-based performance analysis** — understanding representative request performance without storing every trace
+  - Head-based sampling (fixed rate, e.g., 1%) or tail-based sampling (keep all errors + sample of slow traces) balances detail with storage cost.
+  - **Avoid when:** every single request must be traceable for audit — use head-based sampling with 100% sampling for audited transactions only.
+
 ---
 
 ## Scenario-Based Questions

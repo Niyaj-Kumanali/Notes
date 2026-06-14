@@ -111,6 +111,28 @@ authRequestUri += "&code_challenge=" + codeChallenge + "&code_challenge_method=S
 
 **Resolution:** Implement a centralized logout (Single Logout / SLO). The SPA calls the Auth Server's `/logout` endpoint with the ID token hint. The Auth Server: (1) invalidates all refresh tokens for the user, (2) redirects to each registered client's post-logout URI (OpenID Connect Front-Channel or Back-Channel Logout), and (3) clears the Auth Server session. Each client receives a logout notification and clears its local session. For apps that are offline, the session remains valid until token expiry (trade-off: SLO is best-effort, not guaranteed).
 
+## Use Cases
+
+- **Third-party application authorization** — "Sign in with Google" or allowing a SaaS tool to access user data
+  - Authorization code grant (with PKCE) lets users delegate specific permissions (scopes) to applications without sharing their password.
+  - **Avoid when:** the application is first-party and fully trusted — session-based auth or OpenID Connect is simpler for your own apps.
+
+- **Mobile and SPA authentication** — native mobile apps or single-page applications accessing APIs
+  - Authorization Code with PKCE (Proof Key for Code Exchange) protects against authorization code interception. No client secret required.
+  - **Avoid when:** the client is a backend service with no user interaction — use the client credentials grant instead.
+
+- **API access for server-to-server** — Microservice A needs to call Microservice B on behalf of itself
+  - Client credentials grant: the service authenticates with its client ID and secret, receives an access token with its own scopes.
+  - **Avoid when:** the call is within a trusted network boundary — mutual TLS or internal JWT signing may be simpler.
+
+- **Multi-tenant SaaS authorization** — one application serving data for multiple organizations
+  - OAuth scopes and tenant IDs in access tokens enable fine-grained authorization per organization. The authorization server knows which tenant each user belongs to.
+  - **Avoid when:** all users access the same data — simple role-based access control (RBAC) without OAuth is sufficient.
+
+- **Federated identity across organizations** — enterprise SSO where users authenticate via their corporate IdP (Azure AD, Okta)
+  - OpenID Connect on top of OAuth 2.0 provides identity federation. The authorization server acts as a broker between the app and the corporate IdP.
+  - **Avoid when:** all users are from a single organization — a single OAuth provider with username/password is sufficient.
+
 ---
 
 ## Scenario-Based Questions

@@ -124,6 +124,26 @@
   }
   ```
 
+## Use Cases
+
+Virtual threads (Project Loom) make it practical to have one thread per task without the memory and context-switch costs of platform threads, dramatically simplifying concurrent I/O-bound code.
+
+- **High-throughput web servers** — Handle thousands of concurrent HTTP requests with a simple synchronous programming model.
+  - Each request runs on its own virtual thread; the web server (Tomcat 10.1+, Jetty 12+) is configured with a virtual-thread executor. Example: a REST API that receives 10,000 requests/second with each handler making several downstream calls.
+  - **Avoid when:** the workload is CPU-bound — virtual threads do not speed up computation; use platform threads sized to the number of cores instead.
+
+- **Microservice orchestration with many downstream calls** — Execute multiple remote invocations in parallel without complex reactive APIs.
+  - Launch virtual threads for each downstream call and join them with `StructuredTaskScope`. Example: a dashboard service that calls profile, orders, and stats services concurrently.
+  - **Avoid when:** fine-grained cancellation or back-pressure is needed — structured concurrency handles basic scopes; reactive frameworks still lead for complex flow control.
+
+- **Database access with one connection per thread** — Write blocking JDBC calls without reserving an expensive OS thread per connection.
+  - Use a connection pool sized to the database's max connections (e.g., 50) while the application can create thousands of virtual threads. Example: a CRUD microservice using JPA/Hibernate on virtual threads.
+  - **Avoid when:** you use `synchronized` in hot paths — pinning prevents virtual threads from being unmounted during blocking; prefer `ReentrantLock` or `Semaphore`.
+
+- **Migration path from reactive to synchronous code** — Replace a complex reactive stack (WebFlux, RxJava) with simpler blocking code on virtual threads.
+  - Switch to virtual-thread-backed Tomcat with Spring MVC (instead of WebFlux) while keeping the same throughput. Example: a team struggling with reactive debugging and learning curve.
+  - **Avoid when:** the existing reactive codebase is stable and performant — the migration cost may not justify the benefit.
+
 ## Scenario-Based Questions
 
 **Q: Your web application currently uses a thread pool of 200 platform threads to handle HTTP requests. You want to migrate to virtual threads. What changes are required in the web server configuration?**

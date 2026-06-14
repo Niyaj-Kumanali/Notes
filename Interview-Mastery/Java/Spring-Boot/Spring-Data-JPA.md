@@ -314,6 +314,32 @@ Page<OrderReportRow> findReportRows(Pageable pageable);
 
 ---
 
+## Use Cases
+
+- Spring Data JPA eliminates boilerplate data-access code but requires careful handling of performance and query generation. These use cases cover the most common data-access patterns in production applications.
+
+- **Standard CRUD with `JpaRepository`** — A REST API needs basic create, read, update, and delete operations for a `Customer` entity.
+  - Extend `JpaRepository<Customer, Long>` and get `save()`, `findById()`, `findAll()`, `deleteById()` for free. Add custom queries via derived method names or `@Query`.
+  - **Avoid when:** You need read-only access with DTO projections — consider interface-based projections or `@Query` with JPQL constructors to avoid loading full entities.
+
+- **N+1 query prevention on list endpoints** — An order listing endpoint that loads items lazily causes one SQL query per order, slowing from 200ms to 8s as traffic grows.
+  - Use `JOIN FETCH` or `@EntityGraph` in the repository query to load associations eagerly in a single SQL statement. Test with `spring.jpa.show-sql=true`.
+  - **Avoid when:** Joining many associations creates a Cartesian product — limit to 2-3 `JOIN FETCH` and use `@BatchSize` for the rest.
+
+- **Dynamic filtering with `Specification`** — An admin dashboard lets users filter by any combination of 15 fields (status, role, date range, plan type).
+  - Implement `JpaSpecificationExecutor` and build `Specification<User>` objects dynamically. Compose predicates with `and()`/`or()` based on which filter fields are present.
+  - **Avoid when:** The number of filter combinations is small and fixed — derived query methods are simpler and more readable.
+
+- **Read-optimized DTO projections for reporting** — A reporting module displays 100K+ rows with only 5 fields. Loading full entities consumes 200MB of heap.
+  - Use interface-based projections (`interface OrderProjection { String getName(); }`) or `@Query` with JPQL constructor expressions. Only the selected columns are fetched.
+  - **Avoid when:** You need to write back changes — full entity loading is required for persistence context tracking.
+
+- **Pagination and sorting for large result sets** — A product search endpoint returns thousands of results that must be sliced into pages and sortable by price, rating, or name.
+  - Accept `Pageable` (with `page`, `size`, `sort` parameters) in the repository method. Return `Page<Product>` which includes total count and page metadata.
+  - **Avoid when:** The client needs a streaming cursor over millions of rows — use `Stream<T>` with `@Transactional(readOnly = true)` and a scrollable result set.
+
+---
+
 ## Scenario-Based Questions
 
 - **Q: You notice that a simple `findAll()` on an `Order` entity with 20 `@OneToMany` associations takes 30 seconds and generates 150+ SQL queries. No exceptions, but the production database CPU is at 100%. How do you fix this?**

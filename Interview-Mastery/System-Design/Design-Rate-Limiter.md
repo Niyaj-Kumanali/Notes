@@ -81,6 +81,28 @@
 - Each request's timestamp is added to a sorted set keyed by the limiting identifier
 - Lua script atomically removes expired entries and checks the count
 
+## Use Cases
+
+- **API gateway rate limiting** — protecting public APIs from abuse by individual users or IPs
+  - Token bucket or sliding window algorithm per user/IP. Returns `429 Too Many Requests` with `Retry-After` header when limit is exceeded.
+  - **Avoid when:** the client is trusted (internal service-to-service) — internal traffic may bypass rate limiting to avoid latency overhead.
+
+- **DDoS mitigation** — absorbing distributed denial-of-service attacks targeting application endpoints
+  - Global rate limits at the edge (CDN/load balancer level) before traffic reaches application servers. Challenge-based protection (CAPTCHA) for suspicious sources.
+  - **Avoid when:** the attack is a low-and-slow application-layer attack — rate limiting alone won't suffice; combine with WAF rules and anomaly detection.
+
+- **Tiered pricing enforcement** — free tier limited to 1000 requests/hour while premium tier allows 100,000 requests/hour
+  - Per-API-key rate limits configured based on subscription tier. Limits are checked on every request before processing.
+  - **Avoid when:** pricing is based on usage volume rather than request count — consider metering and billing instead.
+
+- **Login and registration throttling** — preventing brute-force password guessing or account enumeration
+  - Aggressive rate limits on `/login` and `/register` endpoints per IP and per username/IP combination. Exponential backoff on repeated failures.
+  - **Avoid when:** the application uses a dedicated identity provider (Auth0, Cognito) — delegate rate limiting to the IdP's configuration.
+
+- **Resource fairness across tenants** — ensuring one noisy tenant doesn't degrade service for others in multi-tenant systems
+  - Per-tenant rate limiting distributes resources proportionally. Burst capacity allows short spikes but sustained usage is capped.
+  - **Avoid when:** tenants pay for dedicated capacity — rate limits should reflect purchased capacity, not enforce uniform fairness.
+
 ## Scenario-Based Questions
 
 **Q: Your rate limiter uses a centralized Redis instance. During a traffic spike, Redis CPU hits 100% and the rate limiter starts failing open (allowing all requests). What happened and how do you fix it?**

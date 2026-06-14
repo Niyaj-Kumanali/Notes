@@ -339,6 +339,30 @@ public class EventPipeline {
   - If stages needed to produce new event objects from old ones, `Function<Event, Event>` would be more appropriate, avoiding mutable state entirely.
   - Choosing `Consumer` over `Function` here signals that the pipeline is a side-effect chain, not a transformation pipeline.
 
+## Use Cases
+
+- Reach for functional interfaces (or write your own) whenever you need a typed contract for a single behavior that can be passed around — as a lambda target, a method reference target, or a callback. The Java standard library provides 43+ functional interfaces in `java.util.function`.
+
+- **`Predicate<T>` for filtering and validation** — test a condition
+  - Use `Predicate<T>` when a method needs to accept a condition to test against each element. Stream `filter()` is the canonical consumer. Chain predicates with `.and()`, `.or()`, `.negate()` to compose complex rules.
+  - **Avoid when:** the predicate throws a checked exception — standard `Predicate<T>` does not declare `throws`. Create a custom `ThrowingPredicate` or use a catch-wrapping adapter.
+
+- **`Function<T, R>` for transformation** — convert input to output
+  - Use `Function<T, R>` when a method transforms one value into another. Stream `map()` is the primary consumer. Compose functions with `.andThen()` and `.compose()` for pipeline building.
+  - **Avoid when:** the transformation has side effects — use `Consumer<T>` instead to signal that the purpose is the side effect, not the return value.
+
+- **`Consumer<T>` for side effects** — operate on an input, return nothing
+  - Use `Consumer<T>` for callbacks that perform actions (logging, sending, persisting) without producing a result. Stream `forEach()` is the canonical consumer. Chain consumers with `.andThen()`.
+  - **Avoid when:** the consumer modifies the input object — a `Function<T, T>` or `UnaryOperator<T>` is more honest about the transformation.
+
+- **`Supplier<T>` for lazy or deferred generation** — produce a value on demand
+  - Use `Supplier<T>` when generating a value is expensive or should be delayed. `Optional.orElseGet(supplier)` computes the default only when the Optional is empty. Also used in `Stream.generate()` for computed sequences.
+  - **Avoid when:** the value is cheap and always needed — pass the value directly rather than wrapping it in a supplier.
+
+- **`Comparator<T>` for ordering** — compare two elements
+  - `Comparator<T>` is a functional interface with `compare(T, T)` plus default methods like `reversed()`, `thenComparing()`, `nullsFirst()`. Use `Comparator.comparing(KeyExtractor)` to create comparators from method references.
+  - **Avoid when:** the natural ordering of the class is what you want — implement `Comparable<T>` on the class itself.
+
 ---
 
 ## Scenario-Based Questions

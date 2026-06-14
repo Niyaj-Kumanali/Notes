@@ -143,6 +143,26 @@
   }
   ```
 
+## Use Cases
+
+Pattern matching transforms type checks and destructuring from verbose, error-prone idioms into concise, compiler-verified expressions.
+
+- **Type-safe `instanceof` chains** — Replace cascading `if-else` or `Visitor` patterns with a single expression.
+  - Use `if (obj instanceof String s)` or pattern-matching `switch` to bind the variable and check the type atomically. Example: processing a heterogeneous `List<Object>` where each element needs specific handling.
+  - **Avoid when:** the type set is open and a default fallback is acceptable — pattern matching with sealed types gives compile-time exhaustiveness; an open hierarchy needs a `default` branch.
+
+- **Record deconstruction** — Extract nested fields from a record hierarchy in one step.
+  - Match `Wrapping(Container(Point(int x, int y), String label))` to destructure all levels at once. Example: JSON-like nested data structures processed in a rules engine.
+  - **Avoid when:** only a top-level field is needed — a simple accessor call is clearer than a nested pattern.
+
+- **Exhaustive switches over sealed types** — Guarantee every permitted subtype is handled; the compiler flags any omission.
+  - Write a switch expression over a sealed interface without a `default` branch. Example: processing each `Shape` variant (Circle, Rect, Triangle) in a drawing application.
+  - **Avoid when:** the type hierarchy is not sealed — a `default` branch is required and the compiler cannot enforce exhaustiveness.
+
+- **Guarded patterns** — Combine a type check with an additional condition without nested `if` statements.
+  - Write `case Circle c when c.radius() > 0 -> ...` to apply the branch only when the radius is positive. Example: validating domain objects during deserialization.
+  - **Avoid when:** the guard condition is expensive or has side effects — guards are evaluated for every matching case, so pre-compute the condition if possible.
+
 ## Scenario-Based Questions
 
 **Q: You have a method that receives an Object and needs to extract data from a deeply nested record structure like `Wrapper(Container(Point(int x, int y), String label))`. How would you implement this without explicitly calling getters?**

@@ -328,6 +328,30 @@ public class SMSNotifier {
 }
 ```
 
+## Use Cases
+
+- Reach for a design pattern when you recognize a recurring structural or behavioral problem and want a battle-tested solution that the team already understands by name. Patterns are not silver bullets — they add indirection in exchange for flexibility.
+
+- **Singleton** — single instance, global access point
+  - Use for shared resources like a thread pool, configuration manager, or connection pool where multiple instances would conflict. Spring beans are singletons by default — you rarely need to implement it manually.
+  - **Avoid when:** the "singleton" needs to be testable — inject it via DI instead of using a static `getInstance()`.
+
+- **Factory Method / Abstract Factory** — decoupling object creation from usage
+  - Use when the exact type of an object is determined at runtime (e.g., creating different `Notification` types based on a channel enum). The client code works with the interface; the factory decides the concrete class.
+  - **Avoid when:** a simple `new` with a conditional suffices — a factory adds unnecessary indirection for two or three variants.
+
+- **Builder** — constructing complex objects step by step
+  - Use when an object has many optional parameters, or when the construction needs to produce different representations (e.g., building an SQL query, an HTTP request, or a meal combo). The builder separates construction from representation.
+  - **Avoid when:** the object has 2–3 simple parameters — use a constructor or a static factory method instead.
+
+- **Strategy** — interchangeable algorithms at runtime
+  - Use when you have multiple ways to perform an operation (sorting, pricing, validation) and want to switch between them without conditionals. Each strategy is a separate class implementing a common interface.
+  - **Avoid when:** the strategies differ only in one value (e.g., discount percentages) — pass the value as a parameter rather than creating one class per variant.
+
+- **Observer / Event-Driven** — one-to-many notification of state changes
+  - Use when a state change in one object should trigger updates in multiple others (e.g., order placed → send email, update inventory, log audit). Spring's `@EventListener` or a message broker (Kafka/RabbitMQ) implement this cleanly.
+  - **Avoid when:** the reaction is always the same single action — a direct method call is simpler and avoids event dispatch overhead.
+
 ---
 
 ## Scenario-Based Questions

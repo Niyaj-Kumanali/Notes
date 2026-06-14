@@ -478,6 +478,26 @@ public class MigrationCoordinator {
 
 ---
 
+## Use Cases
+
+The `java.util.concurrent` package provides production-ready building blocks for most concurrent programming needs, from thread management to coordination.
+
+- **Thread pools for request handling** — Manage a fixed or cached set of worker threads to avoid the cost of per-task thread creation.
+  - Use `Executors.newFixedThreadPool(n)` or `newCachedThreadPool()` for web server request processing. Example: accepting HTTP connections with a bounded pool to prevent resource exhaustion.
+  - **Avoid when:** tasks are long-lived CPU-bound and the pool is sized larger than available cores — oversubscription degrades throughput.
+
+- **Concurrent collections** — Share data across threads without external synchronization when access patterns fit the collection's design.
+  - Use `ConcurrentHashMap` for high-read, moderate-write maps. Example: an in-memory cache of user sessions updated by one thread and read by many.
+  - **Avoid when:** compound operations (iterate-then-modify) are needed — use `compute` or `merge` atomic methods instead.
+
+- **Atomic counters and accumulators** — Safely increment or update a single numeric value without locks.
+  - Use `AtomicInteger`, `LongAdder`, or `AtomicReference` for metrics, sequence generators, or status flags. Example: counting requests per second across dozens of threads.
+  - **Avoid when:** multiple related fields must change atomically — use a lock or `StampedLock` for multi-field invariants.
+
+- **Coordination primitives** — Orchestrate multi-thread workflows where threads must wait for each other or for external conditions.
+  - Use `CountDownLatch` for one-shot barriers, `CyclicBarrier` for repeated synchronization, `Phaser` for dynamic party sets, `Semaphore` for resource access limits. Example: a batch processor that starts all workers after data is fully loaded.
+  - **Avoid when:** a simpler `CompletableFuture` chain or structured concurrency (`StructuredTaskScope`) can express the same orchestration more declaratively.
+
 ## Scenario-Based Questions
 
 **Q: You are designing a real-time chat server that handles 100K concurrent connections. Each user can be in multiple chat rooms. Messages must be delivered to all members of a room within 100ms. The server runs on 8 cores. How do you structure the concurrency?**

@@ -298,6 +298,32 @@ public class BatchProcessor {
 
 ---
 
+## Use Cases
+
+- Declarative transaction management with `@Transactional` is the standard approach for ensuring data consistency. These use cases cover isolation, propagation, and rollback strategies for real-world transactional boundaries.
+
+- **Atomic write operations across multiple repositories** — A funds-transfer service must debit one account and credit another in a single atomic unit. If the credit fails, the debit must roll back.
+  - Place both operations in a `@Transactional` method. Spring commits only if the method completes without exception; any `RuntimeException` triggers a rollback of both writes.
+  - **Avoid when:** The second operation is in a different microservice — use a saga pattern with compensating actions instead of a distributed transaction.
+
+- **Independent audit logging within a transaction** — A service must log every order attempt (success or failure) for compliance, and the audit record must persist even when the main transaction rolls back.
+  - Mark the audit service method with `@Transactional(propagation = Propagation.REQUIRES_NEW)`. It suspends the parent transaction and commits independently.
+  - **Avoid when:** The audit should be part of the same transaction — use the default `REQUIRED` propagation instead.
+
+- **Per-record transaction isolation in batch jobs** — A nightly batch processes 50K records. One bad record must not roll back the entire batch.
+  - Use `TransactionTemplate` with `PROPAGATION_REQUIRES_NEW` inside the record loop. Catch exceptions per record, log them, and continue processing.
+  - **Avoid when:** The batch is small (< 100 records) — failing fast and rolling back the whole batch may be simpler and safer.
+
+- **Read-only transaction optimization** — A reporting service queries large datasets without any writes. The database can optimize read-only connections by skipping lock acquisition.
+  - Use `@Transactional(readOnly = true)` on the method or the entire service class. Hibernate skips dirty checking, reducing flush overhead.
+  - **Avoid when:** The method performs any writes — `readOnly = true` does not prevent writes but may cause confusing behavior with some database drivers.
+
+- **Custom rollback rules for checked exceptions** — An `@Transactional` method calls an external API that throws a checked `InsufficientInventoryException`. By default, Spring only rolls back on `RuntimeException`.
+  - Use `@Transactional(rollbackFor = InsufficientInventoryException.class)` to declare that checked exceptions should also trigger a rollback.
+  - **Avoid when:** The exception indicates a retryable condition (e.g., deadlock) — configure a `RetryOperationsInterceptor` instead.
+
+---
+
 ## Scenario-Based Questions
 
 - **Q: Your `@Transactional` service method catches a `DataIntegrityViolationException` and logs it but does not rethrow. A customer reports that their order was not created. The database shows no order record. But the method returned normally without an error to the client. What happened?**

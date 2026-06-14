@@ -318,6 +318,28 @@ class OrderEventTest {
   - This is strictly more reliable than `Thread.sleep(3000)` which wastes 3 seconds even when the event completes in 50ms, and fails intermittently when the event takes 3.1 seconds on a slow CI machine.
   - The `@MockBean` annotations replace real Spring beans with Mockito mocks, so side-effect verification is fast, isolated, and does not require a real email server.
 
+## Use Cases
+
+- **Unit testing Java classes** — testing individual methods in isolation from external dependencies
+  - `@Test` methods with JUnit assertions (`assertEquals`, `assertTrue`, `assertThrows`). `@DisplayName` for readable test names. `@ParameterizedTest` for data-driven tests.
+  - **Avoid when:** the test requires Spring context — `@SpringBootTest` is better suited; `@ExtendWith(SpringExtension.class)` bridges JUnit 5 and Spring.
+
+- **Integration testing with extensions** — testing code that needs database, file system, or network access
+  - Custom `Extension` (replacing JUnit 4 `@Rule`) manages test lifecycle. Temporary directories via `@TempDir`. Database setup with `@BeforeEach`/`@AfterEach`.
+  - **Avoid when:** the integration requires external infrastructure — combine with Testcontainers for a real database instance.
+
+- **Parameterized testing** — running the same test with multiple input/output combinations
+  - `@ValueSource`, `@CsvSource`, `@MethodSource` provide test data. Test runs once per combination. Reduces boilerplate compared to loop-based testing.
+  - **Avoid when:** each test case has unique assertion logic — individual test methods are clearer when the expected behavior differs per input.
+
+- **Migration from JUnit 4 to 5** — incrementally adopting JUnit 5 without rewriting existing tests
+  - `junit-vintage-engine` allows JUnit 4 tests to run under the JUnit 5 platform. Migrate file-by-file. JUnit 5's `@Nested` and `@DisplayNameGeneration` improve test organization.
+  - **Avoid when:** the project is new — start with JUnit 5 directly.
+
+- **Conditional test execution** — skipping tests based on OS, Java version, or environment variables
+  - `@EnabledOnOs`, `@DisabledOnJre`, `@EnabledIfEnvironmentVariable`. Tests are conditionally executed at runtime. Useful for platform-specific tests.
+  - **Avoid when:** the condition makes tests invisible to reviewers — a comment explaining why a test is disabled is more transparent than a conditional annotation.
+
 ---
 
 ## Scenario-Based Questions

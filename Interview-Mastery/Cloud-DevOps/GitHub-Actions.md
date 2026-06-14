@@ -271,6 +271,28 @@ jobs:
 
   - Each runner pod is ephemeral — it runs exactly one job, then is destroyed. This prevents cross-job contamination (no stray files or credentials from previous runs) and ensures a clean environment every time. The runner pods use a custom Docker image with all tools pre-cached (Node.js versions, Python, Java, Docker, Go, .NET), reducing job setup time from 60 seconds (fresh GitHub-hosted runner) to under 5 seconds. The Kubernetes cluster uses a dedicated node pool for runners with spot instances for cost savings. Auto-scaling scales to zero when no jobs are queued, and the cluster autoscaler deallocates the underlying VMs. Total cost dropped to $2,000/month — the Kubernetes cluster with spot instances, with the same CI throughput. The security model isolates runners in a separate namespace with no access to production namespaces, and all outbound traffic goes through a NAT gateway with audit logging.
 
+## Use Cases
+
+- **CI for pull requests** — automatically running tests, linting, and building for every PR
+  - Workflow triggers on `pull_request` event. Matrix builds across OS and runtime versions. Status check blocks merging on failure.
+  - **Avoid when:** the repository is private and has low activity — GitHub Actions minutes still incur cost; consider self-hosted runners for savings.
+
+- **CD to cloud providers** — deploying to AWS, Azure, or GCP after successful CI
+  - OIDC authentication securely connects Actions to cloud providers without storing long-lived credentials. Deploy jobs run after CI passes.
+  - **Avoid when:** deployment requires complex orchestration — use a dedicated deployment tool (ArgoCD, Spinnaker) for advanced rollout strategies.
+
+- **Scheduled maintenance tasks** — daily database backups, weekly dependency updates, or monthly certificate renewal
+  - `schedule` event with cron syntax triggers workflows at specified intervals. Slack/email notifications on success or failure.
+  - **Avoid when:** the task is triggered by external events — use webhooks or event-driven architecture instead.
+
+- **Monorepo CI optimization** — building and testing only changed services in a monorepo
+  - Path filters in workflow triggers minimize unnecessary builds. Custom scripts compute dependency impact. Reusable workflows share logic across services.
+  - **Avoid when:** the monorepo has fewer than 5 services — building everything on every commit is simpler and fast enough.
+
+- **Self-hosted runner auto-scaling** — handling variable CI load without paying for always-on GitHub-hosted runners
+  - Actions Runner Controller (ARC) on Kubernetes scales runner pods based on job queue depth. Ephemeral pods eliminate cross-job contamination.
+  - **Avoid when:** CI load is constant and predictable — GitHub-hosted runners are easier to manage and have predictable pricing.
+
 ---
 
 ## Scenario-Based Questions

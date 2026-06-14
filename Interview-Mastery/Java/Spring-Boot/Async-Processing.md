@@ -276,6 +276,32 @@
 
 ---
 
+## Use Cases
+
+- `@Async` offloads work from the request thread to improve responsiveness and throughput. These use cases cover common async patterns, thread-pool configuration, and context propagation.
+
+- **Fire-and-forget notifications** — An order service must send confirmation emails, SMS, and push notifications after checkout without making the user wait.
+  - Annotate the notification method with `@Async` and `void` return type. The request thread returns immediately; notifications run on a background thread.
+  - **Avoid when:** The caller needs the result — use `CompletableFuture<T>` as the return type and combine futures if needed.
+
+- **Long-running report generation with progress feedback** — A PDF report takes 30-60 seconds. The user should get a `202 Accepted` response and poll a status endpoint.
+  - Return `CompletableFuture<Void>` from the `@Async` method. The controller returns `202 Accepted` with a report ID immediately. A separate status endpoint tracks completion.
+  - **Avoid when:** The report is generated synchronously on a user action — consider WebSockets or SSE for push-based completion notification.
+
+- **Dedicated thread pool for I/O vs. CPU tasks** — File uploads (I/O-bound) and image processing (CPU-bound) have different resource profiles. Mixing them causes thread contention.
+  - Define multiple `@Bean("ioExecutor")` and `@Bean("cpuExecutor")` `ThreadPoolTaskExecutor` instances with different pool sizes. Reference them via `@Async("ioExecutor")`.
+  - **Avoid when:** All async tasks have similar characteristics — a single shared executor with sensible defaults is sufficient.
+
+- **Security context propagation to async threads** — An audit service runs async but loses the authenticated user identity, logging all actions as anonymous.
+  - Implement a `TaskDecorator` that captures `SecurityContextHolder` and `MDC` from the caller thread and restores them in the worker thread. Register it on the executor.
+  - **Avoid when:** The async task does not need user context — skip propagation to keep the task simpler and safer.
+
+- **Async exception handling with `AsyncUncaughtExceptionHandler`** — An `@Async` method throws an exception that is silently swallowed because the caller's thread no longer exists.
+  - Implement `AsyncConfigurer.getAsyncUncaughtExceptionHandler()` to log the exception and trigger alerts. For `CompletableFuture` returns, handle exceptions via ` exceptionally()` or `handle()`.
+  - **Avoid when:** The caller uses `Future.get()` — the exception is thrown to the caller's thread on `get()`.
+
+---
+
 ## Scenario-Based Questions
 
 **Q: Your application processes file uploads. Each file needs virus scanning, thumbnail generation, and cloud upload. The total processing time is 15 seconds per file. Users wait on the upload endpoint for 15 seconds. How do you decouple this?**

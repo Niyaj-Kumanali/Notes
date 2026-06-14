@@ -114,6 +114,28 @@ public class CheckoutController {
 
 **Resolution:** Implement predictive monitoring. Track growth rates of all metrics (DB query latency, connection pool usage, disk I/O, request rate). Model when each resource reaches critical thresholds. When the growth trend projects hitting the limit within 30 days, create a proactive ticket. The DB latency issue is fixed (missing index added) before it becomes an incident.
 
+## Use Cases
+
+- **Service health monitoring** — CPU, memory, request rate, error rate, and latency for each service
+  - Key RED metrics (Rate, Errors, Duration) collected and visualized in real-time dashboards. Alerts fire when metrics cross defined thresholds.
+  - **Avoid when:** you need detailed per-transaction context — metrics summarize, they don't capture individual request details.
+
+- **SLO-based alerting** — measuring and alerting on service level objectives (e.g., 99.9% uptime, <500ms P95 latency)
+  - Burn-rate alerts track how fast the error budget is consumed. Multi-window approach catches sustained degradation while ignoring brief blips.
+  - **Avoid when:** the service is not customer-facing — internal services may have looser SLOs and simpler threshold alerts.
+
+- **Capacity planning and auto-scaling** — predicting when resources will be exhausted and scaling proactively
+  - Trend analysis of growth rates (requests, storage, connections). Predictive modeling identifies when thresholds will be hit in 7–30 days.
+  - **Avoid when:** traffic is highly erratic and unpredictable — reactive auto-scaling with generous headroom is more practical.
+
+- **Cost optimization** — identifying over-provisioned resources, unused instances, or inefficient queries
+  - Monitor utilization metrics. Right-size instances based on actual usage (e.g., CPU < 20% average → downsizing). Track cost per service.
+  - **Avoid when:** uptime guarantees require significant headroom — minimum instance counts may mean some over-provisioning is intentional.
+
+- **Business KPI tracking** — active users, conversion rates, revenue, or feature adoption over time
+  - Business metrics collected alongside technical metrics in the same monitoring platform. Dashboards serve both engineering and product teams.
+  - **Avoid when:** metrics cardinality is very high (e.g., per-user tracking) — consider dimensional metrics systems or analytics databases.
+
 ---
 
 ## Scenario-Based Questions

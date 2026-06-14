@@ -306,6 +306,32 @@ public class ReportService {
 
 ---
 
+## Use Cases
+
+- Spring Core's IoC container is the foundation for any Spring application. These use cases help identify when and how to leverage its core capabilities — from bean wiring to conditional configuration.
+
+- **Microservice with environment-specific beans** — A multi-environment deployment (dev/staging/prod) requires different implementations for the same interface (e.g., `DataSource`, `BlobStorage`).
+  - Use `@Profile` and `@Conditional` to register beans only for the active environment. Keeps environment logic out of code.
+  - **Avoid when:** You need runtime (not deploy-time) switching — use delegation or strategy pattern instead.
+
+- **Plugin-style architecture with dynamically discovered beans** — A notification system adds new channels (email, SMS, push) via separate JARs without modifying the core router.
+  - Inject `List<NotificationSender>` to collect all implementations automatically. New senders are picked up without code changes to the router.
+  - **Avoid when:** Bean ordering matters and default ordering is insufficient — use `@Order` or `@Priority`.
+
+- **Lazy-init for expensive singleton beans** — A reporting engine loads a 2GB ML model that is only needed for 10% of requests.
+  - Mark the bean `@Lazy` and inject with `@Lazy` at the injection point. The model is loaded only on first use.
+  - **Avoid when:** The bean is used in `@PostConstruct` of another bean — lazy beans may not be available yet.
+
+- **Custom scoped beans for request-bound state** — A web application needs a user-cached shopping cart scoped to the HTTP session.
+  - Use `@Scope(value = "session", proxyMode = ScopedProxyMode.TARGET_CLASS)`. The same bean instance lives for the duration of the session.
+  - **Avoid when:** The bean is stateless — singleton scope is more efficient and avoids proxy overhead.
+
+- **Testing with mock dependencies** — A service depends on a payment gateway that is unavailable in CI environments.
+  - Override the bean definition in a `@TestConfiguration` class with a mock/stub. Spring's DI container substitutes the real bean for the test double.
+  - **Avoid when:** You need to test the wiring itself — use `@SpringBootTest` instead of manual bean overrides.
+
+---
+
 ## Scenario-Based Questions
 
 **Q: You are migrating a 10-year-old Spring 3 application with XML config to Spring Boot with annotation-based config. The legacy app has 200+ bean definitions in XML. How do you approach this incrementally without a big-bang rewrite?**
