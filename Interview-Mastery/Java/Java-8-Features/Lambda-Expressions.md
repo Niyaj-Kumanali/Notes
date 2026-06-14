@@ -564,6 +564,47 @@ CircuitBreaker cb = new CircuitBreaker(
   - Lambdas cannot declare instance fields or additional methods, cannot shadow enclosing variables (no new scope), can only implement single-method interfaces (functional interfaces), cannot refer to `this` as the lambda instance itself, and have less flexibility with generic type parameters.
   - Anonymous inner classes are still the correct choice when the implementation requires additional state, multiple interface methods, or `this`-referential behavior.
 
+**How do you compose lambda expressions using `andThen()` and `compose()`?**
+  - `Function<T, R>` provides `andThen()` (applies current function first, then the next) and `compose()` (applies the argument function first, then the current).
+  - Example: `Function<String, String> trimThenUppercase = String::trim.andThen(String::toUpperCase);`
+  - `Consumer<T>` provides `andThen()` for chaining consumers. `Predicate<T>` provides `and()`, `or()`, `negate()` for logical composition.
+
+**What is the `java.util.function` package and what are its core interfaces?**
+  - The package contains 43 functional interfaces organized by arity and type: `Function<T,R>`, `Consumer<T>`, `Predicate<T>`, `Supplier<T>`, `UnaryOperator<T>`, `BinaryOperator<T>`.
+  - Primitive specializations avoid boxing overhead: `IntFunction`, `LongConsumer`, `DoublePredicate`, `ToIntFunction<T>`.
+  - Bi-variants accept two arguments: `BiFunction<T,U,R>`, `BiConsumer<T,U>`, `BiPredicate<T,U>`.
+
+**What is the scope of `this` inside a lambda vs an anonymous class?**
+  - Inside a lambda, `this` refers to the enclosing class instance (the class that contains the lambda expression). Inside an anonymous inner class, `this` refers to the anonymous class instance itself.
+  - This means a lambda cannot access its own instance fields or methods — it has no independent identity.
+
+**Can a lambda throw a checked exception? How do you design APIs that accept throwing lambdas?**
+  - Standard functional interfaces do not declare checked exceptions. A lambda that throws a checked exception must catch it or delegate to a wrapper.
+  - To design a throwing API, create a custom `@FunctionalInterface` with a `throws` clause: `@FunctionalInterface interface ThrowingFunction<T,R> { R apply(T t) throws Exception; }`. Then provide a utility method that converts `ThrowingFunction` to `Function` by wrapping checked exceptions in `RuntimeException`.
+
+**How does `invokedynamic` work for lambda compilation?**
+  - `invokedynamic` is a JVM instruction introduced in Java 7 for dynamic language support, repurposed in Java 8 for lambda compilation.
+  - The compiler emits `invokedynamic` pointing to `LambdaMetafactory.metafactory()` as the bootstrap method. On first invocation, the bootstrap method uses `MethodHandles.Lookup` to generate a `CallSite` containing the lambda's implementation.
+  - The generated implementation is linked as a `ConstantCallSite`, which is never invalidated — subsequent invocations call it directly without bootstrap overhead.
+
+**What happens if a lambda captures a mutable object reference?**
+  - The variable itself must be effectively final, but the object it references can be mutated. The lambda captures the reference, not the object's state.
+  - Example: `List<String> list = new ArrayList<>(); Runnable r = () -> list.add("item");` — this compiles because `list` itself is never reassigned. The lambda calls `list.add()`, which mutates the list's internal state.
+
+**What is the difference between `Runnable` and `Callable` as lambda targets?**
+  - `Runnable.run()` takes no arguments, returns void, and cannot throw checked exceptions.
+  - `Callable.call()` takes no arguments, returns a value, and can throw checked exceptions.
+  - When used as lambda targets: `() -> 42` is a `Callable<Integer>`, not a `Runnable`. `() -> System.out.println("done")` is a `Runnable`.
+
+**How do you create a custom functional interface, and what annotation should you use?**
+  - A functional interface has exactly one abstract method. Use `@FunctionalInterface` to have the compiler enforce this rule.
+  - `default` and `static` methods do not count toward the single abstract method constraint. Example: `@FunctionalInterface interface Transformer<T, R> { R transform(T input); }`.
+  - The annotation is optional but recommended — it prevents another developer from accidentally adding a second abstract method, which would break all lambda assignments.
+
+**What is the relationship between lambdas and the Stream API?**
+  - Lambdas provide the behavior parameterization that makes the Stream API possible. Every `Stream` intermediate operation (`filter`, `map`, `flatMap`, `sorted`, `peek`) and terminal operation (`forEach`, `collect`, `reduce`, `anyMatch`, `noneMatch`) accepts a lambda or method reference.
+  - Without lambdas, each stream pipeline would require a verbose anonymous inner class for every operation, making the API impractical for everyday use.
+
 ---
 
 ## Developer Recommendations

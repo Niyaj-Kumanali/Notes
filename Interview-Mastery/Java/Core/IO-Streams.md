@@ -762,6 +762,43 @@ public class CsvExporter {
   ```
   - In Java 9+, the `InputStreamReader(InputStream)` constructor is annotated with `@SuppressWarnings("try")` to handle this correctly even in a single-resource try-with-resources, but the multi-variable pattern is the most robust approach.
 
+**What is the difference between `OutputStream` and `Writer`?**
+  - `OutputStream` writes raw bytes for binary data; `Writer` writes characters with charset encoding. The bridge is `OutputStreamWriter`.
+  - Always use `Writer` for text output to ensure proper charset conversion. Using `OutputStream.write(String.getBytes())` is error-prone because it depends on the platform default charset.
+
+**What is `PipedInputStream` and `PipedOutputStream` used for?**
+  - Pipe streams connect two threads within the same JVM — one thread writes to `PipedOutputStream`, another reads from the connected `PipedInputStream`.
+  - Used for inter-thread communication without shared memory or files. The pipe has a fixed-size internal buffer (typically 1024 bytes), and writes block when the buffer is full.
+  - In practice, `BlockingQueue` or `Exchanger` are preferred for thread communication because they handle synchronization more explicitly.
+
+**How does `ObjectOutputStream` handle circular references during serialization?**
+  - `ObjectOutputStream` maintains a reference table of all objects already written. When a previously serialized object is encountered again, it writes a back-reference to the table instead of serializing the object's data again.
+  - This handles circular object graphs without infinite recursion and reduces the serialized stream size. The reference table is cleared when `reset()` is called on the stream.
+
+**What is the purpose of `PushbackInputStream`?**
+  - `PushbackInputStream` allows you to "unread" one or more bytes back into the stream so they will be returned by the next `read()` call.
+  - Useful for parsing scenarios where you need to peek ahead to determine how to interpret the current token, then push back characters that were read speculatively. The pushback buffer size defaults to 1 byte.
+
+**What is `SequenceInputStream` used for?**
+  - `SequenceInputStream` concatenates multiple `InputStream` instances, reading from each in sequence until exhausted, then moving to the next.
+  - Useful for merging multiple log files, configuration file fragments, or file segments into a single logical stream without creating a temporary concatenated file.
+
+**What is the difference between `RandomAccessFile` and `FileChannel`?**
+  - `RandomAccessFile` supports read/write at arbitrary positions via `seek()` but operates at the byte-stream level.
+  - `FileChannel` provides the same random-access capability through `position()` and `read()`/`write()` at the channel level, with additional features like `transferTo()`, `map()` for memory-mapped I/O, and file locking. For new code, prefer `FileChannel` wrapped in `Channels.newInputStream()`/`newOutputStream()`.
+
+**How does `Console` (System.console()) differ from `Scanner` for reading user input?**
+  - `System.console()` provides password masking (`readPassword()` returns `char[]`, not `String`), formatted printing (`printf()`), and reader/writer access. It returns `null` if the application has no console (e.g., in an IDE or background process).
+  - `Scanner` works anywhere but cannot mask passwords and has no direct console integration. Use `Console` for interactive CLI tools; use `Scanner` for testing or non-interactive scenarios.
+
+**What is the difference between `FileSystem.getDefault()` and `Paths.get()`?**
+  - `FileSystem.getDefault()` returns the JVM's default file system (typically the OS native file system). You can obtain separators, root directories, and file stores from it.
+  - `Paths.get(String)` is a shortcut for `FileSystems.getDefault().getPath()`. Use `FileSystem.getDefault()` when you need file system operations beyond path creation, like creating `WatchService` instances or iterating file stores.
+
+**What is `AsynchronousFileChannel` and how does it differ from `FileChannel`?**
+  - `AsynchronousFileChannel` (Java 7 NIO.2) performs file I/O without blocking the calling thread. `read()` and `write()` return immediately and complete via `Future` or `CompletionHandler`.
+  - Use it for high-concurrency file servers and event-driven architectures where thread-per-file is not scalable. Unlike `FileChannel`, operations can be submitted with a thread pool (`ExecutorService`), and multiple operations on the same channel can run concurrently.
+
 ---
 
 ## Developer Recommendations

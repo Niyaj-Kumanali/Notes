@@ -365,6 +365,49 @@ v.start();  // dispatches to Car.start() at runtime
   - A class with too many responsibilities — a 3000-line `OrderService` doing validation, DB access, email, and logging.
   - Every change touches the same file, making bugs from unrelated changes common. It is impossible to test any one responsibility in isolation because all the others are entangled with it.
 
+- **What is the difference between shallow copy and deep copy?**
+  - Shallow copy creates a new object but does not clone its reference-type fields — both the original and copy share the same nested objects.
+  - Deep copy clones the entire object graph, creating independent copies of all referenced objects. In Java, `clone()` performs shallow copy by default; deep copy requires manual implementation or serialization-deserialization.
+
+- **Can you override a private method in Java?**
+  - No. Private methods are not inherited, so they cannot be overridden. If a child class defines a method with the same signature, it is a new method, not an override — there is no polymorphic dispatch.
+  - This is a common trick question in interviews: the two methods are unrelated, so calling the method on a child reference (declared as the child type) executes the child's version, but calling it on a parent reference (declared as the parent type) executes the parent's version only.
+
+- **What is the difference between `final`, `finally`, and `finalize`?**
+  - `final` is a keyword that prevents inheritance (class), overriding (method), or reassignment (variable).
+  - `finally` is a block in exception handling that always executes regardless of whether an exception is thrown.
+  - `finalize()` is a deprecated method called by the garbage collector before reclaiming an object — never rely on it for resource cleanup; use `AutoCloseable` or `Cleaner` instead.
+
+- **What is a covariant return type?**
+  - An overriding method may return a subtype of the return type declared in the parent method. Java 5 introduced this for generics; Java 7+ extended it to all overrides.
+  - Example: `Parent clone()` can be overridden as `Child clone()` in the subclass without needing a cast at the call site.
+
+- **What is the difference between static and dynamic binding?**
+  - Static binding (early binding) resolves at compile time for `private`, `static`, and `final` methods based on the declared reference type.
+  - Dynamic binding (late binding) resolves at runtime using the actual object type for overridden instance methods. The JVM uses vtable dispatch to find the correct method implementation.
+
+- **What is the diamond problem in multiple inheritance?**
+  - A class inherits from two classes that both inherit from the same base, causing ambiguity over which inherited method to invoke.
+  - Java avoids this by disallowing multiple inheritance of classes. Interfaces with `default` methods solve it via explicit disambiguation: the implementing class must override the conflicting method or use `SuperInterface.super.method()` to pick one.
+
+- **What is a marker interface? Does it violate OOP principles?**
+  - A marker interface has no methods — `Serializable`, `Cloneable`, `RandomAccess`. It tags a class with metadata discoverable via `instanceof`.
+  - Some argue it violates OOP because it uses a type declaration where an annotation would suffice. In modern Java, `@Serializable` or custom annotations are preferred because they can carry configuration and are processed at compile time.
+
+- **What is the difference between coupling and cohesion?**
+  - Coupling measures how dependent one class is on another — low coupling means changes in one class rarely require changes in another.
+  - Cohesion measures how focused a class's responsibilities are — high cohesion means all methods work toward a single purpose.
+  - Good design targets high cohesion and low coupling: a `BankAccount` class should only do account-related things (high cohesion) and should not depend on `EmailService` directly (low coupling).
+
+- **When would you choose an abstract class over an interface in Java 8+?**
+  - Choose an abstract class when the base type has shared state (fields, constructors) or when some methods have common implementation that subclasses must inherit rather than override.
+  - Choose an interface when you define a capability that unrelated classes can implement, or when multiple inheritance of type is needed.
+  - Java 8+ interfaces can have `default` and `static` methods, which has made abstract classes less necessary — but they still cannot hold mutable state or constructors.
+
+- **What is a virtual method?**
+  - A method that can be overridden and participates in runtime polymorphic dispatch. In Java, all non-`static`, non-`private`, non-`final` instance methods are virtual by default — no `virtual` keyword is needed.
+  - The JVM maintains a vtable (virtual method table) per class. At runtime, it reads the correct method pointer from the vtable based on the actual object type, enabling polymorphic behavior with minimal overhead — typically one indirection per call.
+
 ---
 
 ## Developer Recommendations

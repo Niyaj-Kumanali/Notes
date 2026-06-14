@@ -544,6 +544,37 @@ The `remove(key)` in `snapshotAndReset()` is not incidental — it ensures count
   - Each resulting chain either remains a Red-Black tree (if length ≥ 6) or converts back to a linked list (if < 6).
   - Non-tree buckets use the same bit test for redistribution.
 
+**What is the difference between a Comparable and a Comparator?**
+  - `Comparable` defines a natural ordering within the class itself (`int compareTo(T o)`) — used by `TreeSet`, `TreeMap`, `Collections.sort()`.
+  - `Comparator` is an external strategy for ordering when you cannot modify the class or need multiple orderings. Java 8+ makes `Comparator` composable via `thenComparing()`, `reversed()`, `nullsFirst()`.
+  - Example: `Collections.sort(people, Comparator.comparing(Person::lastName).thenComparing(Person::firstName))`.
+
+**How do you avoid ConcurrentModificationException in a multi-threaded environment?**
+  - Use concurrent collections: `ConcurrentHashMap`, `CopyOnWriteArrayList`, `ConcurrentLinkedQueue`, `ConcurrentSkipListMap`.
+  - For existing code: synchronize on the collection object during iteration, or use `Stream` with `Collectors.toList()` to create a snapshot.
+  - The fail-fast mechanism is a bug-detection feature — relying on it as the sole protection is incorrect because it does not guarantee detection under all concurrent access patterns.
+
+**What is the purpose of the Collections utility class? Give three examples.**
+  - `Collections` provides static methods that operate on or return collections.
+  - `Collections.unmodifiableList(list)` — returns a read-only view.
+  - `Collections.synchronizedMap(map)` — wraps a map with synchronized access.
+  - `Collections.binarySearch(list, key)` — performs binary search on a sorted list.
+  - `Collections.reverse(list)`, `Collections.shuffle(list)`, `Collections.rotate(list, distance)` are also frequently used.
+
+**How does EnumMap achieve better performance than HashMap for enum keys?**
+  - `EnumMap` stores values in a plain array indexed by the enum's ordinal, so lookups are O(1) array access — no hash computation or collision resolution.
+  - It is iteration-order guaranteed (the natural order of the enum constants) and uses `volatile` for the value array so iteration does not require copying.
+  - For enum keys, `EnumMap` is always faster and more memory-efficient than `HashMap`.
+
+**What is the difference between a Set and a List in terms of contract?**
+  - A `Set` prohibits duplicates — `add()` returns `false` if the element already exists, as determined by `equals()`. A `List` allows duplicates and maintains insertion order via index.
+  - `Set` has no positional access (no `get(index)`). `List` provides positional access, search by index, and `ListIterator` for bidirectional traversal.
+  - `NavigableSet` extends `Set` with navigation methods like `lower()`, `floor()`, `ceiling()`, `higher()`.
+
+**When would you choose a WeakHashMap over a regular HashMap?**
+  - Use `WeakHashMap` when you want entries to be automatically removed when the key is no longer referenced elsewhere in the application. The map uses weak references for keys — if the only remaining references to a key are the weak references in the map, the GC can reclaim the key and the entry is removed on the next map operation.
+  - Common use cases: caches where entries should not outlive their keys, metadata attached to objects with finite lifetimes, and listener registries where forgetting to unregister causes memory leaks.
+
 ---
 
 ## Developer Recommendations

@@ -594,9 +594,46 @@ public class EventPipeline {
   - Standard functional interfaces should be preferred over custom ones in most cases — create a custom interface only when necessary for checked exceptions, multiple parameters with meaningful names, or type-safe semantic tagging.
   - Example: `@FunctionalInterface interface ThrowingFunction<T,R> { R apply(T t) throws Exception; }`.
 
----
+**How does `Predicate<T>` differ from `Function<T, Boolean>`?**
+  - Both take a `T` and produce a `Boolean`. `Predicate<T>` is semantically a test/toggle (returns primitive `boolean`), while `Function<T, Boolean>` is a transformation (returns boxed `Boolean`).
+  - `Predicate` provides composition methods `and()`, `or()`, `negate()` — `Function` provides `andThen()` and `compose()`. Using the right interface communicates intent.
 
-## Developer Recommendations
+**What is `BiFunction<T, U, R>` and when would you use it?**
+  - `BiFunction<T, U, R>` accepts two arguments of potentially different types and returns a result. `BinaryOperator<T>` is a specialization where both arguments and the result are the same type.
+  - Used in `Map.merge()`, `Stream.reduce()`, and any two-argument transformation. Example: `(a, b) -> a + b` as a `BinaryOperator<Integer>`.
+
+**What is `ToIntFunction<T>` and why do primitive specializations exist?**
+  - `ToIntFunction<T>` takes a `T` and returns a primitive `int`. Similarly: `ToLongFunction`, `ToDoubleFunction`, `IntFunction`, `LongFunction`, `DoubleFunction`.
+  - They exist to avoid autoboxing overhead in numeric pipelines. A `ToIntFunction<Employee>` applied to 1M employees avoids creating 1M `Integer` wrapper objects.
+
+**Can a functional interface have `equals()`, `hashCode()`, or `toString()` abstract methods?**
+  - No — methods from `Object` do not count toward the single abstract method count because all implementations inherit from `Object`. An interface with `boolean equals(Object)` and `int hashCode()` as the only abstract methods is NOT a functional interface.
+
+**How does `@FunctionalInterface` interact with annotation inheritance?**
+  - `@FunctionalInterface` is not inherited by sub-interfaces. A sub-interface of a functional interface must itself be annotated with `@FunctionalInterface` if the compiler should enforce the SAM rule.
+  - If the sub-interface adds no new abstract methods, it remains a functional interface even without the annotation — but the annotation provides compile-time protection.
+
+**What is the difference between `UnaryOperator<T>` and `Function<T,T>`?**
+  - `UnaryOperator<T>` extends `Function<T,T>` — the input and output types are the same. It additionally provides the static `identity()` method.
+  - Similarly, `BinaryOperator<T>` extends `BiFunction<T,T,T>` with `minBy()` and `maxBy()` static methods.
+
+**What is a method reference to a functional interface's method?**
+  - A functional interface's SAM can be referenced as `String::valueOf` matching `Function<Integer, String>`. The method reference resolves against the target type at compile time.
+  - If multiple functional interfaces match the same method reference signature, the assignment target disambiguates: `Function<String, Integer> f = Integer::parseInt;` versus `ToIntFunction<String> f = Integer::parseInt;`.
+
+**How do you write a lambda that matches `TriFunction<T,U,V,R>` (a three-argument function)?**
+  - Java's `java.util.function` does not include `TriFunction`. Define a custom functional interface: `@FunctionalInterface interface TriFunction<A,B,C,R> { R apply(A a, B b, C c); }`.
+  - Or use `(a, b, c) -> { ... }` with a method reference that matches the three parameters.
+
+**What is the difference between an anonymous class and a lambda in terms of overload resolution?**
+  - An anonymous class always creates a new instance of a named class. A lambda uses `invokedynamic` and is resolved at runtime.
+  - Overload resolution differs: `foo(() -> "hi")` infers the target type from context. `foo(new Supplier<String>() { public String get() { return "hi"; } })` explicitly creates an anonymous `Supplier` instance.
+
+**How does the compiler infer the target type of a lambda in method chaining?**
+  - The compiler infers the target type from the expected parameter type of the method receiving the lambda. In `list.stream().map(x -> x).collect(toList())`, `x -> x` is inferred as `Function<T,T>` from `Stream.map()`.
+  - In chained pipelines, inference is left-to-right — the output type of one operation becomes the input type inference context for the next. When inference fails, provide an explicit type: `(String x) -> x`.
+
+---
 
 - **Prefer standard functional interfaces over custom ones**
   - The `java.util.function` package provides 43 interfaces covering the vast majority of lambda use cases.

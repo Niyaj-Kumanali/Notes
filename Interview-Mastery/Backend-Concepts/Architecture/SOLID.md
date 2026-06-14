@@ -318,6 +318,44 @@ public class UserService {
   - SRP keeps classes focused. OCP lets you extend without modifying (via interfaces). LSP ensures subclasses work correctly through those interfaces. ISP keeps interfaces focused so clients don't depend on what they don't need. DIP lets high-level code depend on those interfaces rather than concretions.
   - They form a cohesive set for maintainable OO design.
 
+- **Can you have OCP without polymorphism?**
+  - No. OCP fundamentally requires polymorphism — you cannot extend behavior without modifying existing code unless you dispatch to pluggable implementations.
+  - Without polymorphism, adding a new payment method means adding a new `if` branch in the existing `PaymentProcessor`. With polymorphism, you add a new class implementing `PaymentMethod` and the processor never changes.
+
+- **What is the difference between OCP and the Strategy pattern?**
+  - OCP is the principle (what to achieve); Strategy is one implementation pattern (how to achieve it).
+  - Strategy achieves OCP by encapsulating each algorithm variant behind a common interface so new variants can be added without modifying the client that uses them.
+
+- **How does LSP relate to design by contract?**
+  - LSP is a specific application of design by contract: subclasses must honor the preconditions, postconditions, and invariants established by the base class.
+  - A subclass can weaken preconditions (accept more inputs) but cannot strengthen them. It can strengthen postconditions (return stronger guarantees) but cannot weaken them.
+  - The `Square/Rectangle` violation is fundamentally a precondition/postcondition mismatch: `Rectangle.setWidth` guarantees height is unchanged; `Square.setWidth` violates that postcondition.
+
+- **What is a practical way to detect SRP violations in code review?**
+  - Look for class names containing "and" or "or" (e.g., `UserAndOrderManager`). Check imports — if a class imports from 5+ unrelated packages, it likely has too many responsibilities.
+  - Another heuristic: if you cannot describe what a class does in one sentence without using "and," the class violates SRP.
+
+- **Does Spring's `@Transactional` on a service method violate SRP?**
+  - No. Transaction management is a cross-cutting concern, not a responsibility of the class itself. AOP separates the transaction logic from business logic.
+  - The class still has one business reason to change. The transaction behavior is declarative — changing transaction settings does not require changing the class's code, just its annotation.
+
+- **How does ISP apply to REST API design?**
+  - ISP at the API level means client-specific endpoints rather than a one-size-fits-all API. A mobile client should not have to call an endpoint that returns 50 fields when it only needs 5.
+  - GraphQL solves this at the protocol level (client specifies exact fields). REST solves it via BFF (Backend for Frontend) — separate API surfaces for web, mobile, and third-party clients.
+
+- **What is the role of DIP in hexagonal architecture?**
+  - Hexagonal architecture (ports and adapters) is DIP applied at the architectural level. The core domain depends on port interfaces (abstractions), and infrastructure adapters implement those ports.
+  - The database, message queue, and email service are all adapters that implement ports. Swapping from PostgreSQL to MongoDB means writing a new adapter — the core domain never changes.
+
+- **How would you refactor a class that violates OCP but is already in production?**
+  - Use the Strangler Fig pattern: introduce an interface for the behavior being varied, create implementations for existing variants, then wire them via dependency injection.
+  - Old code using the concrete class is wrapped behind the interface. New code uses only the interface. Gradually migrate call sites until the old class can be removed — no production downtime at any step.
+
+- **When should you intentionally violate SOLID?**
+  - In prototypes or throwaway code — premature abstraction costs time without benefit.
+  - When the behavior is genuinely stable and unlikely to change — an `if-else` for two payment types is fine if your company will never add a third.
+  - SOLID exists to manage change. If change is not expected at a given boundary, applying it there is over-engineering. The key is knowing which boundaries are likely to change — and that judgment comes from domain knowledge, not from principles alone.
+
 ---
 
 ## Developer Recommendations

@@ -430,6 +430,42 @@ public class SMSNotifier {
 - **How do design patterns improve testability?**
   - Patterns like Strategy, Observer, and DIP encourage programming to interfaces rather than concrete classes. This loose coupling makes it trivial to mock dependencies in unit tests and test components in isolation.
 
+- **What is the Singleton pattern and when should you avoid it?**
+  - Singleton ensures a class has exactly one instance with a global access point. Avoid it when the singleton holds mutable state (causes hidden coupling between tests) or when you need to mock the instance in tests.
+  - Spring beans are singletons by default but without the global access point — they're managed by the IoC container, making them testable via DI.
+
+- **What is the Null Object pattern and how does it differ from returning null?**
+  - Null Object returns a no-op implementation instead of null, so callers can call methods on it without null-checking. Example: returning `NoOpLogger` instead of null for a `Logger` field.
+  - The difference is that null forces every caller to check for null explicitly. Null Object lets callers treat the absent case the same as the present case — the object does nothing silently. The trade-off is one extra class per nullable behavior.
+
+- **What is the difference between Adapter and Facade patterns?**
+  - Adapter converts one interface to another so they can work together — it's about compatibility between existing interfaces.
+  - Facade provides a simplified interface to a complex subsystem — it's about reducing complexity for the caller. The Adapter wraps one interface; the Facade wraps an entire subsystem.
+
+- **How does the Template Method pattern differ from the Strategy pattern?**
+  - Template Method defines the skeleton of an algorithm via inheritance — subclasses override specific steps. Strategy composes interchangeable algorithms via interfaces — the client selects a strategy at runtime.
+  - Template Method is static (determined at compile time by subclassing). Strategy is dynamic (determined at runtime by which implementation is passed).
+
+- **What is a real-world example of the Command pattern in Java?**
+  - `Runnable` and `Callable` are Command pattern implementations — they encapsulate an action as an object that can be passed to threads or executors.
+  - In Swing, `Action` objects are commands. In task queues, each task is a command that the worker executes. The pattern enables queuing, logging, and undo/redo support.
+
+- **Explain the Flyweight pattern and where it's used in the JVM.**
+  - Flyweight shares common state across many objects to reduce memory usage. The JVM's `String` interning is a canonical example — string literals with the same value share the same underlying `char[]` array.
+  - `Integer.valueOf(127)` uses flyweight for small integers (-128 to 127). The pattern is valuable when there are many fine-grained objects with shared intrinsic state.
+
+- **What pattern is used by `BufferedReader` and other Java I/O classes?**
+  - Decorator pattern. `BufferedReader` wraps a `Reader` to add buffering behavior. `InputStreamReader` wraps an `InputStream` to convert bytes to characters. `GZIPInputStream` wraps an `InputStream` to add decompression.
+  - The layered wrapping is the hallmark of Decorator — each layer adds one capability, and layers compose arbitrarily.
+
+- **What is the Mediator pattern and how does it compare to Observer?**
+  - Mediator centralizes communication between objects — instead of objects talking directly, they communicate through a mediator. Observer distributes communication — one publisher notifies many subscribers.
+  - Mediator reduces coupling between colleagues (they only know the mediator). Observer reduces coupling between publisher and subscriber (the publisher doesn't know who's listening). Use Mediator for complex many-to-many interactions; use Observer for simple one-to-many notifications.
+
+- **How does the Memento pattern enable undo functionality?**
+  - Memento captures an object's internal state without violating encapsulation. The originator creates a memento containing a snapshot of its state. A caretaker stores mementos and can restore the originator to a previous state.
+  - Example: a text editor's undo stack stores the document state after each change. The trade-off is memory usage — each memento is a full state snapshot, which can be large for complex objects.
+
 ---
 
 ## Developer Recommendations

@@ -305,6 +305,41 @@ public class TaxCalculator {
 - **How does Conway's Law relate to coupling?**
   - System structure mirrors org communication structure. If two teams need to coordinate frequently, their services should be loosely coupled (API/events), not tightly coupled (shared DB).
 
+- **What is Content coupling and give a real example?**
+  - One module directly modifies another module's internal data. Example: a service class directly setting `order.total = x` instead of calling `order.setTotal(x)` which might have validation or side effects. Fix by enforcing proper encapsulation with private fields and accessor methods.
+
+- **What is the difference between Temporal and Procedural cohesion?**
+  - Temporal cohesion groups elements that execute at the same time (e.g., `startup()` that initializes DB, loads config, and starts health check). Procedural cohesion groups elements that follow a sequential procedure but don't share data.
+  - Temporal is worse because the tasks are unrelated apart from timing — a startup failure in the DB initializer should not block the health check from starting.
+
+- **How does coupling affect deployment frequency?**
+  - Tight coupling forces coordinated deployments — if Service A depends on B's internal schema, A cannot deploy unless B deploys first or both deploy together.
+  - Loose coupling (API/event boundaries) enables independent deployability. Teams practicing continuous deployment measure their coupling by how often they can deploy without coordinating with other teams.
+
+- **What is the relationship between coupling and test fragility?**
+  - Each coupling point is a test dependency that must be mocked or set up. A class with 15 direct dependencies (stamp/common coupling) requires 15 mocks in every test — a change to any one dependency breaks every test.
+  - Reducing coupling to Data/Message level means each test mocks only what's directly needed. A change to one dependency breaks only the tests for that specific interface.
+
+- **What is External coupling and when is it acceptable?**
+  - External coupling occurs when modules depend on an external system — a database, filesystem, or third-party API. It's acceptable because the dependency is on a stable interface (SQL, REST API) rather than internal implementation.
+  - The danger is when multiple modules directly access the same external resource without abstraction — a schema change in a shared database (Common coupling via the DB) breaks all consumers.
+
+- **How do you measure cohesion quantitatively?**
+  - LCOM (Lack of Cohesion of Methods) measures how many method pairs do not share fields. LCOM = number of method pairs that don't share fields minus those that do. A high LCOM value means low cohesion — methods operate on disjoint data.
+  - Tools like SonarQube, JDepend, and IntelliJ's structural search can compute these metrics automatically and flag classes above configurable thresholds.
+
+- **What is the relationship between coupling and the Dependency Inversion Principle?**
+  - DIP reduces coupling by ensuring high-level modules depend on abstractions rather than low-level concretions. Without DIP, the coupling is Control or Stamp level (passing concrete implementations).
+  - With DIP, coupling drops to Data coupling (parameters match interfaces) or Message coupling (events). The key mechanism is constructor injection — the class doesn't create its dependencies, so it's not coupled to their creation logic.
+
+- **When is high coupling acceptable?**
+  - Within a single bounded context or module, high coupling between closely related classes is acceptable and even desirable — `Order` and `OrderItem` are tightly coupled by design.
+  - High coupling becomes a problem only at module/service boundaries where independent deployability and team ownership matter. A class that never changes and has no reason to change is fine with high coupling — the risk is purely hypothetical.
+
+- **How does package-private access in Java control coupling?**
+  - Package-private access limits visibility to the same package, creating a natural module boundary. Classes within the package can be tightly coupled among themselves, but outside the package, only public API is visible.
+  - JPMS (Java Platform Module System, Java 9+) enforces this at the JVM level: modules must explicitly `export` packages and `require` other modules. A class outside cannot accidentally depend on internal implementation.
+
 ---
 
 ## Developer Recommendations

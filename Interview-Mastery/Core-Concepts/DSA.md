@@ -382,6 +382,42 @@ hash("banana") = 200 → arr[200 % 16] = "banana"  // index 8 — collision hand
 - **What is the space complexity of a recursive algorithm?**
   - O(depth of recursion) due to call stack frames. Each recursive call adds a frame containing local variables and the return address. A recursive DFS on a tree of depth d uses O(d) stack space. For a balanced tree this is O(log n); for a degenerate (linked-list) tree this is O(n), risking stack overflow on large inputs.
 
+- **What is the difference between a HashMap and a TreeMap?**
+  - HashMap provides O(1) average lookup/insert using hash tables but does not maintain any order. TreeMap provides O(log n) operations using a Red-Black tree and maintains keys in sorted order (natural ordering or custom Comparator).
+  - Choose HashMap when order does not matter and you need the fastest access. Choose TreeMap when you need sorted iteration, range queries (subMap, headMap, tailMap), or floor/ceiling operations.
+
+- **Explain the sliding window technique and when to use it.**
+  - A window `[left, right]` that expands and contracts across the data. Used for subarray/substring problems where you need the optimal contiguous range satisfying a condition.
+  - Example (maximum sum subarray of size k): expand right to add elements, contract left when the window exceeds size k. Each element enters once and leaves once — O(n) total. The technique works when the condition is monotonic (expanding the window never makes a valid window invalid for the property you care about).
+
+- **What is the difference between a stack and a queue?**
+  - Stack (LIFO) — last element pushed is the first popped. Used for DFS, expression evaluation, undo history. Queue (FIFO) — first element enqueued is the first dequeued. Used for BFS, job scheduling, buffering.
+  - In Java, `ArrayDeque` implements both interfaces — use `Deque` with `push`/`pop` for stack semantics, `add`/`poll` for queue semantics.
+
+- **What is the time complexity of merge sort and why is it stable?**
+  - O(n log n) in all cases (best, average, worst). Divide the array into halves recursively (log n levels), then merge each level (O(n) per level). Stability comes from the merge step: when two elements are equal, the element from the left subarray is placed first, preserving the original relative order.
+  - The O(n) auxiliary space is the main disadvantage — merging requires a temporary array of size n.
+
+- **What is a trie and what problems does it solve?**
+  - A tree where each node represents a character; paths from root to nodes spell prefixes. O(k) lookup where k is the key length — independent of dictionary size.
+  - Solves: autocomplete (find all words with a given prefix), spell checking (is this a valid word?), longest common prefix, and IP routing (longest prefix match). Trade-off: O(n × m) memory where n is the number of words and m is average length.
+
+- **How does Java's HashMap handle collisions after Java 8?**
+  - Java 8+ converts a collision bucket from a linked list to a Red-Black tree when a bucket exceeds 8 entries (TREEIFY_THRESHOLD). This improves worst-case from O(n) to O(log n) — a defense against hash-collision DoS attacks.
+  - When the bucket shrinks below 6 entries (UNTREEIFY_THRESHOLD), it converts back to a linked list. The threshold gap prevents oscillation between list and tree on edge operations.
+
+- **What is the difference between counting sort and comparison-based sorts?**
+  - Counting sort does not compare elements — it counts occurrences of each value and reconstructs the sorted array from those counts. O(n + k) where k is the value range. Works only for integers or objects that can be mapped to integer keys.
+  - Comparison sorts (quicksort, mergesort) are O(n log n) on average and work on any comparable type. Counting sort beats comparison sorts when k is not much larger than n (e.g., sorting 1M scores in range 0-100).
+
+- **What is amortized analysis and why does it matter for dynamic arrays?**
+  - Amortized analysis averages the cost of operations over a sequence, reporting the per-operation average rather than the worst case of a single operation.
+  - For ArrayList: a single `add` that triggers resize is O(n), but resize happens only when the array is full. After each resize (doubling capacity), n/2 more O(1) adds follow before the next resize. Total work across n adds is ~3n, making the amortized cost O(1). Without amortized analysis, a dynamic array's `add` would be reported as O(n) — technically true per operation but misleadingly pessimistic.
+
+- **What is the difference between Bellman-Ford and Dijkstra's algorithms?**
+  - Dijkstra's greedily processes nodes by shortest known distance using a priority queue — O((V+E) log V). Fails on negative-weight edges because it assumes processed nodes are finalized.
+  - Bellman-Ford relaxes all edges V-1 times — O(VE). Handles negative weights and detects negative cycles (a cycle whose total weight is negative, making shortest paths undefined). Use Dijkstra for positive-weight graphs; use Bellman-Ford when negative edges may exist or you need cycle detection.
+
 ---
 
 ## Advanced Topics
