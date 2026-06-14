@@ -597,6 +597,55 @@ public class PaymentGateway {
   - I/O-bound: `cores * (1 + waitTime / computeTime)`, which is typically 2-4x the core count.
   - Always measure with your specific workload rather than relying on formulas alone.
 
+**What is thread starvation and how do you diagnose it?**
+  - Thread starvation occurs when high-priority threads consume all CPU time, preventing lower-priority threads from running.
+  - In thread pools, starvation happens when all threads are blocked on tasks queued to the same pool (thread starvation deadlock).
+  - Diagnose with thread dumps — look for threads in `RUNNABLE` state that never make progress, or a pattern where worker threads are all `WAITING` on `Future.get()` for tasks that are queued behind them.
+  - Fix by using separate thread pools for different task types or sizing the pool to handle the maximum dependency depth.
+
+**What is the difference between `synchronized` and `ReentrantLock`?**
+  - `synchronized` is simpler (implicit acquisition/release), JVM-optimized with biased locking and lock coarsening, and cannot be forgotten to unlock.
+  - `ReentrantLock` provides `tryLock()` with timeout, `lockInterruptibly()`, fairness guarantees, `Condition` variables, and `getQueuedThreads()` for monitoring.
+  - For 90% of cases `synchronized` is sufficient — use `ReentrantLock` only when you need its advanced features.
+
+**What is the difference between `submit()` and `execute()` in `ExecutorService`?**
+  - `execute(Runnable)` is fire-and-forget — it returns `void` and does not provide a way to track completion or retrieve exceptions.
+  - `submit()` returns `Future<?>` or `Future<T>`, which allows checking completion, retrieving results, canceling, and catching exceptions via `Future.get()`.
+  - Uncaught exceptions in `execute()` propagate to the `UncaughtExceptionHandler` — in `submit()`, they are stored in the `Future` and thrown when `get()` is called.
+
+**What is a `Future` and what are its limitations?**
+  - A `Future` represents the result of an asynchronous computation, returned by `ExecutorService.submit(Callable)`.
+  - Limitations: `get()` blocks indefinitely (no timeout variant in the original API), no way to chain callbacks, no composition (combine or sequence multiple futures), and no error recovery without blocking.
+  - `CompletableFuture` was introduced in Java 8 to address all these limitations with non-blocking composition and callback chaining.
+
+**What is `volatile` and what does it guarantee?**
+  - `volatile` guarantees visibility — every write to a `volatile` variable happens-before any subsequent read of that variable across all threads.
+  - It prevents the JIT compiler from hoisting reads out of loops and ensures the value is read from main memory, not a CPU cache.
+  - It does NOT provide atomicity — `volatile count++` is still a read-modify-write race condition.
+  - Use `volatile` for flags, status indicators, and completion markers where atomic compound actions are not needed.
+
+**What is the difference between `Thread.start()` and `Thread.run()`?**
+  - `start()` creates a new OS thread and invokes `run()` on that new thread asynchronously.
+  - Calling `run()` directly executes the `run()` method on the current thread — no new thread is created.
+  - Always call `start()`. A common novice mistake is calling `run()` thinking it starts a new thread.
+
+**What is a `ThreadGroup` and should you use it?**
+  - `ThreadGroup` represents a set of threads that can be managed as a group — you can interrupt all threads, set max priority, and get uncaught exception handling.
+  - It is largely obsolete since Java 5, replaced by thread pools and `ExecutorService`.
+  - Most modern code should use named thread pools with `ThreadFactory` instead of `ThreadGroup`.
+
+**What is `Thread.join()` and how does it work?**
+  - `t.join()` causes the current thread to pause execution until thread `t` finishes (enters `TERMINATED` state).
+  - `t.join(5000)` waits at most 5 seconds — returns as soon as `t` completes or the timeout expires.
+  - Under the hood, `join()` uses `wait()`/`notify()` — when a thread terminates, it calls `notifyAll()` on itself, waking up all threads waiting on `join()`.
+  - Use `join()` for simple thread coordination, but prefer `CountDownLatch` or `CompletableFuture` for more complex scenarios.
+
+**What is a `ScheduledExecutorService` and how does it differ from `Timer`?**
+  - `ScheduledExecutorService` can schedule tasks with `schedule()`, `scheduleAtFixedRate()`, and `scheduleWithFixedDelay()`, using a thread pool.
+  - `Timer` uses a single background thread — if a task throws an uncaught exception, the `Timer` thread dies and all subsequent tasks are cancelled permanently.
+  - `ScheduledExecutorService` handles exceptions gracefully — one failing task does not affect others.
+  - Always prefer `ScheduledExecutorService` over `Timer`.
+
 ---
 
 ## Developer Recommendations

@@ -729,6 +729,13 @@ synchronized(lockA) {               synchronized(lockB) {
 
 > **Interview follow-up:** The candidate suggested `tryLock()` with a timeout to avoid deadlock. If both threads back off when they cannot acquire the second lock, they release the first lock and retry — this avoids deadlock but can cause livelock where both threads keep retrying in lockstep. How would you add jitter or exponential backoff to the retry logic to break the livelock cycle?
 
+**Q: A real-time trading system processes buy/sell orders using multiple threads that access a shared order book. Under peak load, traders report that their orders are taking 10x longer to execute even though the system is nowhere near its theoretical capacity. Thread dumps show many threads in `BLOCKED` state on `ReentrantLock` associated with the order book's bid-ask spread calculation. How would you diagnose and resolve this contention?**
+  - The thread dumps reveal `BLOCKED` state — threads are not doing useful work; they are waiting to acquire the spread calculation lock.
+  - The spread calculation is a read-mostly operation (it only changes when market conditions shift, which is far less frequent than order placement).
+  - Solution: replace `ReentrantLock` with `ReadWriteLock` or `StampedLock`. The spread calculation acquires a read lock (shared), while order mutations acquire a write lock (exclusive).
+  - Even better: use `StampedLock.tryOptimisticRead()` for the spread calculation — it never blocks writers and only validates the stamp after reading. If a write occurred during the read, the stamp invalidates and the read retries with a full read lock.
+  - Profile with JFR before and after — expected improvement: 5-10x throughput under contention.
+
 ---
 
 ## Interview Questions
@@ -785,6 +792,53 @@ synchronized(lockA) {               synchronized(lockB) {
   - `shutdown()` prevents new task submission but allows already-submitted tasks to complete normally.
   - `shutdownNow()` interrupts actively executing tasks and returns the list of queued (not yet started) tasks.
   - The best practice pattern is: `shutdown()`, then `awaitTermination(timeout)`, then if not terminated, `shutdownNow()`, then `awaitTermination(timeout)` again for the forced shutdown.
+
+- **What is a `Phaser` and when would you use it?**
+  - `Phaser` is a reusable synchronization barrier similar to `CyclicBarrier` and `CountDownLatch`, but supports dynamic party registration and deregistration.
+  - Parties can register mid-execution via `register()` or `bulkRegister()`, and arrive without waiting via `arrive()`.
+  - Use for multi-phase computations where the number of participating threads changes over time — e.g., a staged data pipeline where some workers join only for specific phases.
+
+- **What is `Exchanger<V>` and what is its use case?**
+  - `Exchanger<V>` provides a synchronization point where two threads can exchange objects — each thread calls `exchange(V)` and blocks until the other thread arrives, receiving the other's object.
+  - Use for pairwise data exchange patterns like a producer-consumer with buffers: one thread hands off a filled buffer and receives an empty one.
+  - The exchange is atomic — both threads must arrive for either to proceed.
+
+- **What is the difference between `Runnable` and `Callable` in a concurrency context?**
+  - `Runnable.run()` returns `void` and cannot throw checked exceptions; its failures propagate to `UncaughtExceptionHandler` if submitted via `execute()`.
+  - `Callable.call()` returns a value and can throw checked exceptions; failures are captured in the `Future` and surfaced when `get()` is called.
+  - `Runnable` is for fire-and-forget tasks; `Callable` for tasks where the caller needs the result or exception.
+
+- **What is `ForkJoinPool` and how does work stealing work?**
+  - `ForkJoinPool` is a specialized thread pool for divide-and-conquer algorithms, where tasks can recursively fork subtasks and join their results.
+  - Work stealing: each worker thread has a double-ended queue (deque) of tasks. A thread that exhausts its own deque can "steal" work from the tail of another thread's deque.
+  - This minimizes contention — the owner pushes/pops from the head, while stealers take from the tail.
+  - Use `ForkJoinPool` for recursive parallel tasks like merge sort, matrix multiplication, and tree traversal.
+
+- **What is `CompletableFuture.allOf()` and `CompletableFuture.anyOf()`?**
+  - `allOf()` returns a `CompletableFuture<Void>` that completes when all provided futures complete. Use for parallel fan-out where you need all subtasks to finish.
+  - `anyOf()` returns a `CompletableFuture<Object>` that completes when any one of the provided futures completes. Use for race patterns (e.g., query multiple replicas, take the fastest response).
+  - Neither `allOf()` nor `anyOf()` propagate results — you must combine them manually with `thenApply()` or `thenAccept()`.
+
+- **What is `ThreadLocalRandom` and why use it over `Random` in multithreaded code?**
+  - `ThreadLocalRandom` provides per-thread instances of `Random`, eliminating contention on the shared seed update.
+  - `Random` uses an `AtomicLong` seed — under high concurrency, CAS failures cause retries and cache line bouncing.
+  - `ThreadLocalRandom` is up to 10x faster than `Random` under contention. Use `ThreadLocalRandom.current().nextInt()`.
+
+- **What is the concept of happens-before in the JMM?**
+  - Happens-before is a partial ordering of operations that guarantees memory visibility — if operation X happens-before Y, then X's effects are visible to Y.
+  - Sources of happens-before: program order (within a thread), monitor unlock before next lock on same monitor, `volatile` write before subsequent read, `Thread.start()` before the started thread's actions, `Thread.join()` after the joined thread's actions, and transitivity.
+  - Without happens-before, compiler reordering and CPU out-of-order execution can produce surprising results.
+
+- **What is the difference between `notify()` and `notifyAll()`?**
+  - `notify()` wakes up a single arbitrarily chosen thread waiting on the monitor — efficient but can cause missed signals if the chosen thread is not the right one.
+  - `notifyAll()` wakes up all waiting threads — safer but may cause unnecessary context switching as all threads contend for the lock.
+  - Use `notifyAll()` unless you can prove that only one thread type waits on the condition and any thread can handle the notification.
+
+- **What is the role of `ThreadMXBean` in diagnosing concurrency issues?**
+  - `ThreadMXBean` (via `ManagementFactory.getThreadMXBean()`) provides thread CPU time, thread contention monitoring, and deadlock detection.
+  - `findDeadlockedThreads()` detects cycles in lock ownership, including `ReentrantLock` and other `java.util.concurrent` locks (not just `synchronized`).
+  - `findMonitorDeadlockedThreads()` only finds `synchronized`-based deadlocks.
+  - Use in automated tests — if `findDeadlockedThreads()` returns non-null, the test fails immediately.
 
 ---
 

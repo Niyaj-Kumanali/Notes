@@ -591,6 +591,53 @@ Map<String, Long> freq = Pattern.compile("\\W+")
     ));
 ```
 
+- **Question: Group products by category and find the most expensive product in each category.**
+```java
+Map<String, Optional<Product>> mostExpensiveByCategory = products.stream()
+    .collect(Collectors.groupingBy(
+        Product::getCategory,
+        Collectors.maxBy(Comparator.comparing(Product::getPrice))
+    ));
+```
+
+- **Question: Collect log entries into a map of service name to list of error messages, filtering out non-error entries.**
+```java
+Map<String, List<String>> errorsByService = logs.stream()
+    .collect(Collectors.groupingBy(
+        Log::getService,
+        Collectors.filtering(
+            log -> log.level().ordinal() >= Level.ERROR.ordinal(),
+            Collectors.mapping(Log::getMessage, Collectors.toList())
+        )
+    ));
+```
+
+- **Question: Partition transactions by amount threshold and compute the average for each group.**
+```java
+Map<Boolean, Double> avgByThreshold = transactions.stream()
+    .collect(Collectors.partitioningBy(
+        tx -> tx.amount() > 1000,
+        Collectors.averagingDouble(Transaction::amount)
+    ));
+```
+
+- **Question: Build a map of department to employee count, sorted by department name.**
+```java
+Map<String, Long> headcount = employees.stream()
+    .collect(Collectors.groupingBy(
+        Employee::getDepartment,
+        TreeMap::new,
+        Collectors.counting()
+    ));
+```
+
+- **Question: Convert a stream of integers to a bracketed comma-separated string, replacing nulls with "N/A".**
+```java
+String result = numbers.stream()
+    .map(n -> n == null ? "N/A" : n.toString())
+    .collect(Collectors.joining(", ", "[", "]"));
+```
+
 ## Interview Questions
 
 - What is a `Collector` and what are its four core functions?
@@ -608,6 +655,36 @@ Map<String, Long> freq = Pattern.compile("\\W+")
 - Can you combine two downstream collectors without `teeing`? How?
 - What happens to the combiner in a sequential stream?
 - How do you group by a composite key in `groupingBy`?
+
+- **What is the difference between `CONCURRENT` and `UNORDERED` characteristics?**
+  - `CONCURRENT` means the accumulator can be called from multiple threads on the same result container — the combiner is never called because each thread accumulates directly into the shared container using thread-safe mechanisms.
+  - `UNORDERED` signals that the collector does not rely on encounter order, allowing the runtime to skip ordering guarantees and merge containers in any order.
+  - A collector with both `CONCURRENT` and `UNORDERED` is the most efficient for parallel streams: the runtime can skip partitioning and merging entirely.
+  - **Interview follow-up:** What happens if a CONCURRENT collector is used on an ordered parallel stream with a stateful accumulator?
+
+- **What happens if a custom collector's combiner is implemented incorrectly?**
+  - The result is silently corrupted under parallel execution — the bug never manifests in sequential streams because the combiner is only called during parallel evaluation.
+  - Common failure: the combiner modifies one container and returns it but also mutates the other, or forgets to combine internal state (e.g., summing counts but leaving the source list unchanged).
+  - Testing requires asserting that sequential and parallel results are identical for the same input, ideally with randomized data that forces the combiner to execute.
+  - **Interview follow-up:** How would you unit-test a custom collector's combiner without relying on `parallelStream()`?
+
+- **How would you collect into an immutable map with duplicate key handling?**
+  - Use `Collectors.toUnmodifiableMap(keyMapper, valueMapper, mergeFunction)` (Java 10+). The merge function resolves key collisions before the map is wrapped in an unmodifiable view.
+  - Alternatively, chain `collectingAndThen(toMap(...), Collections::unmodifiableMap)` for the same result on older JDK versions.
+  - The unmodifiable wrapper throws `UnsupportedOperationException` on any mutation attempt, making the contract explicit to callers.
+  - **Interview follow-up:** Can you construct an immutable map where the value type itself is mutable? Is the map truly immutable?
+
+- **What is the advantage of `teeing` over two separate `collect()` calls?**
+  - `teeing` processes both downstream collectors in a single pass — O(n) instead of O(2n). Two separate calls would iterate the entire stream twice.
+  - For large datasets (millions of records), this difference is significant: a single pass reads the data once from disk or memory, while two passes double the I/O and memory bandwidth pressure.
+  - `teeing` also guarantees both collectors see the same elements in the same order, avoiding subtle data races from concurrent iteration.
+  - **Interview follow-up:** How would you implement a three-way collection without `teeing`? What are the trade-offs?
+
+- **How does `collect()` differ from `reduce()` for custom aggregation?**
+  - `reduce()` requires an associative accumulation function and creates a new immutable result per element (or per chunk in parallel) — the accumulator and combiner are the same binary operator.
+  - `collect()` uses a mutable result container — the accumulator mutates the container in place, avoiding per-element allocation. The combiner merges two containers into one.
+  - For grouping, joining, or summing, `collect()` is significantly more memory-efficient because it reuses a single container and only allocates when the container needs to grow.
+  - **Interview follow-up:** Could you implement `Collectors.toList()` using `reduce()`? What would the performance characteristics be?
 
 ## Developer Recommendations
 

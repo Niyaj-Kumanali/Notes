@@ -575,6 +575,43 @@ public class PaymentService {
 
   > **Interview follow-up:** The candidate explained why the compiler is conservative. If a developer creates a utility `@Default.Impl` annotation that generates override methods at compile time for resolving diamond conflicts, what risks does this annotation processor face when the interface defaults change between library versions?
 
+**Q: A library provides an interface `Initializable` with a default `init()` method that registers the component with a lifecycle manager. A client implements `Initializable` and overrides `init()` with custom logic but forgets to call `super.init()`. The component is never registered, and the application silently skips it during startup. How would you design the interface to prevent this mistake?**
+
+  - The root cause is that the default method has required behavior (registration) that subclasses can accidentally skip by overriding `init()` without delegating to the default.
+  - The fix is to separate the required behavior from the overridable behavior. The interface provides a non-overridable default `init()` (which delegates registration to a private static method) that calls an abstract `initInternal()`:
+  ```java
+  interface Initializable {
+      default void init() {
+          LifecycleRegistry.register(this);
+          initInternal();
+      }
+      void initInternal();
+  }
+  ```
+  - Subclasses implement `initInternal()` and cannot accidentally skip the registration because `init()` is not overridden — it is inherited and final in practice (though not in language syntax).
+  - The broader principle: default methods should be final templates that call abstract or overridable hook methods, similar to the Template Method pattern. Required behavior lives in the default; optional or variable behavior lives in the hook.
+
+  > **Interview follow-up:** The candidate proposed the Template Method pattern. If a subclass genuinely needs to override the entire `init()` workflow for a special component (e.g., a component that initializes asynchronously and cannot use the synchronous template), how would you support both the standard path (template) and the exception path (full override) without a fragile `super.init()` delegation contract?
+
+**Q: A team designs an interface `EventHandler` with a default `handle(Event e)` that logs the event and delegates to `processEvent(Event e)`. The interface also provides a default `canHandle(Event e)` that returns `true` by default. A subclass overrides `canHandle()` to filter events but forgets to also override `handle()`, so the logging in `handle()` still runs for filtered-out events. How do you ensure the filtering applies consistently?**
+
+  - The interface has two separate defaults (`canHandle` and `handle`) that should be used together but are not coupled at the interface level. The subclass overrode one but not the other, creating inconsistent behavior.
+  - The fix is to make the dispatch a single entry point: provide a default `dispatch(Event e)` that checks `canHandle` and then calls `handle`. Subclasses override `canHandle()` and/or `processEvent()` but not `dispatch()`:
+  ```java
+  interface EventHandler {
+      default void dispatch(Event e) {
+          if (canHandle(e)) processEvent(e);
+          else log.warn("Unhandled event: {}", e);
+      }
+      default boolean canHandle(Event e) { return true; }
+      void processEvent(Event e);
+  }
+  ```
+  - Now the filtering is intrinsic to the dispatch: a subclass that overrides `canHandle()` automatically gets the filtered behavior because `dispatch()` calls `canHandle()` before `processEvent()`.
+  - The design error was having two independent defaults that callers must invoke in the right order. The fix consolidates the ordering into a single non-overridable entry point.
+
+  > **Interview follow-up:** The candidate consolidated dispatch into a single entry point. If the event handler chain must process events in priority order (high-priority handlers first), how would you design the prioritization into the interface without forcing every handler to implement ordering logic?
+
 ---
 
 ## Interview Questions
@@ -631,6 +668,47 @@ public class PaymentService {
 **How did default methods change the Collections framework?**
   - Default methods allowed retrofitting `Iterable` with `forEach(Consumer)`, `Collection` with `stream()`, `parallelStream()`, `removeIf(Predicate)`, `spliterator()`, `List` with `sort(Comparator)` and `replaceAll(UnaryOperator)`, and `Map` with `getOrDefault()`, `putIfAbsent()`, `computeIfAbsent()`, `computeIfPresent()`, `merge()`, and `forEach()`.
   - All existing `ArrayList`, `LinkedList`, `HashSet`, `TreeMap`, and custom collection implementations inherited these methods automatically without any code changes.
+
+**What is the difference between default methods and private interface methods (Java 9+)?**
+  - Default methods are public instance methods inherited by implementing classes. They support overriding and participate in virtual dispatch.
+  - Private interface methods (Java 9+) are helper methods that cannot be overridden or inherited. They exist to reduce code duplication within the interface itself.
+  - Private static methods in interfaces follow the same rules as static methods in classes — they can only be accessed from other methods within the same interface.
+  - Use private methods to extract shared logic from multiple defaults without exposing that logic as part of the public API.
+
+**Can a default method override a method from `Object`?**
+  - No. An interface cannot declare a default method that overrides `toString()`, `equals()`, or `hashCode()` because these methods are inherited from `Object` and have special status in the JVM.
+  - If an interface attempts to declare a default `toString()`, the compiler rejects it. The implementing class always inherits `Object.toString()`.
+  - This is by design: allowing interfaces to override `Object` methods would create unresolvable diamond conflicts because every class already inherits these methods from `Object`.
+
+**How does the JVM implement default methods at the bytecode level?**
+  - Default methods are compiled as regular instance methods on the interface, with the `ACC_DEFAULT` flag in the access flags (added in Java 8 class file format version 52).
+  - The JVM's method resolution uses a three-level lookup: (1) class hierarchy — concrete methods in the class and superclasses, (2) interface hierarchy — the most specific default method from interfaces, (3) fallback — throw `AbstractMethodError` if no implementation is found.
+  - The `invokespecial` instruction with `InterfaceName.super.methodName()` calls the default implementation directly, bypassing the virtual dispatch on the interface.
+
+**What happens to default methods when a class is loaded from a pre-Java-8 class file?**
+  - A pre-Java-8 class file (version 52- ) that implements an interface with a default method is not required to implement it — the class inherits the default automatically.
+  - If the class has a method with the same signature as a new default, the "class wins" rule applies: the class's method takes precedence over the default.
+  - This is exactly how `ArrayList` inherited `forEach()` and `stream()` in Java 8 — the class files from Java 7 were loaded without modification, and the JVM resolved the default methods at runtime.
+
+**Can a default method be `strictfp`?**
+  - Yes. The `strictfp` modifier is allowed on default methods, ensuring that floating-point arithmetic in the default method is strictly reproducible across platforms.
+  - Like other modifiers on default methods (`abstract`, `synchronized`, `final` are prohibited), `strictfp` applies only to the method body within the interface.
+
+**How do default methods interact with the `@FunctionalInterface` annotation?**
+  - A `@FunctionalInterface` can have any number of default methods — only the single abstract method (SAM) counts toward the functional interface contract.
+  - Default methods in a `@FunctionalInterface` are inherited by lambda expressions, but lambdas cannot override them. If a lambda needs different behavior for a default method, it must be written as a full anonymous class.
+  - Adding default methods to a `@FunctionalInterface` is a design trade-off: it allows backward-compatible evolution of the interface but can dilute the single-responsibility contract.
+
+**What is the difference between a default method and an abstract class method?**
+  - Default methods cannot access instance state (no fields), cannot be `final` or `synchronized`, and cannot call or be called via `super` in the same way as class methods.
+  - Abstract classes can have constructors, instance fields, and `final` methods. They support stateful initialization and encapsulation.
+  - Default methods provide behavior without state — they are mixins that any class can adopt. Abstract classes provide a base implementation with shared state.
+  - Use default methods when you need to evolve an interface or provide a cross-cutting capability. Use abstract classes when you need shared state, a constructor contract, or mandatory base behavior.
+
+**How do default methods enable the mixin pattern in Java?**
+  - Before default methods, Java had single inheritance of implementation (classes) and multiple inheritance of type (interfaces). Default methods introduced multiple inheritance of behavior — a class can implement multiple interfaces and inherit behavior from each.
+  - This enables the mixin pattern: an interface like `Comparable` provides default comparison behavior, `AutoCloseable` provides default resource cleanup, and a class implements both to compose behaviors without an abstract class hierarchy.
+  - The limitation compared to true mixins (e.g., Scala traits) is that default methods cannot hold state (no fields) and cannot participate in constructor chains.
 
 ---
 

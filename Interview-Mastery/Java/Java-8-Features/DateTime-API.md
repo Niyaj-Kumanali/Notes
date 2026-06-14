@@ -692,6 +692,39 @@ record Event(String id, Instant timestamp, String source, String payload) {}
 
   > **Interview follow-up:** The candidate proposed reconstructing historical timezone mappings. If the branch's timezone change coincided with a DST transition, how would you disambiguate which offset applies to a historical transaction — use the zone rules at the transaction's local date/time, or look up the actual offset from historical tzdata?
 
+**Q: A developer uses `Instant.now()` for logging timestamps and `LocalDateTime.now()` for display in the UI. The logs and UI show times that differ by several hours. The developer verifies both calls happen within the same millisecond. What is wrong?**
+
+  - `Instant.now()` always returns the current UTC instant. `LocalDateTime.now()` uses the JVM's default timezone, which is typically the server's configured timezone. If the server's timezone is not UTC, the two values represent different points on the timeline.
+  - The fix: use `Instant.now()` for both logging and as the source of truth for the UI. Convert to `ZonedDateTime` with the user's timezone for display: `Instant.now().atZone(userZone).toLocalDateTime()`.
+  - The root cause is that `LocalDateTime.now()` silently uses the default timezone, which may differ from UTC. The developer assumed both calls returned the same instant — but `LocalDateTime.now()` returns the local clock time, not the UTC instant.
+
+  > **Interview follow-up:** The candidate identified the default timezone assumption. If the server's JVM timezone is changed from UTC to America/New_York to fix a display bug in one region, what cascading effects occur for other systems that rely on the server's UTC timestamps?
+
+**Q: A batch process reads `Period.ofDays(30)` intervals from a configuration file and adds them to `LocalDate.now()` for scheduling. Some months the schedule jumps to the 28th instead of the 30th. What is happening?**
+
+  - `Period.ofDays(30)` adds exactly 30 calendar days. When the current date is near month-end, adding 30 days may cross a month boundary: January 31 + 30 days = March 2 (because February has 28 days, so January 31 + 30 days = March 2).
+  - The developer expected "30 days" to mean "approximately one month," but `Period.ofDays(30)` does not preserve the day-of-month like `plusMonths(1)` does. `plusMonths(1)` from January 31 returns February 28 (the last day of February), preserving month semantics.
+  - The fix: use `plusMonths(1)` for monthly scheduling (preserves the day-of-month within month-end constraints) or use `ChronoUnit.DAYS.addTo(date, 30)` for exact 30-day intervals.
+
+  > **Interview follow-up:** The candidate distinguished `Period.ofDays(30)` from `plusMonths(1)`. For a monthly billing cycle that should always bill on the same day-of-month (e.g., the 15th), what happens with `plusMonths(1)` if the 15th falls on a weekend — do you bill on the 15th regardless, or adjust to the prior Friday?
+
+**Q: A REST API accepts date strings in the format `"yyyy-MM-dd"` and parses them with `LocalDate.parse()`. A client sends `"2025-13-01"` (month 13). The API returns a 500 error. What happened, and how do you make the API more robust?**
+
+  - `LocalDate.parse()` uses `ResolverStyle.SMART` by default, which throws `DateTimeParseException` for month 13. The exception propagates as a 500 error because there is no handler for `DateTimeParseException`.
+  - The fix: add a validation layer that catches `DateTimeParseException` and returns a 400 Bad Request with a descriptive error message. Alternatively, use `ResolverStyle.LENIENT` for flexible parsing (month 13 becomes January of next year).
+  - For REST APIs, always validate date inputs before parsing and return structured error responses (e.g., `{"field": "date", "error": "Invalid date format. Expected yyyy-MM-dd."}`).
+  - The broader principle: date parsing at system boundaries should be validated and produce domain-specific errors, not low-level parsing exceptions.
+
+  > **Interview follow-up:** The candidate suggested returning 400 with a structured error message. If the API uses `ResolverStyle.LENIENT` and the client sends February 30, the date is silently adjusted to March 2. Is this acceptable, or should the API reject ambiguous dates — and how would you configure the formatter to reject February 30 while accepting other lenient inputs?
+
+**Q: A developer writes `ZonedDateTime.now().toInstant()` and compares it to `Instant.now()`. The two values differ by the DST offset on fall-back day. What is the explanation?**
+
+  - `ZonedDateTime.now()` creates a `ZonedDateTime` with the current instant and the system default timezone. Calling `toInstant()` strips the timezone and returns the UTC instant — which should be identical to `Instant.now()`.
+  - If the two values differ, it is not because of DST. It is because `ZonedDateTime.now()` and `Instant.now()` were called at different times (even microseconds apart). The DST offset is irrelevant because `toInstant()` normalizes to UTC.
+  - The actual issue is likely that the developer compared the `ZonedDateTime`'s local time to `Instant.now()` without converting — comparing `ZonedDateTime.toString()` (which shows local time) to `Instant.toString()` (which shows UTC). The "DST offset" difference is just the difference between local time and UTC.
+
+  > **Interview follow-up:** The candidate correctly identified that `toInstant()` normalizes to UTC. If the developer instead uses `OffsetDateTime.now()` and compares it to `Instant.now()`, what relationship do the two UTC instants have, and under what condition would they differ?
+
 ---
 
 ## Interview Questions
@@ -773,6 +806,57 @@ record Event(String id, Instant timestamp, String source, String payload) {}
   - `ChronoUnit.YEARS.between(date1, date2)` — total number of years.
   - `Period.between(date1, date2)` — a `Period` of years, months, and days components (for human-readable differences like "1 year, 3 months, 2 days").
   - `Duration.between(instant1, instant2)` — time-based duration for `Instant` and `LocalTime` values.
+
+**How do you convert between `LocalDateTime` and `Instant`?**
+  - `LocalDateTime.toInstant(ZoneOffset)` requires an explicit offset — there is no no-argument version because `LocalDateTime` has no timezone.
+  - `Instant.atZone(ZoneId)` returns a `ZonedDateTime`, and `toLocalDateTime()` strips the zone.
+  - The conversion always requires a `ZoneId` or `ZoneOffset` because `LocalDateTime` is an ambiguous local clock reading that must be pinned to a specific zone before it can be mapped to a timeline instant.
+
+**What is `OffsetDateTime` and when would you use it over `ZonedDateTime`?**
+  - `OffsetDateTime` stores date, time, and a fixed UTC offset (e.g., `+05:30`) but no DST rules. It cannot tell you whether the offset changes on March 9 — it only knows the offset at the instant it was created.
+  - `ZonedDateTime` stores date, time, a `ZoneId`, and the applicable offset from the zone rules. It knows when DST transitions occur and adjusts offsets automatically.
+  - Use `OffsetDateTime` for wire protocols (ISO-8601 specifies offset-based formats) and for values from systems that only provide a fixed offset. Use `ZonedDateTime` for human-facing scheduling where DST matters.
+
+**How do you handle dates before the Unix epoch (before 1970)?**
+  - `LocalDate`, `LocalDateTime`, and `ZonedDateTime` support dates from year -999,999,999 to +999,999,999. They are not limited to the Unix epoch range.
+  - `Instant` stores seconds and nanoseconds from 1970-01-01T00:00:00Z, supporting values up to ±292 years (the range of a `long` in seconds). For dates outside this range, use `LocalDateTime` with a `ZoneOffset`.
+  - `ChronoUnit.between()` works with `Instant` values but may overflow for very distant dates — use `Duration.between()` for the widest range.
+
+**What is the purpose of `Clock` in the Date and Time API?**
+  - `Clock` provides the current instant, date, and time using a timezone. It is the injectable time source that makes date/time code testable.
+  - `Clock.fixed(Instant, ZoneId)` returns a clock that always returns the same instant — useful for testing time-dependent logic.
+  - `Clock.offset(Clock, Duration)` returns a clock shifted by a duration — useful for testing future or past dates.
+  - Best practice: accept a `Clock` parameter in methods that need the current time, defaulting to `Clock.systemDefaultZone()` in production and injecting a fixed clock in tests.
+
+**What is `ResolverStyle` and how does it affect date parsing?**
+  - `ResolverStyle` controls how the date/time parser handles out-of-range values: `STRICT` rejects any value outside the exact field range, `SMART` adjusts within range (Feb 29 in non-leap year → Feb 28), `LENIENT` adjusts rolling (month 13 → January of next year).
+  - Default is `SMART` for `DateTimeFormatter.ofPattern()`. The ISO formatters use `STRICT`.
+  - Use `STRICT` for system-to-system communication where format compliance is critical. Use `LENIENT` for user-facing input where flexibility is valued over precision. Use `SMART` for most internal processing.
+
+**How do you calculate age from a birth date?**
+  - `Period.between(birthDate, now).getYears()` — `Period`'s year component gives the integer age. This is correct: if born on June 13, 2000, `Period.between` on June 13, 2025 returns exactly 25 years.
+  - The calculation is calendar-based and does not use millisecond precision — a person born on February 29 (leap year) legally ages on February 28 in non-leap years, which `Period` handles correctly.
+  - For precise age in months or days for legal contexts, use `ChronoUnit.YEARS.between(birthDate, now)` which returns the same integer value.
+
+**What is the difference between `ZonedDateTime` and `OffsetDateTime` in serialization?**
+  - `ZonedDateTime` serializes to `"2025-06-13T14:30:00+05:30[Asia/Kolkata]"` — includes the zone ID in brackets. Not all JSON libraries handle the zone ID correctly.
+  - `OffsetDateTime` serializes to `"2025-06-13T14:30:00+05:30"` — no zone ID, just the offset. This is more portable across systems and wire protocols.
+  - For REST APIs and database storage, prefer `OffsetDateTime` or `Instant` over `ZonedDateTime` because the zone ID adds complexity with minimal benefit.
+
+**How do you handle week-based years and week-of-year in the API?**
+  - `IsoFields.WEEK_BASED_YEAR` and `IsoFields.WEEK_OF_WEEK_BASED_YEAR` provide ISO-8601 week date fields.
+  - In ISO-8601, week 1 of a year is the week containing the first Thursday. January 1 may belong to week 52 or 53 of the previous year.
+  - Use `date.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)` and `date.get(IsoFields.WEEK_BASED_YEAR)` to get the correct week-based values, not the calendar year.
+
+**What is the difference between `DateTimeFormatter.ISO_INSTANT` and `DateTimeFormatter.ISO_ZONED_DATE_TIME`?**
+  - `ISO_INSTANT` formats `Instant` values as UTC: `"2025-06-13T14:30:00Z"`. It always outputs the `Z` suffix.
+  - `ISO_ZONED_DATE_TIME` formats `ZonedDateTime` values with the zone offset and optional zone ID: `"2025-06-13T14:30:00+05:30[Asia/Kolkata]"`.
+  - `ISO_INSTANT` cannot parse values with zone offsets other than `Z` (UTC). `ISO_ZONED_DATE_TIME` can parse any valid ISO-8601 zoned datetime string.
+
+**What is the difference between `Clock.systemDefaultZone()` and `Clock.systemUTC()`?**
+  - `Clock.systemDefaultZone()` returns a clock using the JVM's default timezone — determined by the `user.timezone` system property, the `TZ` environment variable, or the OS timezone configuration.
+  - `Clock.systemUTC()` returns a clock that always uses UTC regardless of JVM defaults. `LocalDate.now(systemUTC)` gives the UTC date, which may differ from the local date around midnight.
+  - The JVM's default timezone can be changed at runtime via `TimeZone.setDefault()`, making `systemDefaultZone()` non-deterministic in long-running servers. Production systems should use `systemUTC()` for server-side date logic.
 
 ---
 

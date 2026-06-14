@@ -421,6 +421,64 @@ future.whenComplete((result, ex) -> {
 });
 ```
 
+- **Question: You need to poll an external service every 100ms until a result is ready, with a maximum of 10 retries. How do you implement this with CompletableFuture?**
+```java
+CompletableFuture<Result> pollWithRetry(int maxRetries) {
+    CompletableFuture<Result> future = CompletableFuture.supplyAsync(() -> poll(), executor);
+    for (int i = 0; i < maxRetries; i++) {
+        future = future.thenCompose(result -> {
+            if (result.isReady()) return CompletableFuture.completedFuture(result);
+            return CompletableFuture.supplyAsync(() -> {
+                sleep(100);
+                return poll();
+            }, executor);
+        });
+    }
+    return future;
+}
+```
+
+- **Question: You have a list of 1000 CompletableFuture tasks. Using `allOf` with 1000 futures creates a single callback that fires only when all complete. How do you process results incrementally as each completes instead of waiting for all?**
+
+  - `allOf` waits for all futures — you cannot get partial results. Use a callback per future instead:
+  ```java
+  List<CompletableFuture<Result>> futures = tasks.stream()
+      .map(task -> CompletableFuture.supplyAsync(() -> process(task), executor))
+      .collect(Collectors.toList());
+
+  futures.forEach(f -> f.thenAccept(result -> resultsQueue.add(result)));
+  ```
+  - Each future's completion triggers independent processing. The main thread can wait on `allOf` for overall completion, but individual results are consumed as they arrive.
+  - For backpressure, use a blocking queue with bounded capacity so slow consumers force producers to wait.
+
+- **Question: You call serviceA, serviceB, and serviceC in parallel. If serviceA fails, you want to cancel serviceB and serviceC immediately. How do you implement cancellation propagation?**
+
+  - `CompletableFuture` does not have built-in cancellation propagation. You must implement it manually:
+  ```java
+  List<CompletableFuture<?>> all = List.of(f1, f2, f3);
+  f1.exceptionally(ex -> {
+      f2.cancel(true);
+      f3.cancel(true);
+      return null;
+  });
+  ```
+  - However, `cancel(true)` only sets the `CancellationException` result — it does not stop the running thread unless the task checks `Thread.isInterrupted()`.
+  - For true cancellation, use a shared `AtomicBoolean cancelled` flag that all tasks check periodically, or use the `CompletableFuture` timeout approach with `orTimeout()` and `completeOnTimeout()`.
+
+- **Question: You chain `thenApply` -> `thenApply` -> `thenAccept`. The second `thenApply` throws an exception. Where does the exception propagate — to `thenAccept` or to a downstream `exceptionally`?**
+
+  - The exception propagates through the chain, skipping all subsequent stages that depend on the result. `thenAccept` is never invoked because it requires a successful result from the previous stage.
+  - An `exceptionally` attached after the chain catches the exception from any prior stage. An `exceptionally` placed between stages catches exceptions only from the stages above it.
+  - `handle` captures both result and exception at its position in the chain, replacing the exception with a fallback value that downstream stages can process.
+
+- **Question: You have a microservice that receives 1000 requests per second, each triggering a CompletableFuture chain. After running for 30 minutes, response times degrade from 50ms to 5 seconds. What is the most likely cause and how do you fix it?**
+
+  - The most likely cause is thread pool starvation: all async tasks are running on `ForkJoinPool.commonPool()`, which has `Runtime.availableProcessors() - 1` threads. For a typical server with 8 cores, the common pool has 7 threads. 1000 requests/second with average task duration of 50ms means 50 concurrent tasks on average — and the 7-thread pool is saturated.
+  - The fix: use a dedicated `ExecutorService` with a bounded work queue and a thread pool sized for the expected concurrency: `new ThreadPoolExecutor(50, 100, 60, TimeUnit.SECONDS, new LinkedBlockingQueue<>(1000))`.
+  - Also add monitoring: queue depth, active thread count, rejected task count. When the queue fills, the executor strategy determines behavior (`CallerRunsPolicy` throttles the caller, `AbortPolicy` throws, `DiscardPolicy` silently drops).
+
+---
+
 ## Interview Questions
 
 - What is the difference between `Future` and `CompletableFuture`?
@@ -438,6 +496,31 @@ future.whenComplete((result, ex) -> {
 - How do you cancel a `CompletableFuture`? Does it stop the running thread?
 - Explain how `thenCompose` prevents nested `CompletableFuture<CompletableFuture<T>>`.
 - How do you collect results from a list of `CompletableFuture`?
+
+- **What is the difference between `thenApply` and `thenCompose`?**
+  - `thenApply` transforms the result of a `CompletableFuture<T>` using a `Function<T, R>` — the function returns a plain value, and the result is `CompletableFuture<R>`.
+  - `thenCompose` transforms the result using a `Function<T, CompletionStage<R>>` — the function returns a `CompletionStage`, and the result is `CompletableFuture<R>` without nesting (`CompletableFuture<CompletableFuture<R>>`).
+  - Use `thenApply` for simple transformations (parsing, mapping) and `thenCompose` for chaining another async operation (flatMap).
+
+- **What is the difference between `complete()` and `obtrudeValue()`?**
+  - `complete(T value)` sets the result only if the future is not already completed. Returns `true` if the value was set, `false` if the future was already completed.
+  - `obtrudeValue(T value)` forcibly sets the result even if the future was already completed — it overwrites any existing result or exception.
+  - `obtrudeValue` is intended for exceptional cases like caching systems where a stale result must be replaced. It should not be used in normal control flow.
+
+- **How does `completeExceptionally` interact with callback chains?**
+  - When a `CompletableFuture` is completed exceptionally, all downstream `thenApply`, `thenAccept`, and `thenCompose` callbacks are skipped — the exception propagates to the first `exceptionally`, `handle`, or `whenComplete` handler in the chain.
+  - Multiple `exceptionally` handlers can be chained: each one can catch the exception and provide a recovery value, which then flows into the next normal callback.
+  - `whenComplete` does not consume the exception — it observes the result or exception for side effects (logging, metrics) and then propagates the same result or exception downstream.
+
+- **What is the `CompletableFuture` timeout behavior in Java 9+?**
+  - `orTimeout(long timeout, TimeUnit unit)` completes the future exceptionally with a `TimeoutException` if not done before the timeout. Returns the same `CompletableFuture` for chaining.
+  - `completeOnTimeout(T value, long timeout, TimeUnit unit)` supplies a default value on timeout instead of throwing. Returns the same `CompletableFuture`.
+  - Both methods schedule a delayed task that competes with the normal completion — the first to complete wins. This is safe for one-shot operations but not for repeated timeouts.
+
+- **What is the difference between `get()` and `join()` on CompletableFuture?**
+  - `get()` throws `InterruptedException` (checked) and `ExecutionException`. `join()` throws `CompletionException` (unchecked) and `CancellationException`.
+  - `join()` is preferred in lambda chains and stream pipelines because it does not require checked exception handling.
+  - Both block the calling thread until completion. For non-blocking consumption, use `thenAccept` or `whenComplete`.
 
 ## Developer Recommendations
 

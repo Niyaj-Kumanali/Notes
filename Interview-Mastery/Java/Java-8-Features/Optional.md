@@ -465,6 +465,15 @@ for (String line : lines) {
 
   > **Interview follow-up:** The candidate explains the separation of concerns. If the service layer uses `Optional` for both "not found" and "deactivated account," how does the controller distinguish between 404 (not found) and 403 (forbidden/deactivated) from the same `Optional<User>` return type?
 
+**Q: A service method returns `Optional<User>` and the controller uses `orElseThrow` with a custom exception. A new requirement adds soft-deleted users — the service now returns `Optional.empty()` for both "not found" and "soft-deleted." The controller cannot distinguish between them. How would you redesign?**
+
+  - The problem is that `Optional.empty()` conflates two distinct semantic states: "never existed" and "soft-deleted." `Optional` is a binary container and cannot encode this distinction.
+  - One solution: change the service to return a sealed result type: `sealed interface UserResult { record Found(User u) implements UserResult; record NotFound() implements UserResult; record SoftDeleted(User u) implements UserResult; }`.
+  - The controller pattern-matches: `Found` → 200 with user, `NotFound` → 404, `SoftDeleted` → 410 Gone.
+  - The principle: `Optional` is adequate for binary outcomes. When the domain has three or more outcomes for the same operation, use a dedicated result type.
+
+  > **Interview follow-up:** The candidate suggested a sealed result type. How does this approach affect the stream pipeline that calls `service.findAll().flatMap(Optional::stream)`? Does the sealed type break the pipeline, and how would you adapt?
+
 ---
 
 ## Interview Questions
@@ -521,6 +530,60 @@ for (String line : lines) {
   - `Optional` holds zero or one elements, while `Stream` holds zero or many elements.
   - `Optional.stream()` (Java 9+) provides direct interoperation: converting `Optional` to a `Stream` for use in stream pipelines.
   - `Stream.findFirst()`, `findAny()`, `min()`, `max()`, and `reduce()` all return `Optional` to represent the possibility of an empty stream result.
+
+**How does `Optional.or()` differ from `orElseGet()`?**
+  - `Optional.or(supplier)` (Java 9+) returns the current `Optional` if present, otherwise returns the `Optional` produced by the supplier — allowing lazy fallback to another `Optional`-returning operation.
+  - `orElseGet(supplier)` returns the value if present, otherwise invokes the supplier and returns its result directly, not wrapped in `Optional`.
+  - Use `or()` when the fallback itself may be absent. Use `orElseGet` when the fallback always produces a value.
+
+**What is the difference between `ifPresent()` and `ifPresentOrElse()`?**
+  - `ifPresent(consumer)` executes the consumer if the value is present; if empty, it does nothing.
+  - `ifPresentOrElse(consumer, runnable)` (Java 9+) executes the consumer if present, otherwise executes the runnable — handling both branches explicitly in a single method call.
+  - `ifPresentOrElse` is the Optional equivalent of `if-else`, eliminating the need for an `isPresent()` check before an `if` block.
+
+**What happens when you call `Optional.ofNullable(null).map(Function.identity())`?**
+  - `Optional.ofNullable(null)` returns `Optional.empty()`. Calling `map()` on an empty `Optional` returns `Optional.empty()` without invoking the function.
+  - If the mapping function is expensive, it is never evaluated — the key benefit of `map` over a null check.
+
+**How does `Optional` interact with the Stream API?**
+  - `Optional.stream()` (Java 9+) converts to a 0-or-1 element `Stream`, enabling `flatMap(Optional::stream)` to filter and unwrap in stream pipelines in a single step.
+  - `Optional` supports `map`, `filter`, and `flatMap` directly, making it usable in intermediate stream operations that return `Optional`.
+
+**Why does `Optional` not implement `Serializable`?**
+  - The JDK designers intentionally omitted `Serializable` to avoid encouraging `Optional` as a field type — if it were serializable, developers would use it in DTOs and entities, which is an anti-pattern.
+  - `Optional.empty()` is a singleton — serializing and deserializing it would create a new instance, breaking reference equality guarantees.
+
+**What is the performance cost of using `Optional`?**
+  - Each `Optional` instance is a separate heap object: ~16 bytes (compressed OOPs) for the container, plus 4 bytes for the wrapped value reference, plus padding.
+  - `Optional.ofNullable()` has a null check branch internally. `Optional.of()` skips the check and throws NPE if passed null.
+  - `orElse()` is cheaper than `orElseGet()` because it avoids a lambda invocation — but its eager argument evaluation can be far more expensive than the lambda overhead.
+  - For most non-hot-path code, the allocation cost of `Optional` is negligible. In hot paths processing millions of elements per second, allocation pressure becomes significant.
+
+**Can `Optional` be used with `switch` expressions (Java 17+)?**
+  - Not directly — `Optional` is not a sealed class, so it cannot be used in a pattern-matching `switch` with type patterns.
+  - You can transform: `switch (optional.map(val -> classify).orElse(DEFAULT)) { ... }`.
+  - With Java 21's record patterns, a pattern-matching switch on a sealed result type is more readable than an `Optional` chain.
+
+**What is the relationship between `Optional` and `null` at the JVM level?**
+  - At bytecode level, `Optional` is a regular object with no special JVM handling — the JVM does not optimize away allocation of empty Optionals.
+  - Null has first-class JVM support: `ifnull`, `aconst_null`, and `athrow` bytecodes. A null check is a single CPU instruction, while `Optional` operations involve method dispatch.
+  - `Optional` is always more expensive than a null check at the individual operation level. Its value is not performance but API safety and design clarity.
+
+**How would you convert an `Optional<String>` to an `Optional<Integer>` with error handling for invalid input?**
+  - Use `map` with a parsing function that throws on invalid input:
+  ```java
+  Optional<Integer> parseInt = opt.map(s -> {
+      try { return Integer.parseInt(s); }
+      catch (NumberFormatException e) { throw new IllegalArgumentException("Invalid: " + s, e); }
+  });
+  ```
+  - This throws `IllegalArgumentException` when the value is present but invalid — distinct from `NoSuchElementException` for an absent value.
+  - For a functional approach without exceptions, return `Optional.empty()`: `opt.flatMap(s -> { try { return Optional.of(Integer.parseInt(s)); } catch (NumberFormatException e) { return Optional.empty(); } })`.
+
+**What is the difference between `filter` on `Optional` and `filter` on `Stream`?**
+  - `Optional.filter(predicate)` returns `Optional.empty()` if the predicate fails, otherwise returns the same `Optional` — it discards non-matching values.
+  - `Stream.filter(predicate)` returns a new `Stream` containing only elements that match — it can produce zero, some, or all elements from the original.
+  - Both are lazy: the predicate is only evaluated when the value or stream is consumed.
 
 ---
 

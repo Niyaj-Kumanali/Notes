@@ -55,28 +55,28 @@
 
 | File | Status |
 |------|--------|
-| Java/Java-Internals/Generics.md | ⬜ |
-| Java/Java-Internals/Java-Memory-Model.md | ⬜ |
-| Java/Java-Internals/Garbage-Collection.md | ⬜ |
-| Java/Java-Internals/Reflection-Annotations.md | ⬜ |
+| Java/Java-Internals/Generics.md | ✅ |
+| Java/Java-Internals/Java-Memory-Model.md | ✅ |
+| Java/Java-Internals/Garbage-Collection.md | ✅ |
+| Java/Java-Internals/Reflection-Annotations.md | ✅ |
 
 ## Java — Modern Java (9-21)
 
 | File | Status |
 |------|--------|
-| Java/Modern-Java/Records.md | ⬜ |
-| Java/Modern-Java/Sealed-Classes.md | ⬜ |
-| Java/Modern-Java/Pattern-Matching.md | ⬜ |
-| Java/Modern-Java/Switch-Expressions.md | ⬜ |
-| Java/Modern-Java/Text-Blocks.md | ⬜ |
-| Java/Modern-Java/Virtual-Threads.md | ⬜ |
+| Java/Modern-Java/Records.md | ✅ |
+| Java/Modern-Java/Sealed-Classes.md | ✅ |
+| Java/Modern-Java/Pattern-Matching.md | ✅ |
+| Java/Modern-Java/Switch-Expressions.md | ✅ |
+| Java/Modern-Java/Text-Blocks.md | ✅ |
+| Java/Modern-Java/Virtual-Threads.md | ✅ |
 
 ## Java — Build Tools
 
 | File | Status |
 |------|--------|
-| Java/Build-Tools/Maven.md | ⬜ |
-| Java/Build-Tools/Gradle.md | ⬜ |
+| Java/Build-Tools/Maven.md | ✅ |
+| Java/Build-Tools/Gradle.md | ✅ |
 
 ## Java — Spring Boot
 
@@ -124,14 +124,14 @@
 | File | Status |
 |------|--------|
 | Backend-Concepts/Microservices/Microservices.md | ✅ |
-| Backend-Concepts/Microservices/Service-Discovery.md | ⬜ |
-| Backend-Concepts/Microservices/API-Gateway.md | ⬜ |
-| Backend-Concepts/Microservices/Service-Mesh.md | ⬜ |
-| Backend-Concepts/Microservices/Migration-to-Microservices.md | ⬜ |
-| Backend-Concepts/Microservices/Distributed-Transactions.md | ⬜ |
+| Backend-Concepts/Microservices/Service-Discovery.md | ✅ |
+| Backend-Concepts/Microservices/API-Gateway.md | ✅ |
+| Backend-Concepts/Microservices/Service-Mesh.md | ✅ |
+| Backend-Concepts/Microservices/Migration-to-Microservices.md | ✅ |
+| Backend-Concepts/Microservices/Distributed-Transactions.md | ✅ |
 | Backend-Concepts/Microservices/Circuit-Breaker.md | ✅ |
 | Backend-Concepts/Microservices/SAGA.md | ✅ |
-| Backend-Concepts/Microservices/Distributed-Logging.md | ⬜ |
+| Backend-Concepts/Microservices/Distributed-Logging.md | ✅ |
 
 ### API
 
@@ -225,15 +225,15 @@
 
 | File | Status |
 |------|--------|
-| System-Design/CAP-Theorem.md | ⬜ |
-| System-Design/Load-Balancing.md | ⬜ |
-| System-Design/Consistent-Hashing.md | ⬜ |
-| System-Design/Design-URL-Shortener.md | ⬜ |
-| System-Design/Design-Chat-System.md | ⬜ |
-| System-Design/Design-Rate-Limiter.md | ⬜ |
-| System-Design/Design-Distributed-Cache.md | ⬜ |
-| System-Design/Design-Parking-Lot.md | ⬜ |
-| System-Design/Design-Notification-System.md | ⬜ |
+| System-Design/CAP-Theorem.md | ✅ |
+| System-Design/Load-Balancing.md | ✅ |
+| System-Design/Consistent-Hashing.md | ✅ |
+| System-Design/Design-URL-Shortener.md | ✅ |
+| System-Design/Design-Chat-System.md | ✅ |
+| System-Design/Design-Rate-Limiter.md | ✅ |
+| System-Design/Design-Distributed-Cache.md | ✅ |
+| System-Design/Design-Parking-Lot.md | ✅ |
+| System-Design/Design-Notification-System.md | ✅ |
 
 ---
 
@@ -241,7 +241,7 @@
 
 | File | Status |
 |------|--------|
-| Git.md | ⬜ |
+| Git.md | ✅ |
 
 ---
 
