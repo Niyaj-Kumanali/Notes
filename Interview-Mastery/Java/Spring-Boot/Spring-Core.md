@@ -7,6 +7,9 @@
 - **Definition**
   - Spring Core is the foundation module of the Spring Framework that provides the **Inversion of Control (IoC)** container and **Dependency Injection (DI)** capabilities.
   - It is responsible for managing the complete lifecycle of Java objects — from instantiation to destruction — so that developers can focus on business logic rather than object wiring.
+  - Spring is lightweight Java Framework.
+  - It provides a comprehensive programming and configuration model for Java based enterprise application.
+  - It is built on core concepts like IoC, DI, and AOP.
 
 ### Historical Context
 

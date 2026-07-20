@@ -212,17 +212,17 @@ List<UserDto> findAllDto();
 ## Common Mistakes
 
 - **N+1 queries** — Fetching entities in a loop causes N extra SQL queries, turning fast operations into slow ones.
-- **Why it looks correct**: Each individual query succeeds and returns data — the performance problem only manifests as the dataset grows, and without SQL logging enabled, the extra queries are invisible.
-- **Fix**: Use `JOIN FETCH` or `@EntityGraph` to eagerly load associations in a single query.
+    - **Why it looks correct**: Each individual query succeeds and returns data — the performance problem only manifests as the dataset grows, and without SQL logging enabled, the extra queries are invisible.
+    - **Fix**: Use `JOIN FETCH` or `@EntityGraph` to eagerly load associations in a single query.
 - **`LazyInitializationException`** — Accessing a lazy-loaded association outside a transaction throws this exception.
-- **Why it looks correct**: The entity reference contains the correct ID, and the getter method exists — the code reads naturally, and the error only fires when the getter is actually called outside the session.
-- **Fix**: Load eagerly within the transaction, using `JOIN FETCH`, or switching to DTO projections.
+    - **Why it looks correct**: The entity reference contains the correct ID, and the getter method exists — the code reads naturally, and the error only fires when the getter is actually called outside the session.
+    - **Fix**: Load eagerly within the transaction, using `JOIN FETCH`, or switching to DTO projections.
 - **Not using `@Transactional` on modifying queries** — Without it, lazy loading fails and changes may not be flushed to the database.
-- **Why it looks correct**: `save()` returns immediately without errors — the data may eventually be flushed by OSIV or by a subsequent transactional method, masking the missing annotation.
-- **Fix**: Always add `@Transactional` on service methods that modify data.
+    - **Why it looks correct**: `save()` returns immediately without errors — the data may eventually be flushed by OSIV or by a subsequent transactional method, masking the missing annotation.
+    - **Fix**: Always add `@Transactional` on service methods that modify data.
 - **Using entities as DTOs** — Over-fetching data, circular JSON references during serialization, and performance issues.
-- **Why it looks correct**: Returning an entity directly is the path of least resistance — the data is correct during development, and the performance impact is only visible under load.
-- **Fix**: Use DTO projections instead to select only the fields you need.
+    - **Why it looks correct**: Returning an entity directly is the path of least resistance — the data is correct during development, and the performance impact is only visible under load.
+    - **Fix**: Use DTO projections instead to select only the fields you need.
 - **`CascadeType.ALL` everywhere** — Unintended cascading deletes can wipe out large parts of the database accidentally.
 - **Why it looks correct**: `CascadeType.ALL` is the quickest way to make related entities persist, and during development with minimal data, cascading never causes visible problems.
 - **Fix**: Be explicit about which cascade types you actually need (`PERSIST`, `MERGE`).
