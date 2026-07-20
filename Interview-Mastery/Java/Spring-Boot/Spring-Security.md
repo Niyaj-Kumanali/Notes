@@ -4,22 +4,22 @@
 
 ## Overview
 
-- **Definition:** Spring Security is the de-facto security framework for Spring applications. It provides **authentication** (who you are), **authorization** (what you can do), and **protection** against common attacks like CSRF, session fixation, clickjacking, and XSS.
+- **Definition:** Spring Security is the de-facto security framework for Spring applications. It provides **authentication** (who you are), **authorization** (what you can do), and protection against common web security risks such as CSRF, session fixation, clickjacking, insecure headers, and unsafe security configuration.
 - **Why It Exists:** To offer a comprehensive, configurable security model for Spring applications that handles authentication, authorization, and attack protection out of the box, reducing the risk of security vulnerabilities from custom implementations.
 - **Key Concepts:**
   - **Authentication** — Verifies the identity of a user. Supports form login, HTTP Basic, OAuth2, JWT, LDAP, SAML, and Remember-Me across a wide range of authentication mechanisms.
   - **Authorization** — Controls access to resources based on roles, permissions, or custom rules. Supports both URL-based and method-level authorization.
-  - **Protection** — Built-in defenses against CSRF, CORS misconfiguration, clickjacking, and header injection. These protections are enabled by default and can be fine-tuned.
+  - **Protection** — Built-in defenses against CSRF, session fixation, clickjacking, and insecure response headers. It can reduce XSS impact through security headers, but application code must still validate input and encode output correctly.
   - **Integration** — Seamless integration with OAuth2, JWT, LDAP, SAML, and Spring's method-level security annotations like `@PreAuthorize` and `@PostAuthorize`.
   - **Security Filter Chain:** Spring Security is implemented as a chain of servlet filters. Each filter handles a specific security concern:
 
     ```
-    Request → SecurityContextPersistenceFilter → LogoutFilter →
+    Request → SecurityContextHolderFilter → LogoutFilter →
     UsernamePasswordAuthenticationFilter → BasicAuthenticationFilter →
-    ExceptionTranslationFilter → FilterSecurityInterceptor → Controller
+    ExceptionTranslationFilter → AuthorizationFilter → Controller
     ```
 
-    Each filter in the chain either handles the request or passes it to the next filter. The order of filters matters — placing a filter in the wrong position can bypass security checks.
+    Each filter in the chain either handles the request or passes it to the next filter. The order of filters matters — placing a filter in the wrong position can bypass security checks. In older Spring Security versions and older examples, you may also see `SecurityContextPersistenceFilter` and `FilterSecurityInterceptor`; Spring Security 6 commonly uses `SecurityContextHolderFilter` and `AuthorizationFilter`.
 
   - **Authentication Architecture:**
 
@@ -207,13 +207,22 @@
 
 ---
 
+### Token Lifecycle and Revocation
+
+- JWT-based APIs are stateless by default, so the server does not automatically know when a token should be invalidated before its expiry. Keep access tokens short-lived (5-15 minutes) and pair them with refresh tokens when users need longer sessions.
+- Store refresh tokens more carefully than access tokens. Common production designs use HTTP-only secure cookies, refresh token rotation, and server-side storage of the latest valid refresh token identifier or token family.
+- For immediate permission changes or forced logout, add a revocation check such as a token version, session id, or denylist stored in Redis/DB. This reintroduces a small amount of server-side state, but it gives operational control over compromised or stale tokens.
+- Be clear in interviews: pure stateless JWT is simple and scalable, but revocation and permission freshness usually require either short TTLs or a server-side validation check.
+
+---
+
 ## Common Mistakes
 
 - **Storing passwords in plain text** — If the database is breached, all passwords are exposed and can be used immediately.
   - Why it looks correct: The application works perfectly — users log in, authentication succeeds, and there are no errors. The security risk is invisible until the database is compromised.
   - Fix: Always use `BCryptPasswordEncoder` or stronger (Argon2, SCrypt) for password hashing with automatic salting.
 
-- **Overly permissive CORS** — Allowing all origins (`*`) opens the door for XSS and data theft from any website.
+- **Overly permissive CORS** — Allowing all origins (`*`) can expose browser-accessible APIs to untrusted sites and increase the damage from client-side vulnerabilities.
   - Why it looks correct: During development the frontend on `localhost:3000` connects without errors — the wildcard CORS policy is convenient and the security risk only materializes in production.
   - Fix: Restrict to specific, known origins that are verified and documented.
 
