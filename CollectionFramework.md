@@ -225,6 +225,7 @@
         create an HashTable with given initial capacity of 100 and default load factor of 0.75.
 - HashMap h3 = new HashMap(100, 0.9f);
         create an HashTable with given initial capacity of 100 and load factor of 0.90.
+        
 ### LinkedHashMap
 - LinkedHashMap is a child class of HashMap.
 - LinkedHashMap has same properties of HashMap with the only difference HashMap is not synchronized, LinkedHashMap is a synchronized hence LinkedHashMap is Thread safe.
