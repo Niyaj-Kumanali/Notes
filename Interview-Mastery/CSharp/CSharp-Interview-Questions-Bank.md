@@ -446,6 +446,8 @@ This question bank is based on Abdul Shoaib's resume and focuses on C#, ASP.NET 
 
 ## Redis and Caching Questions
 
+> Detailed answers in `Database/Redis-Caching.md`
+
 1. What is Redis?
 2. Why use Redis?
 3. What is in-memory cache?
@@ -481,6 +483,8 @@ This question bank is based on Abdul Shoaib's resume and focuses on C#, ASP.NET 
 
 ## Azure, Azure DevOps, IIS and Deployment Questions
 
+> Detailed answers in `DevOps/Docker-AzureDevOps.md`
+
 1. What Azure services have you used?
 2. What is Azure DevOps?
 3. What is CI/CD?
@@ -515,6 +519,8 @@ This question bank is based on Abdul Shoaib's resume and focuses on C#, ASP.NET 
 ---
 
 ## Testing, xUnit and NUnit Questions
+
+> Detailed answers in `Testing/xUnit-NUnit.md`
 
 1. What is unit testing?
 2. What is integration testing?
@@ -666,6 +672,61 @@ This question bank is based on Abdul Shoaib's resume and focuses on C#, ASP.NET 
 38. Cache improves performance but creates correctness risk. How do you handle it?
 39. A client reports approval emails are delayed. How do you investigate?
 40. A global client requests a critical production fix. How do you handle communication and delivery?
+
+---
+
+## Logging and Serilog Questions
+
+1. What is structured logging?
+2. Why is structured logging better than string interpolation?
+3. What is Serilog?
+4. Why use Serilog over default ILogger?
+5. How do you configure Serilog in ASP.NET Core?
+6. What are Serilog sinks?
+7. What Serilog sinks have you used?
+8. What are Serilog enrichers?
+9. How do you add correlation IDs to logs?
+10. What are the log levels in ASP.NET Core?
+11. When do you use Warning vs Error?
+12. What is a correlation ID?
+13. Why are correlation IDs important in distributed systems?
+14. How do you implement correlation ID middleware?
+15. What is AsyncLocal<T>?
+16. What logging best practices do you follow?
+17. What should you never log?
+18. How do you log exceptions properly?
+19. What is request/response logging middleware?
+20. How do you enable log file rotation in Serilog?
+
+---
+
+## SQL Server Fundamentals Questions
+
+1. What is a clustered index?
+2. What is a non-clustered index?
+3. What is a covering index?
+4. What is index fragmentation?
+5. How do you rebuild an index?
+6. What is an execution plan?
+7. How do you read an execution plan?
+8. What is the difference between Index Scan and Index Seek?
+9. What is a Key Lookup?
+10. What are the join types in SQL Server?
+11. What is a stored procedure?
+12. What are the benefits of stored procedures?
+13. What is parameter sniffing?
+14. How do you handle parameter sniffing?
+15. What are ACID properties?
+16. What isolation levels exist?
+17. What is a deadlock?
+18. How do you prevent deadlocks?
+19. What is SQL injection?
+20. How do parameterized queries prevent SQL injection?
+21. What is connection pooling?
+22. How does connection pool exhaustion happen?
+23. What is parameter sniffing in stored procedures?
+24. What are window functions?
+25. What is a CTE?
 
 ---
 
