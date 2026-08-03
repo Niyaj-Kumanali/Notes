@@ -13,11 +13,11 @@
 
 These concepts underpin every other topic. Master them first.
 
-- [ ] `Core-Concepts/OOPs.md`
-- [ ] `Backend-Concepts/Architecture/SOLID.md`
-- [ ] `Core-Concepts/Coupling-and-Cohesion.md`
-- [ ] `Backend-Concepts/Architecture/Design-Patterns.md`
-- [ ] `Core-Concepts/DSA.md`
+- [X] `Core-Concepts/OOPs.md`
+- [X] `Backend-Concepts/Architecture/SOLID.md`
+- [X] `Core-Concepts/Coupling-and-Cohesion.md`
+- [X] `Backend-Concepts/Architecture/Design-Patterns.md`
+- [X] `Core-Concepts/DSA.md`
 
 ---
 
@@ -25,29 +25,29 @@ These concepts underpin every other topic. Master them first.
 
 Build Java fundamentals before touching frameworks.
 
-- [ ] `Java/Core/Collections-Framework.md`
-- [ ] `Java/Core/IO-Streams.md`
+- [X] `Java/Core/Collections-Framework.md`
+- [X] `Java/Core/IO-Streams.md`
 
 ## Phase 2b: Java 8 Features (9 files)
 
 Lambda expressions, streams, optionals, and the modern Java API that transformed the language.
 
-- [ ] `Java/Java-8-Features/Lambda-Expressions.md`
-- [ ] `Java/Java-8-Features/Method-References.md`
-- [ ] `Java/Java-8-Features/Functional-Interfaces.md`
-- [ ] `Java/Java-8-Features/Stream-API.md`
-- [ ] `Java/Java-8-Features/Collectors.md`
-- [ ] `Java/Java-8-Features/Optional.md`
-- [ ] `Java/Java-8-Features/Default-Methods.md`
-- [ ] `Java/Java-8-Features/DateTime-API.md`
-- [ ] `Java/Java-8-Features/CompletableFuture.md`
+- [X] `Java/Java-8-Features/Lambda-Expressions.md`
+- [X] `Java/Java-8-Features/Method-References.md`
+- [X] `Java/Java-8-Features/Functional-Interfaces.md`
+- [X] `Java/Java-8-Features/Stream-API.md`
+- [X] `Java/Java-8-Features/Collectors.md`
+- [X] `Java/Java-8-Features/Optional.md`
+- [X] `Java/Java-8-Features/Default-Methods.md`
+- [X] `Java/Java-8-Features/DateTime-API.md`
+- [X] `Java/Java-8-Features/CompletableFuture.md`
 
 ---
 
 ## Phase 2c: Java Concurrency (2 files)
 
-- [ ] `Java/Concurrency/Multithreading.md`
-- [ ] `Java/Concurrency/Concurrency.md`
+- [X] `Java/Concurrency/Multithreading.md`
+- [X] `Java/Concurrency/Concurrency.md`
 
 ---
 
@@ -55,10 +55,10 @@ Lambda expressions, streams, optionals, and the modern Java API that transformed
 
 Memory model, garbage collection, generics — the topics interviewers use to distinguish depth.
 
-- [ ] `Java/Java-Internals/Generics.md`
-- [ ] `Java/Java-Internals/Java-Memory-Model.md`
-- [ ] `Java/Java-Internals/Garbage-Collection.md`
-- [ ] `Java/Java-Internals/Reflection-Annotations.md`
+- [X] `Java/Java-Internals/Generics.md`
+- [X] `Java/Java-Internals/Java-Memory-Model.md`
+- [X] `Java/Java-Internals/Garbage-Collection.md`
+- [X] `Java/Java-Internals/Reflection-Annotations.md`
 
 ---
 
@@ -66,12 +66,12 @@ Memory model, garbage collection, generics — the topics interviewers use to di
 
 Records, sealed classes, virtual threads — Java 9 through 21 features that show you stay current.
 
-- [ ] `Java/Modern-Java/Records.md`
-- [ ] `Java/Modern-Java/Sealed-Classes.md`
-- [ ] `Java/Modern-Java/Pattern-Matching.md`
-- [ ] `Java/Modern-Java/Switch-Expressions.md`
-- [ ] `Java/Modern-Java/Text-Blocks.md`
-- [ ] `Java/Modern-Java/Virtual-Threads.md`
+- [X] `Java/Modern-Java/Records.md`
+- [X] `Java/Modern-Java/Sealed-Classes.md`
+- [X] `Java/Modern-Java/Pattern-Matching.md`
+- [X] `Java/Modern-Java/Switch-Expressions.md`
+- [X] `Java/Modern-Java/Text-Blocks.md`
+- [X] `Java/Modern-Java/Virtual-Threads.md`
 
 ---
 
@@ -79,9 +79,9 @@ Records, sealed classes, virtual threads — Java 9 through 21 features that sho
 
 Build tools and version control — practical knowledge every working developer needs.
 
-- [ ] `Java/Build-Tools/Maven.md`
-- [ ] `Java/Build-Tools/Gradle.md`
-- [ ] `Git.md`
+- [X] `Java/Build-Tools/Maven.md`
+- [X] `Java/Build-Tools/Gradle.md`
+- [X] `Git.md`
 
 ---
 
@@ -89,9 +89,9 @@ Build tools and version control — practical knowledge every working developer 
 
 Learn to verify code before layering on frameworks.
 
-- [ ] `Java/Testing/JUnit.md`
-- [ ] `Java/Testing/Mockito.md`
-- [ ] `Java/Testing/Testcontainers.md`
+- [X] `Java/Testing/JUnit.md`
+- [X] `Java/Testing/Mockito.md`
+- [X] `Java/Testing/Testcontainers.md`
 
 ---
 
@@ -99,20 +99,20 @@ Learn to verify code before layering on frameworks.
 
 Framework depth in logical dependency order.
 
-- [ ] `Java/Spring-Boot/Dependency-Injection.md`
-- [ ] `Java/Spring-Boot/Spring-Core.md`
-- [ ] `Java/Spring-Boot/Bean-Lifecycle.md`
-- [ ] `Java/Spring-Boot/Spring-MVC.md`
-- [ ] `Java/Spring-Boot/Spring-Data-JPA.md`
-- [ ] `Java/Spring-Boot/Transactions.md`
-- [ ] `Java/Spring-Boot/Exception-Handling.md`
-- [ ] `Java/Spring-Boot/Validation.md`
-- [ ] `Java/Spring-Boot/Caching.md`
-- [ ] `Java/Spring-Boot/Async-Processing.md`
-- [ ] `Java/Spring-Boot/Scheduling.md`
-- [ ] `Java/Spring-Boot/Spring-Security.md`
-- [ ] `Java/Spring-Boot/Actuator.md`
-- [ ] `Java/Spring-Boot/Performance-Optimization.md`
+- [X] `Java/Spring-Boot/Dependency-Injection.md`
+- [X] `Java/Spring-Boot/Spring-Core.md`
+- [X] `Java/Spring-Boot/Bean-Lifecycle.md`
+- [X] `Java/Spring-Boot/Spring-MVC.md`
+- [X] `Java/Spring-Boot/Spring-Data-JPA.md`
+- [X] `Java/Spring-Boot/Transactions.md`
+- [X] `Java/Spring-Boot/Exception-Handling.md`
+- [X] `Java/Spring-Boot/Validation.md`
+- [X] `Java/Spring-Boot/Caching.md`
+- [X] `Java/Spring-Boot/Async-Processing.md`
+- [X] `Java/Spring-Boot/Scheduling.md`
+- [X] `Java/Spring-Boot/Spring-Security.md`
+- [X] `Java/Spring-Boot/Actuator.md`
+- [X] `Java/Spring-Boot/Performance-Optimization.md`
 
 ---
 

@@ -218,11 +218,13 @@
 
 ## Common Mistakes
 
-- **Storing passwords in plain text** — If the database is breached, all passwords are exposed and can be used immediately.
-  - Why it looks correct: The application works perfectly — users log in, authentication succeeds, and there are no errors. The security risk is invisible until the database is compromised.
+- **Storing passwords in plain text** 
+  - If the database is breached, all passwords are exposed and can be used immediately.
+  - Why it looks correct: The application works perfectly, the users log in, authentication succeeds, and there are no errors. The security risk is invisible until the database is compromised.
   - Fix: Always use `BCryptPasswordEncoder` or stronger (Argon2, SCrypt) for password hashing with automatic salting.
 
-- **Overly permissive CORS** — Allowing all origins (`*`) can expose browser-accessible APIs to untrusted sites and increase the damage from client-side vulnerabilities.
+- **Overly permissive CORS** 
+  - Allowing all origins (`*`) can expose browser-accessible APIs to untrusted sites and increase the damage from client-side vulnerabilities.
   - Why it looks correct: During development the frontend on `localhost:3000` connects without errors — the wildcard CORS policy is convenient and the security risk only materializes in production.
   - Fix: Restrict to specific, known origins that are verified and documented.
 

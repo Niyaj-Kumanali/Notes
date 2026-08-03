@@ -7,7 +7,13 @@
 - **Definition:** Spring Boot Performance Optimization encompasses strategies for improving startup time, request latency, memory usage, throughput, and resource utilization. Optimization requires identifying actual bottlenecks through profiling before making changes.
 - **Why It Exists:** Spring Boot applications in production must handle increasing load, scale efficiently, and provide fast responses. Without deliberate optimization, even well-architected applications degrade under load due to N+1 queries, connection pool exhaustion, serialization bottlenecks, and other common issues.
 - **Key Concepts:**
-  - **Optimization Areas:** Performance optimization spans five dimensions: startup time (how quickly the application serves requests), request latency (individual endpoint response speed), memory usage (heap and off-heap consumption with GC pressure), throughput (concurrent request capacity), and resource usage (thread pool and connection pool saturation). Identify the specific area causing pain before choosing a strategy.
+  - **Optimization Areas:** Performance optimization spans five dimensions: 
+    1. startup time (how quickly the application serves requests), 
+    2. request latency (individual endpoint response speed), 
+    3. memory usage (heap and off-heap consumption with GC pressure), 
+    4. throughput (concurrent request capacity), and
+    5. resource usage (thread pool and connection pool saturation). 
+    Identify the specific area causing pain before choosing a strategy.
   - **Startup Optimization:** Reduce startup time by excluding unused auto-configurations, limiting `@ComponentScan` to specific packages, disabling OSIV (`spring.jpa.open-in-view=false`), and enabling lazy initialization (`spring.main.lazy-initialization=true`). For Spring Boot 3.x, AOT compilation can dramatically reduce startup time for Kubernetes deployments.
     ```yaml
     # application.yml
