@@ -199,6 +199,19 @@ This file is a large question bank for revision. Use `Personalized-Questions.md`
 
 ---
 
+## Design Patterns Questions
+
+1. What are design principles and design patterns?
+2. Explain the SOLID principles.
+3. What are the DRY and KISS principles?
+4. Explain the Factory design pattern.
+5. Explain the Singleton design pattern.
+6. Explain the Strategy design pattern.
+7. Explain the Observer design pattern.
+8. Explain the Adapter design pattern.
+
+---
+
 ## Java Collections Questions
 
 1. What is Java Collections Framework?
@@ -226,6 +239,7 @@ This file is a large question bank for revision. Use `Personalized-Questions.md`
 23. When would you use `LinkedList`?
 24. When would you use `ConcurrentHashMap`?
 25. When would you use `TreeMap`?
+26. How does `HashSet` work internally?
 
 ---
 
@@ -261,6 +275,7 @@ This file is a large question bank for revision. Use `Personalized-Questions.md`
 28. What are switch expressions?
 29. What are text blocks?
 30. What are virtual threads?
+31. Given a `List<Employee>` where each employee has Name, ID, Salary, and Experience, filter employees based on experience and salary criteria, then print the results in ascending or descending order. Write the Java code.
 
 ---
 
@@ -366,6 +381,8 @@ This file is a large question bank for revision. Use `Personalized-Questions.md`
 58. What is Spring Boot testing?
 59. What is `@SpringBootTest`?
 60. What is `@WebMvcTest`?
+61. Difference between the traditional Java Singleton design pattern and the Spring singleton bean scope.
+62. Explain in detail `@Component`, `@Bean`, `@Configuration`, `@Repository`, `@Service`, `@RestController`, and `@Controller`. Also, why are there dedicated annotations?
 
 ---
 
@@ -466,6 +483,9 @@ This file is a large question bank for revision. Use `Personalized-Questions.md`
 43. When should you use stored procedures?
 44. How do you call stored procedures from Spring?
 45. How do you debug slow JPA queries?
+46. Why do we use the `@Transactional` annotation?
+47. Can `@Transactional` be applied to private or static methods?
+48. What types of exceptions trigger transaction rollback with `@Transactional`?
 
 ---
 
