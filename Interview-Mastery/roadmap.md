@@ -120,9 +120,9 @@ Framework depth in logical dependency order.
 
 The most common interview weak spot. Go deep here.
 
-- [ ] `Database/SQL.md`
-- [ ] `Database/Normalization.md`
-- [ ] `Database/Denormalization.md`
+- [X] `Database/SQL.md`
+- [X] `Database/Normalization.md`
+- [X] `Database/Denormalization.md`
 - [ ] `Database/Indexing.md`
 - [ ] `Database/Transactions.md`
 - [ ] `Database/Isolation-Levels.md`
