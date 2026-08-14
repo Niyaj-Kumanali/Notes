@@ -38,295 +38,93 @@
 ## Answers
 
 1. What is unit testing?
-   - **Answer:** Unit testing verifies that a single, small unit of code — typically one method or one class — behaves correctly in complete isolation from its collaborators. External dependencies such as databases, HTTP clients, message brokers, and other services are replaced with test doubles like mocks or stubs, so any failure can be attributed to the unit under test and nothing else. A well-written unit test is deterministic, executes in milliseconds, and gives a precise diagnosis when it fails. The FIRST principles summarize the desired properties: Fast, Isolated, Repeatable, Self-validating, and Timely. Unit tests occupy the base of the test pyramid — the largest layer — because they are cheap to write, fast to run, and cover individual business rules exhaustively. Test-Driven Development (TDD) formalizes the cycle: write a failing test first, implement the minimal production code to satisfy it, then refactor while keeping the test green. In Java, JUnit 5 provides the test runner and assertions, while Mockito supplies mocks for dependencies. A typical unit test mocks the repository, invokes one service method, and asserts on the result:
-
-   ```java
-   class ValidationServiceTest {
-       @Mock private SerialRepository repository;
-       @InjectMocks private ValidationService service;
-
-       @Test
-       void rejectsInvalidSerial() {
-           assertFalse(service.isValid("BAD!"));
-       }
-   }
-   ```
-
-   A unit test should never start a Spring context, open a real connection, or perform network I/O; when it does, it stops being a unit test and becomes an integration test. This isolation is what makes the unit layer fast enough to run on every commit and reliable enough to trust.
-
+   - **Answer:** Unit testing tests individual components in isolation, mocking external dependencies. In our inventory project, I wrote JUnit + Mockito tests for the validation service - mocking the repository and testing validation logic with various serial number formats.
+   - **If asked more:** I would explain the FIRST principles (Fast, Isolated, Repeatable, Self-validating, Timely) and the test pyramid: unit tests at the base (fast, numerous), integration above, and end-to-end at the top (slow, few).
 2. What is integration testing?
-   - **Answer:** Integration testing verifies that multiple components work together correctly, exercising the real collaboration between them rather than replacing dependencies with doubles. Typical targets include the interaction between a service and a real database, the flow from a REST controller through the full request pipeline, or the consumption of messages from a real broker. These tests catch problems that unit tests structurally cannot, such as misconfigured bean wiring, incorrect SQL, wrong JSON field names, or mismatched API contracts. In the Spring Boot world, integration tests are usually built with `@SpringBootTest`, which starts the entire application context, and real external systems are often supplied by Testcontainers. Because a full context boot and real infrastructure are involved, integration tests are orders of magnitude slower than unit tests, so they sit in the middle of the test pyramid and are written in smaller numbers. They add most value at the seams of the system — places where code crosses from one boundary to another, such as the repository boundary, the HTTP boundary, or the messaging boundary. Good practice is to limit the number of full-context integration tests and to keep the rest as narrowly scoped slice tests. The goal is not to repeat what unit tests already verify, but to prove that the individually correct pieces agree on their shared interfaces and configuration.
-
+   - **Answer:** Integration testing verifies that components work together correctly, often involving real databases or message brokers. In our cold-chain project, we used `@SpringBootTest` with Testcontainers to test the full Kafka consumer to InfluxDB flow.
+   - **If asked more:** I would discuss how integration tests catch configuration issues that unit tests miss, and how we balanced unit vs integration coverage.
 3. Difference between unit and integration test.
-   - **Answer:** The essential difference is scope: a unit test exercises one unit in isolation with all collaborators replaced by test doubles, while an integration test exercises several real components together to verify their interaction. Unit tests answer "does this method implement its logic correctly?"; integration tests answer "do these components actually work when connected?" A unit test for a service mocks the repository, so a database outage cannot affect it; an integration test uses a real database, so it validates the actual SQL and dialect behavior. Unit tests run in milliseconds and are fully deterministic; integration tests take seconds or minutes because they boot Spring contexts and infrastructure. The test pyramid expresses the recommended ratio — roughly 70% unit tests, 20% integration tests, and 10% end-to-end tests — reflecting the inverse relationship between speed and coverage breadth. Integration tests are also the safety net for refactoring: when a refactor changes an internal structure but preserves behavior, unit tests confirm the units and integration tests confirm the whole flow still holds. End-to-end tests, at the top of the pyramid, drive the full deployed system through its real user interfaces, validating the system as a whole. Each layer compensates for the blind spots of the layer below, which is why a healthy suite contains all three.
-
+   - **Answer:** Unit tests test a single component in isolation (mocked dependencies), while integration tests test multiple components together (real dependencies). Our inventory validation service had unit tests for rules and integration tests for the full submission flow from controller to database.
+   - **If asked more:** I would explain the test pyramid ratio: roughly 70% unit, 20% integration, 10% end-to-end.
 4. What is JUnit?
-   - **Answer:** JUnit is the de-facto standard testing framework for Java, with JUnit 5 (Jupiter) being the current generation. It provides the test lifecycle, the `@Test` annotation to mark test methods, and a rich assertion library such as `assertEquals`, `assertTrue`, `assertThrows`, and `assertAll`. Lifecycle methods are controlled with `@BeforeEach` and `@AfterEach` for per-test setup and teardown, and `@BeforeAll` and `@AfterAll` for class-level initialization. Parameterized tests allow one test method to run against many inputs, which is ideal for data-driven validation logic:
-
-   ```java
-   @ParameterizedTest
-   @ValueSource(strings = {"", "  ", "abc"})
-   void rejectsInvalidSerials(String input) {
-       assertFalse(validator.isValid(input));
-   }
-   ```
-
-   Other sources include `@CsvSource` for multiple columns and `@MethodSource` for computed datasets. `@DisplayName` gives tests readable names, `@Nested` organizes related tests into a hierarchy, and `@Timeout` enforces execution-time limits to catch regressions in performance. In Maven builds, the Surefire plugin runs JUnit 5 tests as part of the standard test phase, making every `mvn test` execution a complete run of the unit suite. JUnit's tight integration with CI means a failing assertion produces a clear, machine-readable report that fails the build and identifies the exact failing case.
-
+   - **Answer:** JUnit is the standard testing framework for Java with annotations like `@Test` and assertions. We used JUnit 5 (Jupiter) for all tests with Maven Surefire plugin running them in the CI pipeline.
+   - **If asked more:** I would discuss JUnit 5 features: parameterized tests for multiple inputs, nested tests for organization, and dynamic tests for data-driven scenarios.
 5. What is Mockito?
-   - **Answer:** Mockito is a mocking framework for Java that creates test doubles to isolate the unit under test from its dependencies. The core workflow is to mock a dependency, stub the behavior it should return, exercise the code under test, and then verify the interactions that took place. Stubbing is done with `when(...).thenReturn(...)` for normal values, `when(...).thenThrow(...)` or `doThrow(...)` for exceptions, and `doAnswer(...)` for computed responses:
-
-   ```java
-   when(repository.findById(42L)).thenReturn(Optional.of(entity));
-   when(repository.save(any())).thenThrow(new DataIntegrityViolationException("dup"));
-   ```
-
-   Verification checks that methods were actually invoked, which distinguishes behavior verification from simple state checking: `verify(repository).save(expectedEntity)` asserts the method was called, and `verify(repository, times(2)).findById(any())` asserts the call count. Argument matchers like `any()`, `eq()`, `anyLong()`, and `isNull()` make stubbing and verification flexible without losing precision. `@Mock` and `@InjectMocks` reduce boilerplate by generating mocks and injecting them automatically. A `spy()` wraps a real object and allows overriding only selected methods, which is useful when most real behavior should be kept. Mockito also supports ordered verification with `InOrder` when call sequencing matters, and lenient vs strict stubbing to detect unused stubs that indicate over-specification. The overall effect is that business logic can be tested deterministically without a database, network, or any other real dependency.
-
+   - **Answer:** Mockito creates mock objects for testing components in isolation. In our service-layer tests, we used `when(repository.findById(any())).thenReturn(Optional.of(entity))` to test business logic without needing a database.
+   - **If asked more:** I would discuss verify for checking method calls, argument matchers, spy for partial mocking, and `@InjectMocks` for automatic mock injection.
 6. What is mock?
-   - **Answer:** A mock is a test double that not only provides canned responses but also records how it was used, allowing the test to verify behavior rather than just outcomes. Unlike a real dependency, a mock is completely under the control of the test: its methods can be configured to return specific values, throw specific exceptions, or do nothing at all. A mock makes a test fast, deterministic, and isolated, because it removes network latency, database state, and external failures from the equation. The defining capability of a mock is behavior verification: after the code under test runs, the test can assert that specific methods were called with the expected arguments and the expected frequency. For example, a service that must save an entity on every call can be tested by asserting `verify(repository).save(entity)` — if the code forgets to persist, the test fails even though the returned value looks correct. Mocks are therefore the right tool when the goal is to test how the code interacts with its collaborators. They are not appropriate for verifying that a third-party library works correctly, which is the job of integration tests against the real dependency.
-
+   - **Answer:** A mock is a fake object that mimics a real dependency with expectations set during the test. In testing our inventory service, we mocked the repository to return predefined data, making tests fast, isolated, and deterministic.
+   - **If asked more:** I would distinguish mocks from stubs: stubs provide predefined answers, mocks additionally verify that methods were called with expected parameters.
 7. What is stub?
-   - **Answer:** A stub is a test double that returns predefined responses to specific method calls, making the environment around the code under test predictable. Stubs are about state, not behavior: they provide the inputs the code needs so its output can be checked, but they do not record or assert on how they were called. For example, stubbing `repository.findById(42L)` to return a known entity lets the test focus on how the service reacts to a found entity versus a missing one. Stubs are the simplest form of test double and are typically configured with `when(...).thenReturn(...)` in Mockito. The essential difference from a mock is intent: a stub supplies data so the test can verify the resulting state, whereas a mock records interactions so the test can verify the calling behavior. In Mockito, the same `when/thenReturn` mechanism is used for both, and the distinction becomes visible in whether the test calls `verify`. Stubs shine when the test's goal is to answer "given this input, does the code produce the correct result?" rather than "did the code call the dependency in the expected way?"
-
+   - **Answer:** A stub returns predefined responses to method calls, making the test environment predictable. In our CDMS tests, we stubbed stored procedure calls to return known result sets, testing reporting logic without running the actual procedure.
+   - **If asked more:** I would explain the difference: stubs focus on providing data for state testing, mocks focus on verifying interaction behavior.
 8. Difference between mock and spy.
-   - **Answer:** A mock is a completely fake object that has no real implementation; every method returns a default value (or a stubbed value) and does nothing unless configured. A spy, by contrast, wraps a real instance, delegating to the real methods by default while allowing individual methods to be stubbed when needed. Concretely, `mock(Repository.class)` produces an object with no real behavior, while `spy(new Repository())` keeps the real logic and lets the test override only selected methods:
-
-   ```java
-   AuditService spy = spy(new AuditService());
-   doNothing().when(spy).send(anyString());
-   spy.record(42L); // real record() logic, but send() is skipped
-   verify(spy).record(42L);
-   ```
-
-   Mocks are the safer default because they cannot accidentally trigger real side effects such as database writes or network calls. Spies are useful in a narrow set of situations: legacy code that cannot be refactored to allow clean injection, or when verifying that a method delegates correctly while stubbing only a small part of its behavior. The main risks of spies are calling real methods during stubbing (partial mocking side effects) and silently depending on real implementations that may change. As a rule of thumb, prefer mocks for all collaborators in new code, and reach for spies only when partial behavior genuinely must be preserved.
-
+   - **Answer:** A mock creates a completely fake object with no real behavior, while a spy wraps a real object and allows overriding specific methods. We used mocks for repositories (completely fake) and spies when we needed some real behavior but wanted to stub others.
+   - **If asked more:** I would recommend mocks by default and spies only when necessary, as spies can have side effects from calling real methods.
 9. What is `@Mock`?
-   - **Answer:** `@Mock` is a Mockito annotation that marks a field to be replaced by an automatically generated mock when the test class is initialized. It is the declarative equivalent of calling `Mockito.mock(SomeClass.class)` and eliminates the boilerplate of manual mock creation. The mocks are created when the test framework initializes Mockito, either through `@ExtendWith(MockitoExtension.class)` in JUnit 5 or by calling `MockitoAnnotations.openMocks(this)` in a `@BeforeEach` method. Each `@Mock` field holds a mock for one dependency, so a test class typically declares one mock per collaborator of the class under test:
-
-   ```java
-   @ExtendWith(MockitoExtension.class)
-   class InventoryServiceTest {
-       @Mock private SerialRepository repository;
-       @Mock private AuditClient auditClient;
-       @InjectMocks private InventoryService service;
-   }
-   ```
-
-   Using the annotation keeps test setup concise, and the strict-stubs feature of `MockitoExtension` flags unused stubs, catching tests that over-specify or lose their meaning. `@Mock` is scoped to the plain unit test — it does not touch the Spring application context at all. When a mock needs to live inside the Spring context instead, `@MockBean` is the corresponding mechanism.
-
+   - **Answer:** `@Mock` is a Mockito annotation that creates and injects a mock for the annotated field. We annotated repository dependencies with `@Mock` in test classes, using `MockitoAnnotations.openMocks(this)` or `@ExtendWith(MockitoExtension.class)` for initialization.
+   - **If asked more:** I would explain how this reduces boilerplate compared to `Mockito.mock()` calls.
 10. What is `@InjectMocks`?
-    - **Answer:** `@InjectMocks` creates a real instance of the class under test and automatically injects the mocks declared with `@Mock` into its dependencies. This removes the need to manually construct the class and pass every collaborator in a constructor call. Mockito performs the injection by trying constructor injection first, then setter injection, and finally field injection, so a class with a single explicit constructor produces the most reliable results. For injection to work correctly, the dependency types declared in the class must be compatible with the mock types declared in the test. A classic example:
-
-    ```java
-    @Mock private SerialRepository repository;
-    @InjectMocks private InventoryService service;
-    ```
-
-    Here `InventoryService` is instantiated for real, and the `SerialRepository` mock is wired into it automatically. `@InjectMocks` only injects into the object under test; it does not create a mock of that object, because the whole point is to exercise the real implementation against mocked collaborators. Keeping the class under test as a real instance is what makes `@InjectMocks` tests genuine unit tests rather than tests of interactions between doubles.
-
+    - **Answer:** `@InjectMocks` creates an instance of the annotated class and injects mocks into its dependencies. In our service tests, the service class had `@InjectMocks`, and Mockito automatically injected the `@Mock` repositories, eliminating manual constructor calls.
+    - **If asked more:** I would discuss how Mockito handles injection - constructor preferred, then setter, then field - and the importance of a single constructor.
 11. What is `@MockBean`?
-    - **Answer:** `@MockBean` places a mock into the Spring application context, replacing the real bean of that type for the duration of the test. It belongs to the Spring Test framework, not to Mockito, and is used in Spring Boot slice and integration tests where the context must resolve dependencies. In a controller slice test, the real service bean is swapped for a mock so the test focuses purely on the web layer:
-
-    ```java
-    @WebMvcTest(InventoryController.class)
-    class InventoryControllerTest {
-        @Autowired private MockMvc mockMvc;
-        @MockBean private InventoryService service;
-    }
-    ```
-
-    Every injection point in the context that needs `InventoryService` receives the same mock, which is what makes slice testing feasible without booting the real business layer. The cost is a slower context and an additional dependency on the Spring Test framework, so `@MockBean` is inappropriate for plain unit tests where `@Mock` is the lightweight option. Note that `@MockBean` mocks reset after each test, which keeps tests isolated but means stubbing must be set up per test. In Spring Boot 3.4+, `@MockBean` is deprecated in favor of `@MockitoBean`, which behaves the same way using Mockito's own bean-creation mechanism. The rule of thumb: use `@Mock` for unit tests and `@MockBean`/`@MockitoBean` only when the mock must participate in the Spring context.
-
+    - **Answer:** `@MockBean` adds a mock to the Spring application context, replacing any existing bean. In our `@WebMvcTest` controller tests, we used `@MockBean` to mock service layer beans while testing only the controller layer.
+    - **If asked more:** I would explain the difference from `@Mock`: `@MockBean` affects the Spring context (slower but necessary for Spring slice tests), while `@Mock` is for plain unit tests.
 12. What is `@SpringBootTest`?
-    - **Answer:** `@SpringBootTest` starts the full Spring Boot application context, which makes it the standard tool for true integration testing of the whole application. It validates that all beans wire together, that configuration properties resolve, and that the complete request-to-database flow works as a whole. The `webEnvironment` attribute controls the web layer: `MOCK` (the default) simulates the servlet environment with MockMvc, `RANDOM_PORT` starts a real server on a random port, and `NONE` disables the web layer entirely. With `RANDOM_PORT`, tests interact over real HTTP using `TestRestTemplate` or `RestAssured`, which exercises serialization, filters, and error handling exactly as production does. Real external dependencies such as databases are usually provided through Testcontainers rather than mocked, because the point of the test is to verify genuine integration:
-
-    ```java
-    @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-    class OrderFlowIT {
-        @Container @ServiceConnection static PostgreSQLContainer<?> db = new PostgreSQLContainer<>("postgres:16");
-        @LocalServerPort private int port;
-    }
-    ```
-
-    Because a full context boot is expensive, `@SpringBootTest` classes should be kept few and focused on critical end-to-end flows, while slice tests cover narrower concerns. `@ActiveProfiles("test")` selects test-specific configuration so the tests do not depend on developer-local settings. `@SpringBootTest` does not replace unit tests; it complements them by proving that individually verified pieces actually work together under real Spring wiring.
-
+    - **Answer:** `@SpringBootTest` loads the full Spring Boot application context for integration testing. In our cold-chain project, we used it with Testcontainers to test the full flow from controller to Kafka to InfluxDB, verifying Spring bean wiring and configuration.
+    - **If asked more:** I would discuss `webEnvironment = RANDOM_PORT` for real HTTP testing with TestRestTemplate and `@ActiveProfiles("test")` for test-specific configuration.
 13. What is `@WebMvcTest`?
-    - **Answer:** `@WebMvcTest` is a Spring Boot slice test that loads only the web layer — controllers, `@ControllerAdvice`, converters, filters, and validation — instead of the entire application context. Dependencies of the controllers, typically services, are replaced with `@MockBean` or `@MockitoBean` mocks so the test exercises only the HTTP concerns. It is substantially faster than `@SpringBootTest` because most beans never get instantiated. Tests drive the controller through MockMvc, which can assert status codes, response headers, JSON content, and error responses without starting a real server:
-
-    ```java
-    @WebMvcTest(InventoryController.class)
-    class InventoryControllerTest {
-        @Autowired private MockMvc mockMvc;
-        @MockitoBean private InventoryService service;
-
-        @Test
-        void returns404WhenSerialUnknown() throws Exception {
-            when(service.findBySerial("X")).thenReturn(Optional.empty());
-            mockMvc.perform(get("/api/inventory/X"))
-                   .andExpect(status().isNotFound());
-        }
-    }
-    ```
-
-    `@WebMvcTest` is where controller validation, request mapping, and exception handling get verified: malformed JSON triggers 400, missing auth yields 401 or 403, and `@ExceptionHandler` responses are checked. It also lets security rules be tested with `@WithMockUser`. What it does not cover is the real service and repository behavior, so business-logic correctness still needs its own unit tests. The slicing principle generalizes: `@DataJpaTest` for the data layer, `@JsonTest` for serialization, and so on, each faster than the full context.
-
+    - **Answer:** `@WebMvcTest` loads only the web layer for focused controller testing. We used it with `@MockBean` for services, testing endpoint mappings, request validation, status codes, and error responses without loading the full context.
+    - **If asked more:** I would explain how it is faster than `@SpringBootTest` and how we used MockMvc for HTTP request assertions.
 14. What is Testcontainers?
-    - **Answer:** Testcontainers is a Java library that manages disposable Docker containers for tests, giving access to real databases, message brokers, and other services instead of in-memory substitutes. A container is declared with `@Container` inside a test class annotated with `@Testcontainers`, and the library handles pull, start, and cleanup:
-
-    ```java
-    @Testcontainers
-    class RepositoryIT {
-        @Container @ServiceConnection
-        static PostgreSQLContainer<?> db = new PostgreSQLContainer<>("postgres:16");
-    }
-    ```
-
-    `@ServiceConnection` automatically configures Spring Boot datasource properties from the container, removing manual property wiring. Tests run against the exact same database engine, version, and features as production, which eliminates the class of bugs caused by "works on H2, fails on the real database." Each test run gets a fresh container, so state from one test cannot leak into another, and containers are torn down automatically afterward. The library supports many images out of the box — PostgreSQL, MySQL, MSSQL, Kafka, Redis, Elasticsearch — and custom images can be wrapped when needed. The main tradeoff is speed: starting a container takes seconds, so Testcontainers tests are significantly slower than unit tests and are usually reserved for integration and repository layers. Running them in CI is straightforward because modern CI runners support Docker, making them the de-facto standard for reliable integration testing.
-
+    - **Answer:** Testcontainers provides disposable Docker containers for integration testing. In our cold-chain project, we used it to spin up real Kafka and InfluxDB containers during tests, ensuring tests ran against the same versions as production.
+    - **If asked more:** I would discuss how Testcontainers improves reliability over in-memory alternatives by using real dependencies, with `@Container` and `@Testcontainers` annotations for lifecycle management.
 15. Why use Testcontainers?
-    - **Answer:** Testcontainers exists because in-memory or embedded substitutes do not faithfully reproduce the behavior of the real system they replace. A typical failure mode is SQL dialect drift: an H2 database accepts queries and functions that the production database rejects, so tests pass locally and break in production. Real differences include window functions, full-text search, collation rules, JSON operators, and stored procedures — precisely the features that mature applications depend on. By running a genuine container image, Testcontainers ensures the SQL actually executed matches production, and it also validates that schema migrations applied correctly. The tradeoff is startup time and resource usage, so the pragmatic strategy is to use Testcontainers for the repository and integration layers where correctness matters most, and faster slice or unit tests everywhere else. Containers are created per test class and shared where safe, keeping the extra cost bounded. Even when a substitute like H2 is used, it makes sense to retain one Testcontainers-based suite that runs against the real engine to catch dialect drift. Ultimately the choice is between a small, reliable suite with real infrastructure versus a fast suite that can silently diverge from production reality.
-
+    - **Answer:** Testcontainers ensures tests run against real databases, not in-memory simulations that behave differently. H2 did not support all MSSQL features our stored procedures used, so Testcontainers with a real MSSQL container caught compatibility issues earlier.
+    - **If asked more:** I would discuss the tradeoff: slower (container startup) but more reliable. We ran them in CI only, not during local development for every change.
 16. How do you test repository layer?
-    - **Answer:** The repository layer is tested with `@DataJpaTest`, a Spring Boot slice that loads only JPA infrastructure — entity mappings, repositories, and the data source — without starting the rest of the application. Each test is transactional by default and rolls back at the end, so tests are isolated from one another. The database is typically either an embedded database for speed or a real one via Testcontainers for dialect fidelity. A typical test saves entities, invokes a repository method, and asserts on the results:
-
-    ```java
-    @DataJpaTest
-    class SerialRepositoryTest {
-        @Autowired private SerialRepository repository;
-
-        @Test
-        void findsBySerialIgnoringCase() {
-            repository.save(new Serial("ABC-123"));
-            assertTrue(repository.existsBySerialIgnoreCase("abc-123"));
-        }
-    }
-    ```
-
-    This verifies that derived query methods generate the expected SQL and that `@Query` annotations, native queries, pagination, and sorting behave correctly against a real schema. Projection interfaces and entity graph settings can also be validated here, because the test exercises actual SQL execution rather than mock behavior. Since the tests run against a real database, schema migration scripts are validated at the same time. `@DataJpaTest` is substantially faster than `@SpringBootTest` because only the data-layer beans are loaded, keeping repository tests fast enough to run on every build.
-
+    - **Answer:** I use `@DataJpaTest` which loads only JPA beans and uses an embedded or Testcontainers database. In CDMS, we tested custom queries, pagination, and sorting - verifying derived queries generated correct SQL and returned expected results.
+    - **If asked more:** I would discuss testing native queries and `@Query` annotations with parameter binding and projection interfaces.
 17. How do you test service layer?
-    - **Answer:** The service layer holds the business logic and is best tested as pure unit tests with JUnit and Mockito, mocking the repositories and external clients it depends on. The class under test is created with `@InjectMocks`, its collaborators are declared with `@Mock`, and each test stubs the exact data the scenario needs. Happy-path scenarios assert the expected return value or entity state, while the surrounding cases get equal attention: validation failures, resource-not-found, duplicate keys, and exceptions propagated from the persistence layer:
-
-    ```java
-    @Test
-    void throwsWhenSerialAlreadyExists() {
-        when(repository.existsBySerial("ABC-123")).thenReturn(true);
-        assertThrows(DuplicateSerialException.class,
-            () -> service.register(new SerialRequest("ABC-123")));
-    }
-    ```
-
-    `verify` confirms that side effects — saving an entity, calling an audit client, publishing an event — actually happened with the expected arguments. Tests must be independent: each test sets up only its own mocks and data, so reordering or running them in parallel changes nothing. Edge cases such as null inputs, empty collections, and boundary values complete the matrix. Because everything is mocked, these tests run in milliseconds and can cover dozens of scenarios, which is why the service layer dominates the unit-test layer of the pyramid.
-
+    - **Answer:** I use JUnit and Mockito, mocking repository dependencies and verifying business logic. In the inventory service, we mocked the repository, then tested validation rules, error handling, and edge cases like duplicate serials and invalid formats.
+    - **If asked more:** I would discuss testing happy path, validation failures, resource not found, concurrent modifications, and keeping tests independent and fast.
 18. How do you test controller layer?
-    - **Answer:** The controller layer is tested with `@WebMvcTest` and MockMvc, which loads only the web slice and drives controllers through the real HTTP request pipeline. Service dependencies are mocked with `@MockBean` or `@MockitoBean`, so the test focuses exclusively on mapping, validation, status codes, and JSON output. MockMvc builds requests and asserts on the full response:
-
-    ```java
-    mockMvc.perform(post("/api/inventory")
-               .contentType(MediaType.APPLICATION_JSON)
-               .content("{\"serial\":\"\"}"))
-           .andExpect(status().isBadRequest())
-           .andExpect(jsonPath("$.errors.serial").exists());
-    ```
-
-    The test matrix covers the standard statuses: 200/201 for success, 400 for bean-validation failures, 404 for unknown resources, and 401/403 for security violations. `jsonPath` assertions verify the structure and values of the response body, and custom error responses from `@ControllerAdvice` are validated here as well. Request content-type handling, path variables, query parameters, and headers are all exercised through real Spring MVC machinery. Security rules are tested in this slice with `@WithMockUser` and by sending requests without authentication to assert the expected 401. Because only the web layer is loaded, the suite is fast and can comprehensively cover every endpoint and its edge cases.
-
+    - **Answer:** I use `@WebMvcTest` with MockMvc, mocking service layer beans. In our cold-chain API tests, we verified GET endpoints returned correct JSON, POST with invalid data returned 400 with validation errors, and endpoints required proper authentication.
+    - **If asked more:** I would discuss testing response status codes, headers, JSON structure, and security filters (JWT, role-based access).
 19. How do you test Kafka consumer?
-    - **Answer:** Kafka consumers are tested at two levels: the message-handling logic as a plain unit test, and the actual consumption flow with a real or embedded broker. The handler logic should be extracted into a plain method so it can be unit-tested with mocked collaborators, covering message parsing, validation, and error handling. The integration layer can use `@EmbeddedKafka` from Spring Kafka, which starts an in-memory broker for lightweight tests, or Testcontainers with a real Kafka image when fidelity to production matters:
-
-    ```java
-    @EmbeddedKafka(partitions = 1, topics = "inventory.events")
-    class InventoryConsumerIT {
-        @Autowired private KafkaTemplate<String, String> kafkaTemplate;
-        @Autowired private InventoryConsumer consumer;
-
-        @Test
-        void processesMessage() {
-            kafkaTemplate.send("inventory.events", "{\"serial\":\"ABC-123\"}");
-            await().atMost(10, TimeUnit.SECONDS)
-                   .untilAsserted(() -> verify(consumer).handle(any()));
-        }
-    }
-    ```
-
-    Because consumption is asynchronous, tests must wait for delivery with `awaitility` or a timeout rather than asserting immediately. The test matrix includes happy-path processing, deserialization errors, poison-pill messages that cannot be parsed, and retry behavior when downstream processing fails. Offset-commit semantics can be observed by checking that the consumer continues to receive messages after a restart. The critical point is that consumer tests should assert on the side effect of consumption — data stored, API called, event re-published — and not merely on the message having been received.
-
+    - **Answer:** I use `@EmbeddedKafka` from Spring Kafka test for lightweight tests or Testcontainers with a real Kafka container. In our cold-chain project, we published test messages, verified the consumer processed them, and asserted expected data was stored in InfluxDB.
+    - **If asked more:** I would discuss testing deserialization errors, poison pills, offset commit behavior, and consumer retry logic.
 20. How do you test scheduled jobs?
-    - **Answer:** The scheduler itself — the Spring `@Scheduled` annotation — is framework behavior and does not need to be tested; what matters is the logic the job executes. The job body should be extracted into a plain, injectable service so it can be tested directly with JUnit and Mockito, exactly like any other service method. The test then covers the job's outcomes: what it reads, what it computes, and what it writes, using mocked dependencies for full isolation:
-
-    ```java
-    @Test
-    void reconciliationSkipsAlreadyReconciled() {
-        when(repository.findUnreconciledSince(any())).thenReturn(List.of());
-        reconciliationService.run();
-        verify(repository, never()).markReconciled(any());
-    }
-    ```
-
-    Idempotency is an especially important property to test: running the job twice should produce the same result and not create duplicates. Failure handling matters too — a job should not die silently or corrupt data when one batch fails, so tests verify retry or skip behavior. If an end-to-end verification is needed, `@SpringBootTest` with a short fixed-delay schedule can trigger the job and assert on the final state. This layered approach gives the speed of unit tests for the logic and the confidence of an integration test for the wiring, without depending on wall-clock timing in the fast test suite.
-
+    - **Answer:** I extract the job logic into a testable service and test that directly, plus an integration test that triggers the scheduler and verifies the outcome. In our inventory system, the reconciliation job was tested by calling the reconciliation service directly with test data.
+    - **If asked more:** I would discuss avoiding testing the scheduler framework itself and focusing on the logic being idempotent and handling failures gracefully.
 21. How do you test security rules?
-    - **Answer:** Security rules are tested at the web layer with `@WebMvcTest`, where Spring Security filters run inside the real request pipeline. The negative cases come first: an unauthenticated request must receive 401, and an authenticated user without the required role must receive 403. Role-based access is simulated with `@WithMockUser`, which injects an authentication into the security context for the request:
-
-    ```java
-    @Test
-    @WithMockUser(roles = "USER")
-    void userCannotDeleteInventory() throws Exception {
-        mockMvc.perform(delete("/api/inventory/42"))
-               .andExpect(status().isForbidden());
-    }
-
-    @Test
-    @WithMockUser(roles = "ADMIN")
-    void adminCanDeleteInventory() throws Exception {
-        mockMvc.perform(delete("/api/inventory/42"))
-               .andExpect(status().isOk());
-    }
-    ```
-
-    When a custom `UserDetailsService` or token-based authentication is used, tests can seed a real user in the context or use `@WithUserDetails`. Method-level security with `@PreAuthorize` and `@Secured` is validated the same way, since the annotation checks the authority stored in the security context. CSRF protection is tested by performing mutating requests without the CSRF token and asserting the expected failure. The full matrix — anonymous, wrong role, right role, disabled account — gives confidence that authorization rules behave as specified without booting the entire application.
-
+    - **Answer:** I use `@WithMockUser` for role-based access and manually set authentication for token-based tests. We tested that unauthenticated requests returned 401, wrong roles got 403, and correct roles could access endpoints.
+    - **If asked more:** I would discuss testing method-level security (`@PreAuthorize`) and CSRF protection.
 22. What is code coverage?
-    - **Answer:** Code coverage measures what percentage of the codebase was executed during the test run, answering "how much code do tests touch?" rather than "how well is the code tested?". Tools like JaCoCo for Java instrument the bytecode and report several metrics: line coverage, branch coverage, and instruction coverage. Branch coverage is the more meaningful number because it reports whether both the true and false arms of each `if` and each case of a `switch` were exercised. Coverage is typically enforced as a CI quality gate, for example a JaCoCo rule that fails the build if branch coverage drops below a threshold. Sensible configuration excludes generated code, DTOs, and configuration classes from the measurement, because covering boilerplate inflates the number without improving confidence. Coverage is reported per class, per package, and overall, so a low number on a specific service class immediately points to untested business logic. The numbers guide where to add tests, but they must be interpreted carefully: a covered line can still contain a wrong assertion, and an uncovered branch is a definite gap. Coverage is best used as a floor that catches regressions, not as a target to maximize blindly.
-
+    - **Answer:** Code coverage measures the percentage of code executed by tests. We used JaCoCo with Maven, targeting 70-80% coverage for service layers with clear exclusion rules for DTOs, configurations, and generated code.
+    - **If asked more:** I would discuss that high coverage does not guarantee good tests - we focused on branch coverage for business logic rather than line coverage numbers.
 23. Is 100% coverage always good?
-    - **Answer:** No — 100% coverage guarantees that every line executed, but it says nothing about the quality of the assertions attached to those executions. A test can reach every branch while asserting nothing meaningful, or can assert outcomes that are trivially true, and the coverage number would look perfect. Coverage cannot detect tests that miss the interesting scenarios, such as the boundary values, the failure paths, or the interactions that matter. Mutation testing is a stronger measure: it changes the code slightly — for example inverting a condition or removing a method call — and runs the suite; if no test fails, the tests failed to lock in that behavior. This directly exposes assertions that are too weak to detect real bugs. Practical guidance is to aim for high coverage on business-critical logic such as validation rules, calculations, and error handling, and to accept lower coverage on glue code. Chasing 100% everywhere usually means writing low-value tests that make the suite harder to maintain while adding little protection. The right mindset is that coverage is a diagnostic tool — it tells you where tests are missing — not a guarantee of correctness.
-
+    - **Answer:** No. 100% coverage can be misleading if tests only check simple paths with no meaningful assertions. We focused coverage on business-critical code - validation logic, calculations, error handling - not on boilerplate getters or configuration classes.
+    - **If asked more:** I would explain that mutation testing is a stronger measure than line coverage: it checks if tests actually catch bugs when the code is mutated.
 24. What is regression testing?
-    - **Answer:** Regression testing verifies that new changes do not break behavior that previously worked, guarding against the reintroduction of fixed bugs or the corruption of existing features. In practice it is an automated safety net: every time code changes, the existing suite runs and any test that fails signals an unintended behavior change. The strength of the net depends on the breadth of the suite, which is why the test pyramid matters — many fast unit tests catch logic regressions early, while integration and end-to-end tests catch wiring and cross-component regressions. Running the full suite on every pull request in CI means regressions are discovered minutes after the change, when the context is fresh and the fix is cheap. Tests should be written for every fixed bug, so the regression suite grows with the system's history of known failure modes. When a regression does slip through, the standard practice is to add a failing test first, then fix the code, so the case is protected forever after. Regression testing is what makes refactoring and continuous delivery safe, because the suite absorbs the risk that otherwise would be carried by manual testing.
-
+    - **Answer:** Regression testing ensures new changes do not break existing functionality. In our CI pipeline, the full test suite ran on every pull request - unit, integration, and smoke tests - catching regressions before they reached production.
+    - **If asked more:** I would discuss how automated regression testing reduces the fear of making changes, especially for critical paths like inventory validation where a regression could cause financial discrepancies.
 25. What is smoke testing?
-    - **Answer:** Smoke testing is a shallow but fast check that the application is actually alive and its core paths work, performed right after a deployment or build. Its purpose is to catch show-stopping problems — wrong configuration, missing dependencies, failure to start — before any deeper testing or real traffic is attempted. Typical smoke checks are a health endpoint returning 200, a simple read endpoint returning a well-formed response, and a basic database round-trip. A good smoke suite runs in under a minute and asserts only the coarsest level of correctness, because it is executed on every environment promotion, not just in the test phase. In CI/CD, smoke tests run immediately after deployment to staging or production and abort the pipeline on failure, preventing a broken build from reaching users. Because they are so cheap, they can run against every deployment, including scheduled builds that do not trigger the full suite. Smoke testing is complementary to regression testing: regression answers "did anything break?", while smoke answers "is the thing even up?". Together they form a two-stage gate — fast triage first, deep verification second.
-
+    - **Answer:** Smoke testing is a quick check that the application starts and core functionality works. In our Jenkins pipeline, after deploying to staging, smoke tests checked the health endpoint returned 200, a simple API call worked, and the dashboard loaded - all within 60 seconds.
+    - **If asked more:** I would explain that smoke tests catch obvious failures early (wrong config, missing dependencies) and prevent wasting time on deeper testing of a broken system.
 26. What is API testing?
-    - **Answer:** API testing validates a REST interface by sending real HTTP requests and asserting on the full response: status code, headers, body content, and schema. It covers the success paths — correct inputs returning 200/201 with the expected JSON — and the failure paths: invalid input yielding 400, missing authentication yielding 401, wrong roles yielding 403, and unknown resources yielding 404. Tests also check contract details like content-type, response headers, pagination metadata, and field types, which is where client integrations often break. API tests can be written in the test suite with Spring's `TestRestTemplate` or with RestAssured for more expressive request/response assertions, and the same tests can target a locally booted app or a deployed environment. In CI, API tests validate that the build's wire contract matches what consumers expect before anything is released. Contract testing extends the idea: producer and consumer sides agree on a shared contract (for example with Spring Cloud Contract) and verify independently. Together with performance checks on latency and throughput, API testing provides the outer safety net that unit and integration tests, by nature, cannot provide for the wire-level contract.
-
+    - **Answer:** API testing validates REST endpoints by sending HTTP requests and verifying status codes, headers, response body, and performance. We used Postman for manual testing and automated API tests in the CI pipeline using Spring Boot's TestRestTemplate.
+    - **If asked more:** I would discuss testing valid requests (200), invalid input (400), unauthorized (401/403), not found (404), and edge cases like empty responses and large payloads.
 27. What is Postman?
-    - **Answer:** Postman is a tool for developing, testing, and documenting APIs through a graphical interface, built around the concept of collections of requests. A collection groups related requests and can carry environment variables — base URLs, tokens, credentials — so the same requests work against dev, test, and production environments without editing them. Pre-request scripts run JavaScript before a request to compute dynamic values, typically to fetch an authentication token and store it in a variable. Test scripts run after the response and contain assertions, such as checking that the status code is 200 and that `jsonPath` matches the expected value:
-
-    ```javascript
-    pm.test("returns 200 with inventory", () => {
-        pm.response.to.have.status(200);
-        pm.expect(pm.response.json().serial).to.eql("ABC-123");
-    });
-    ```
-
-    Collections are stored in the repo as version-controlled JSON, so the API surface is reviewable and shared across team members. The same collections can be executed headlessly in CI using Newman, Postman's command-line runner, turning manually built requests into automated regression tests. Postman also doubles as living API documentation and a tool for ad-hoc exploration during development. Its role is pragmatic: fast manual iteration during development, plus a bridge to automation for teams that do not want to write test code by hand.
-
+    - **Answer:** Postman is a tool for developing and testing APIs through a graphical interface. We created Postman collections for each API module with environment variables, pre-request scripts for authentication, and test scripts for assertions.
+    - **If asked more:** I would discuss how collections were version-controlled in the repo and used for QA testing and CI via Newman.
 28. How do you test error cases?
-    - **Answer:** Error cases are tested deliberately: the test sends inputs designed to fail and asserts that the application responds with the correct error contract. The matrix splits into client errors (4xx) and server errors (5xx). Client errors include missing required fields, invalid formats, out-of-range values, unknown IDs, and duplicate entries, which should produce 400 or 404 with a structured error body:
-
-    ```java
-    mockMvc.perform(post("/api/inventory").content("{}"))
-           .andExpect(status().isBadRequest())
-           .andExpect(jsonPath("$.errors.serial").exists());
-    ```
-
-    Server errors are typically triggered by stubbing a dependency to throw — a repository throwing `DataIntegrityViolationException` or a remote client timing out — and asserting that the `@ControllerAdvice` handler maps it to the correct 500 response instead of leaking a stack trace. The tests verify that the error body is stable, contains actionable messages, and does not expose internal implementation details. Error handling in the business layer is tested at the unit level with `assertThrows` to confirm the right exception types and messages. Combined, these tests ensure that consumers of the API always receive a predictable, documented failure mode rather than an unhandled exception.
-
+    - **Answer:** I intentionally send invalid inputs and assert the correct error response. In the inventory API, we sent missing fields, invalid formats, and duplicate entries - verifying 400/422 status codes and checking error messages were actionable for partners.
+    - **If asked more:** I would discuss testing both client errors (4xx) and server errors (5xx), including database failures (mocked exceptions) and timeout scenarios.
 29. How do you test performance changes?
-    - **Answer:** Performance testing compares measurements before and after a change under identical conditions, because a single absolute number is meaningless without a baseline. The workload must be reproducible — the same script or request mix, the same dataset, and the same environment — so differences reflect the code change and not noise. Metrics to capture include response time (p50, p95, p99), throughput, and resource usage such as CPU, memory, and I/O. Tools like JMeter or Gatling drive load tests, while Spring Actuator metrics or a profiler capture the system side of the measurement. Warm-up is essential: caches, connection pools, and JIT compilation must be warmed before timing begins, otherwise early-run numbers are misleading. Multiple runs reduce variance, and the comparison is made on the distribution, not on a single lucky run. Consistency also requires considering concurrent load, because a change that looks fine at low concurrency can regress badly under contention. If a measured regression appears, profiling identifies the hotspot, and the change is either optimized or reverted. Performance testing is only trustworthy when conditions are tightly controlled; otherwise the results are anecdotal.
-
+    - **Answer:** I run the same workload before and after changes, measuring response times, throughput, and resource usage. In CDMS optimization, I ran stored procedures with realistic data, recorded execution plans, measured elapsed time - from 5 hours to under 12 minutes.
+    - **If asked more:** I would discuss consistent test conditions (same data, server load, warm caches) and tools like JMeter for load testing.
 30. How do you validate database optimization results?
-    - **Answer:** Database optimization is validated by comparing execution plans and resource metrics before and after the change, using the same realistic dataset and workload. The key indicators in the plan are the access method — index seek versus index scan — and the operators, such as a nested-loop join versus a hash join, plus the estimated vs actual row counts. Logical reads and I/O counts from commands like `SET STATISTICS IO` quantify how much data the engine touches, which usually dominates wall-clock time more than CPU. The before and after runs must use realistic data volumes, because an optimization that works on a tiny table can be catastrophic at production scale, and the optimizer makes different decisions as row counts grow. Correctness must be verified alongside speed: the optimized query must return identical results, which is best confirmed by comparing output sets with a hash or checksum. Parameter sniffing means the validation should also cover representative parameter values, since one value may produce a good plan and another a bad one. After the change, the query is monitored in production for at least one full reporting cycle to confirm the improvement holds under real load. The discipline is to prove the change with evidence — plans, reads, timings — rather than trusting that an index or rewrite is better by intuition.
+    - **Answer:** I compare execution plans before and after changes, checking index usage (seek vs scan), logical reads, and actual execution time with realistic data. For CDMS, I captured plans, identified expensive operators, applied changes, and verified index seeks replaced scans.
+    - **If asked more:** I would discuss testing with production-like data volumes, validating correctness by comparing output, and monitoring optimized procedures in production for at least one reporting cycle.
+
