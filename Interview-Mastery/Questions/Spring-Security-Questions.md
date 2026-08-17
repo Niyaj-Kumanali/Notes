@@ -56,290 +56,277 @@
    - **Answer:**
       - A framework for authentication, authorization, and protection against common web vulnerabilities
       - In my CDMS and inventory projects, I used Spring Security with JWT to secure REST APIs, configured security filter chains, and applied role-based access control for admin and partner users
-   - **If asked more:**
-      - I would explain the filter chain architecture, how `SecurityFilterChain` replaced the old `WebSecurityConfigurerAdapter`, and walk through my custom `JwtAuthenticationFilter` that extends `OncePerRequestFilter`
+      - The filter chain architecture consists of `SecurityFilterChain` which replaced the old `WebSecurityConfigurerAdapter`, and I walk through my custom `JwtAuthenticationFilter` that extends `OncePerRequestFilter` to intercept and validate tokens on every request
+      - `SecurityFilterChain` beans are matched by request matchers (e.g., `requestMatcher("/api/**")`), allowing different filter configurations for public and private endpoints, and filters are executed in order with each handling a single security concern such as authentication, authorization, CSRF protection, or exception translation
+
 2. Difference between authentication and authorization.
    - **Answer:**
       - Authentication verifies who you are (identity), authorization verifies what you can do (permissions)
       - In my CDMS project, users logged in with username/password (authentication), and the JWT contained roles like `ROLE_ADMIN` or `ROLE_PARTNER` (authorization) to control access to different API endpoints
-   - **If asked more:**
-      - I would explain how authentication creates a `UsernamePasswordAuthenticationToken`, stores it in `SecurityContextHolder`, and how authorization checks `GrantedAuthority` via `@PreAuthorize` or `.hasRole()` in filter chain configuration
+      - Authentication creates a `UsernamePasswordAuthenticationToken` containing principal, credentials, and authorities, then stores it in `SecurityContextHolder` via `AuthenticationManager.authenticate()`, while authorization checks `GrantedAuthority` objects against the required permissions using `@PreAuthorize`, `.hasRole()`, or filter-chain-level access rules
+
 3. What is security filter chain?
    - **Answer:**
       - The security filter chain is a sequence of filters that intercept every HTTP request to apply authentication, authorization, CSRF, CORS, and other security logic
       - In my inventory project, I configured a custom filter chain with `JwtAuthenticationFilter` before `UsernamePasswordAuthenticationFilter` to validate JWT tokens on every API call
-   - **If asked more:**
-      - I would explain how the filter chain is ordered, how `SecurityFilterChain` beans are matched by request matchers, and how I used multiple filter chains for public and private endpoints in the CDMS API
+      - The filter chain is ordered with each `SecurityFilterChain` bean matched by `requestMatcher()` — a request matching `/api/**` uses one chain while `/actuator/**` uses another, and I used multiple filter chains in the CDMS API to separate public endpoints (no auth required) from private ones (JWT validation mandatory)
+
 4. How does Spring Security process a request?
    - **Answer:**
       - Each request passes through the security filter chain
       - If a JWT is present, my custom filter extracts the token, validates the signature, loads user details, and creates an `Authentication` object stored in `SecurityContextHolder`
       - If JWT is missing or invalid, the request is rejected with 401 before reaching the controller
-   - **If asked more:**
-      - I would walk through the full flow: incoming request → `DelegatingFilterProxy` → `FilterChainProxy` → custom filters → `UsernamePasswordAuthenticationFilter` (for login) → `ExceptionTranslationFilter` → `FilterSecurityInterceptor`
+      - The full flow is: incoming request → `DelegatingFilterProxy` (delegates to Spring-managed bean) → `FilterChainProxy` (selects matching `SecurityFilterChain`) → custom filters (e.g., `JwtAuthenticationFilter`) → `UsernamePasswordAuthenticationFilter` (for login form) → `ExceptionTranslationFilter` (handles auth/denial exceptions) → `FilterSecurityInterceptor` (final authorization check)
+
 5. What is `SecurityContextHolder`?
    - **Answer:**
       - `SecurityContextHolder` stores the `SecurityContext` of the currently authenticated user using a `ThreadLocal`
       - In my CDMS project, I accessed the logged-in user's details in service layers by calling `SecurityContextHolder.getContext().getAuthentication()` to retrieve the username and roles for audit logging
-   - **If asked more:**
-      - I would explain the three storage modes: MODE_THREADLOCAL (default), MODE_INHERITABLETHREADLOCAL (for async), and MODE_GLOBAL
-      - I encountered a context loss issue with `@Async` and had to use `SecurityContextHolder.setStrategyName()` to fix it
+      - Three storage modes exist: `MODE_THREADLOCAL` (default, one context per request thread), `MODE_INHERITABLETHREADLOCAL` (child threads inherit the parent's context, used for `@Async` methods), and `MODE_GLOBAL` (single shared context, only for single-threaded apps). I encountered a context loss issue with `@Async` where the spawned thread had no authentication, and fixed it by calling `SecurityContextHolder.setStrategyName(Mode.INHERITABLETHREADLOCAL)` in the security configuration
+
 6. What is `Authentication` object?
    - **Answer:**
       - `Authentication` represents the authenticated user's identity and authorities
       - After successful JWT validation in my inventory API, I created a `UsernamePasswordAuthenticationToken` containing the user principal, credentials (null for JWT), and granted authorities, and set it in the `SecurityContextHolder`
-   - **If asked more:**
-      - I would explain the three key methods: `getPrincipal()` (user object), `getCredentials()` (password/token), `getAuthorities()` (roles/permissions), and how `isAuthenticated()` flag is set by the `AuthenticationManager`
+      - Three key methods: `getPrincipal()` returns the user object (e.g., `UserDetails` or username string), `getCredentials()` returns the password or token string, and `getAuthorities()` returns the collection of `GrantedAuthority` objects. The `isAuthenticated()` flag starts as `false` during authentication and is set to `true` by the `AuthenticationManager` after successful verification
+
 7. What is `GrantedAuthority`?
    - **Answer:**
       - `GrantedAuthority` represents a permission granted to the user, like a role or a specific action permission
       - In my CDMS project, I mapped database roles like `ADMIN`, `PARTNER`, and `VIEWER` to `SimpleGrantedAuthority` objects in the `UserDetails` implementation for authorization checks
-   - **If asked more:**
-      - I would explain the difference between role-based (`ROLE_ADMIN`) and permission-based (`REPORT_EXPORT`) authorities, and how I used `hasRole('ADMIN')` vs `hasAuthority('REPORT_EXPORT')` in method security annotations
+      - Role-based authorities follow the convention `ROLE_ADMIN`, `ROLE_PARTNER` and are checked with `hasRole()`, while permission-based authorities use custom strings like `REPORT_EXPORT` or `USER_DELETE` and are checked with `hasAuthority()`. I used `hasRole('ADMIN')` for broad admin-only endpoints and `hasAuthority('REPORT_EXPORT')` for fine-grained permission checks on a specific action that only admins with explicit export permission could perform
+
 8. What is `UserDetails`?
    - **Answer:**
       - `UserDetails` is Spring Security's interface representing the user principal with username, password, authorities, and account status flags
       - I implemented a custom `UserDetails` class in my inventory project that wrapped the JPA `User` entity and delegated to it for authentication and authorization
-   - **If asked more:**
-      - I would explain the methods: `getAuthorities()`, `isAccountNonExpired()`, `isAccountNonLocked()`, `isCredentialsNonExpired()`, and `isEnabled()`, and how I used these for account locking after multiple failed login attempts
+      - The interface defines `getAuthorities()` (returns `Collection<GrantedAuthority>`), `isAccountNonExpired()` (account not past expiration), `isAccountNonLocked()` (account not locked), `isCredentialsNonExpired()` (password not past expiration), and `isEnabled()` (account active). I used the account locking methods to implement a failed-login lockout — after 5 consecutive failed attempts I set `enabled = false` on the `UserDetails` object, and unlocked it after a 15-minute cooldown
+
 9. What is `UserDetailsService`?
    - **Answer:**
       - `UserDetailsService` is a core interface that loads user-specific data by username
       - In my CDMS project, I implemented `CustomUserDetailsService` that queried the MSSQL `users` table via JPA repository, mapped the user entity to `UserDetails`, and returned it for authentication
-   - **If asked more:**
-      - I would explain the `loadUserByUsername()` method contract, how to handle `UsernameNotFoundException`, and how I cached user details in Redis to avoid querying the database on every request in the inventory project
+      - The single method `loadUserByUsername(String username)` must return a fully populated `UserDetails` or throw `UsernameNotFoundException`. I cached user details in Redis with a 5-minute TTL to avoid querying the database on every login request in the inventory project, reducing database load while still allowing role changes to propagate within minutes
+
 10. What is `AuthenticationProvider`?
    - **Answer:**
       - `AuthenticationProvider` processes a specific type of authentication request
       - In my JWT-based projects, the `DaoAuthenticationProvider` handled username/password login, and I created a custom `JwtAuthenticationProvider` that validated the JWT token and returned the `Authentication` object
-   - **If asked more:**
-      - I would explain how to implement a custom `AuthenticationProvider` by overriding `authenticate()` and `supports()`, and how I used `AuthenticationManagerBuilder` to register multiple providers for different authentication types
+      - To implement a custom provider, override `authenticate(Authentication auth)` which contains the authentication logic and `supports(Class<?> clazz)` which checks if this provider handles the given authentication type. I registered multiple providers using `AuthenticationManagerBuilder` — `DaoAuthenticationProvider` for form login and a custom `JwtAuthenticationProvider` for API token validation, so Spring Security delegates to the correct provider based on the authentication token type
+
 11. What is `PasswordEncoder`?
    - **Answer:**
       - `PasswordEncoder` handles password hashing and verification
       - In all my projects, I used `BCryptPasswordEncoder` for hashing user passwords before storing them in MSSQL, and Spring Security used the same encoder to verify passwords during login authentication
-   - **If asked more:**
-      - I would explain the difference between `BCryptPasswordEncoder`, `SCryptPasswordEncoder`, and `Pbkdf2PasswordEncoder`, why BCrypt is preferred for its adaptive salt and work factor, and how I configured the strength parameter in my security config
+      - Three common implementations: `BCryptPasswordEncoder` (adaptive hashing with built-in salt, preferred for most apps), `SCryptPasswordEncoder` (memory-hard function, better against GPU attacks), and `Pbkdf2PasswordEncoder` (NIST-recommended, standard-based). I chose BCrypt for its adaptive salt and configurable work factor, and configured the strength parameter (cost factor) to 12 in my security config, balancing security with response time — each login hash took under 1 second
+
 12. Why use BCrypt?
    - **Answer:**
       - BCrypt is a slow, salted hashing algorithm designed specifically for passwords
       - In my CDMS project, I used `BCryptPasswordEncoder` with strength 12 because it makes brute-force attacks impractical — even if the database is compromised, the attacker cannot reverse the hashes easily
-   - **If asked more:**
-      - I would explain how BCrypt embeds the salt in the hash output, how the strength factor increases computation time exponentially, and how I chose the strength based on response time requirements (under 1 second per login attempt is acceptable)
+      - BCrypt embeds the salt directly in the hash output (the 22-character string after the `$2a$12$` prefix), so no separate salt storage is needed. The strength factor controls the number of rounds as `2^strength`, so increasing from 10 to 12 quadruples computation time. I chose strength 12 based on profiling: under 1 second per hash on production hardware, ensuring login latency stayed acceptable while making offline brute-force attacks computationally infeasible
+
 13. What is JWT?
    - **Answer:**
       - JWT is a JSON-based token used for stateless authentication consisting of a header, payload, and signature
       - In my CDMS project, after login the server returned a signed JWT containing the user ID, roles, and expiration time, which the client sent in the `Authorization` header for subsequent requests
-   - **If asked more:**
-      - I would explain the three parts of JWT (header with algorithm, payload with claims, signature), how HMAC-SHA256 signing works, and how I used the `io.jsonwebtoken` (jjwt) library to create and parse tokens in my projects
+      - A JWT has three Base64URL-encoded parts separated by dots: the header specifies the algorithm (e.g., `HS256`) and token type, the payload contains claims (user data, expiration, issuer), and the signature is created by hashing `header + payload` with a secret key using the algorithm specified in the header. I used the `io.jsonwebtoken` (jjwt) library to create tokens with `Jwts.builder().signWith(key).compact()` and parse them with `Jwts.parserBuilder().setSigningKey(key).build().parseClaimsJws(token)`
+
 14. How does JWT authentication work?
    - **Answer:**
       - The client sends credentials to a login endpoint; the server validates them, creates a signed JWT, and returns it
       - In my inventory API, I had a `POST /auth/login` endpoint that accepted username/password, authenticated via `AuthenticationManager`, generated a JWT with 24-hour expiry, and returned it in the response body
-   - **If asked more:**
-      - I would explain the full request flow: client sends `Authorization: Bearer <token>` header → my `JwtAuthenticationFilter` extracts token → validates signature and expiry → parses claims → creates `Authentication` object → sets in `SecurityContextHolder`
+      - For subsequent requests the full flow is: client sends `Authorization: Bearer <token>` header → `JwtAuthenticationFilter` extracts the token string → validates the signature using the signing key, checks expiry (`exp` claim), and verifies the issuer (`iss` claim) → parses claims into a `Claims` object → builds a `UsernamePasswordAuthenticationToken` with the subject as principal and roles from the `roles` claim → sets it in `SecurityContextHolder`. If any step fails, the filter throws `JwtException` and the request never reaches the controller
+
 15. What should a JWT contain?
    - **Answer:**
       - A JWT should contain minimal claims: user ID, roles/permissions, issued-at time, and expiration time
       - In my projects, I included `sub` (user ID), `roles` (comma-separated roles), `iat` (issued at), `exp` (expiration), and `iss` (issuer = application name)
-   - **If asked more:**
-      - I would explain the difference between standard registered claims (`iss`, `sub`, `aud`, `exp`, `nbf`, `iat`, `jti`) and custom claims, and why I kept the payload small to reduce HTTP header overhead in the cold-chain project with frequent API calls
+      - Standard registered claims include `iss` (issuer), `sub` (subject/user ID), `aud` (audience), `exp` (expiration), `nbf` (not-before), `iat` (issued-at), and `jti` (unique token ID for revocation). Custom claims should be minimal — I kept the payload small in the cold-chain project with frequent API calls to reduce HTTP header overhead, since large JWTs increase latency on every request
+
 16. What should a JWT not contain?
    - **Answer:**
       - A JWT should never contain sensitive information like passwords, credit card numbers, or personally identifiable information (PII) because the payload is base64-encoded, not encrypted
       - In my projects, I only stored non-sensitive data like user ID and roles — never the password hash or personal details
-   - **If asked more:**
-      - I would explain that anyone with the token can decode the payload, and how to use JWE (JWT Encryption) if sensitive claims are needed
-      - I would also mention that token size matters when hitting URL length limits or causing HTTP header overhead
+      - Anyone with the token can decode the Base64URL payload and read all claims without needing the signing key — the signature only prevents tampering, not reading. If sensitive claims are required, use JWE (JWT Encryption) with `Jwts.builder().encryptWith(key, algorithm)` to produce an encrypted token where the payload is ciphertext. I also ensured token size stayed reasonable since large payloads cause HTTP header overhead, and very long tokens can hit URL length limits if passed as query parameters
+
 17. How do you validate JWT signature?
    - **Answer:**
       - The server validates the signature using the same secret key that signed the token
       - In my CDMS project, I used the jjwt library's `Jwts.parserBuilder().setSigningKey(secretKey).build().parseClaimsJws(token)` which automatically validates the signature, expiry, and throws exceptions for tampered or expired tokens
-   - **If asked more:**
-      - I would explain HMAC vs RSA signing, how I stored the secret key in environment variables (not in code), and how I handled edge cases like malformed tokens, expired tokens, and tokens with wrong signature by catching `JwtException` and sending 401 responses
+      - HMAC signing uses a shared secret (same key signs and verifies — suitable for single-server or trusted environments), while RSA signing uses a public/private key pair (private key signs, public key verifies — better for distributed systems where multiple services validate tokens). I stored the signing secret in environment variables via `@Value("${jwt.secret}")` rather than hardcoding it in source, and handled edge cases by catching specific exceptions: `SignatureException` for tampered tokens, `ExpiredJwtException` for expired tokens, `MalformedJwtException` for malformed structure, and `UnsupportedJwtException` for unsupported algorithms, returning a 401 JSON response for each
+
 18. Difference between access token and refresh token.
    - **Answer:**
       - Access tokens are short-lived (15-30 minutes) and used to authenticate API requests; refresh tokens are long-lived (7-30 days) and used to obtain new access tokens without re-login
       - In my CDMS project, I implemented refresh token rotation where each refresh request invalidated the old refresh token and issued a new pair
-   - **If asked more:**
-      - I would explain the security trade-off: longer access tokens increase vulnerability if leaked, while refresh tokens reduce login frequency but need secure storage
-      - I stored refresh tokens in MSSQL with expiry dates for revocation capability
+      - The security trade-off is that longer access tokens increase the vulnerability window if leaked (an attacker has more time to use them), while refresh tokens reduce login frequency but require secure storage. I stored refresh tokens in MSSQL with expiry dates and a `revoked` boolean flag, enabling server-side revocation even though the access token itself was stateless
+
 19. How do you revoke JWT?
    - **Answer:**
-      - Stateless JWTs cannot be revoked directly
+      - Stateless JWTs cannot be revoked directly — they remain valid until expiry
       - In my inventory project, I maintained a Redis blacklist of revoked JWT IDs (`jti`) until their natural expiry, and added a filter check at the beginning of the security chain to reject blacklisted tokens
-   - **If asked more:**
-      - I would explain alternative approaches: short token expiry reduces revocation window, refresh token revocation invalidates the ability to get new access tokens, and maintaining a deny-list in Redis is the most practical approach with minimal performance impact
+      - Alternative approaches: short token expiry (5-15 minutes) reduces the revocation window so even an unrevoked token expires quickly, refresh token revocation invalidates the ability to obtain new access tokens (effective for logout), and maintaining a deny-list in Redis is the most practical approach with minimal performance impact — I stored only the `jti` claim (not the full token) with a TTL matching the token's remaining expiry, so Redis automatically cleaned up expired entries
+
 20. What is token rotation?
    - **Answer:**
       - Token rotation issues a new refresh token each time a refresh token is used, invalidating the old one
       - In my CDMS project, when a client called the `/auth/refresh` endpoint, I validated the current refresh token, revoked it in the database, and issued a new access token and refresh token pair
-   - **If asked more:**
-      - I would explain how token rotation limits the damage if a refresh token is stolen — the attacker can use it only once before the legitimate user's next refresh invalidates it
-      - I used `@Transactional` to ensure the rotation was atomic
+      - Token rotation limits the damage if a refresh token is stolen — the attacker can use it only once before the legitimate user's next refresh attempt invalidates it, since both tokens cannot be valid simultaneously. I used `@Transactional` on the rotation method to ensure the old token revocation and new token issuance were atomic, preventing a race condition where both old and new tokens could be valid
+
 21. Where should JWT be stored?
    - **Answer:**
       - On the client side, JWT should be stored in an httpOnly secure cookie or in-memory variable, not in localStorage
       - In my CDMS project, the frontend React application stored the access token in memory and the refresh token in an httpOnly cookie to mitigate XSS attacks
-   - **If asked more:**
-      - I would explain the security implications: localStorage is accessible via JavaScript (XSS vulnerability), while httpOnly cookies are not
-      - I would also discuss the trade-off of in-memory storage where page refresh loses the token, requiring refresh token flow
+      - `httpOnly` cookies are inaccessible to JavaScript (preventing XSS token theft) but are sent automatically with every request to the domain (requiring CSRF protection). In-memory storage (`useState` or a module-level variable) provides the strongest XSS protection but the token is lost on page refresh — the refresh token in the httpOnly cookie then obtains a new access token transparently. The trade-off is that in-memory storage requires the refresh flow to be implemented properly, but it eliminates the XSS attack vector entirely
+
 22. Why is storing JWT in localStorage risky?
    - **Answer:**
       - localStorage is accessible by any JavaScript running on the same origin, making it vulnerable to XSS attacks
       - If an attacker injects a script, they can steal the token and impersonate the user
       - In my projects, I recommended the client team use httpOnly cookies instead
-   - **If asked more:**
-      - I would explain CSRF vs XSS risks, how httpOnly cookies prevent XSS but need CSRF protection, and how I configured the backend with CSRF disabled (since my API used Bearer tokens) but advised the frontend team on proper cookie attributes
+      - The key distinction is CSRF vs XSS: httpOnly cookies prevent XSS (JavaScript cannot read the cookie) but are vulnerable to CSRF (automatically sent with requests, so a malicious site can trigger requests that include the cookie). Bearer tokens in localStorage prevent CSRF (JavaScript must explicitly attach the header, and a malicious origin cannot read it via CORS) but are vulnerable to XSS. Since my APIs used Bearer tokens exclusively, I configured the backend with CSRF disabled (`.csrf().disable()`) and advised the frontend to use httpOnly cookies for the refresh token while keeping the access token in memory only
+
 23. What is CSRF?
    - **Answer:**
       - CSRF (Cross-Site Request Forgery) tricks an authenticated user into executing unwanted actions on a web application
       - In my REST API projects, I disabled CSRF protection because JWT-based stateless APIs are not vulnerable to CSRF — there is no session cookie to exploit
-   - **If asked more:**
-      - I would explain how CSRF works with session cookies, why stateful form-based apps need CSRF tokens, and how stateless APIs using `Authorization: Bearer` header are immune to CSRF since the attacker's site cannot read the JWT from a different origin
+      - CSRF works with session cookies because the browser automatically attaches the session cookie to every request to the domain, so a malicious site can create a hidden form that submits to the target app and the browser includes the session cookie without the user's knowledge. Stateless APIs using `Authorization: Bearer` headers are immune because the attacker's site cannot read the JWT from a different origin (CORS blocks it), and JavaScript on the attacker's site cannot set the `Authorization` header on cross-origin requests via the Fetch API
+
 24. When can CSRF be disabled?
    - **Answer:**
       - CSRF can be disabled when using stateless authentication (JWT), when all state-changing endpoints require a custom header, or when the client and API are on different origins with proper CORS
       - In my CDMS and inventory projects, I disabled CSRF since I used Bearer tokens exclusively
-   - **If asked more:**
-      - I would explain that disabling CSRF without understanding the security implications is dangerous
-      - I would always verify that no session-cookie-based authentication is in use before setting `.csrf().disable()` in the security configuration
+      - Disabling CSRF without understanding the security implications is dangerous — I always verified that no session-cookie-based authentication was in use before setting `.csrf().disable()` in the security configuration. CSRF should remain enabled if the app uses session cookies for login (form-based auth), accepts form submissions, or if the frontend sends cookies automatically. For JWT APIs, the `Authorization` header is never auto-attached by browsers, making CSRF protection unnecessary
+
 25. What is CORS?
    - **Answer:**
       - CORS (Cross-Origin Resource Sharing) is a browser security mechanism that controls which origins can access a web resource
       - In my CDMS project, I configured CORS in Spring Security to allow the React frontend hosted on a different domain to make API calls
-   - **If asked more:**
-      - I would explain the preflight OPTIONS request, how the `Access-Control-Allow-Origin` header works, and how I configured `allowedOrigins`, `allowedMethods`, and `allowedHeaders` in a `@Bean` CorsConfigurationSource for the inventory project
+      - When the frontend at `https://app.example.com` calls the API at `https://api.example.com`, the browser sends a preflight `OPTIONS` request to check if the target origin allows the request. The server responds with `Access-Control-Allow-Origin` (which origins are allowed), `Access-Control-Allow-Methods` (which HTTP methods are permitted), and `Access-Control-Allow-Headers` (which headers are accepted). Without proper CORS configuration, the browser blocks the response and the request fails client-side
+
 26. How do you configure CORS?
    - **Answer:**
       - I configure CORS by defining a `CorsConfigurationSource` bean with allowed origins, methods, and headers
       - In my cold-chain project, I allowed the React dashboard origin and exposed custom headers like `X-Total-Count` for paginated responses
-   - **If asked more:**
-      - I would explain the difference between controller-level `@CrossOrigin` and global CORS configuration, why global config is better for consistency, and how I used `setAllowCredentials(true)` when the frontend needed to send cookies along with JWT in httpOnly cookies
+      - Controller-level `@CrossOrigin` applies only to that specific controller and must be repeated on each one, while global CORS configuration via a `CorsConfigurationSource` bean applies to all endpoints consistently — I always used global config. I set `allowedOrigins("https://app.example.com")` (not `*` in production), `allowedMethods("GET", "POST", "PUT", "DELETE")`, `allowedHeaders("*")`, and `allowCredentials(true)` when the frontend needed to send cookies alongside the JWT in httpOnly cookies
+
 27. Difference between `hasRole()` and `hasAuthority()`.
    - **Answer:**
       - `hasRole('ADMIN')` automatically prefixes with `ROLE_` to check `ROLE_ADMIN`, while `hasAuthority('REPORT_EXPORT')` checks the exact authority string
       - In my CDMS project, I used `hasRole('PARTNER')` for partner endpoints and `hasAuthority('REPORT_EXPORT')` for a specific permission that only admins with export permission had
-   - **If asked more:**
-      - I would explain how Spring Security adds the `ROLE_` prefix with `roleHierarchy()`, how to customize the prefix, and when to use role-based vs permission-based access control in a multi-tenant inventory system
+      - Spring Security automatically adds the `ROLE_` prefix when evaluating `hasRole()`, so storing the role as `ROLE_ADMIN` in the database and using `hasRole('ADMIN')` both resolve to the same authority. You can customize or remove this prefix with `roleHierarchy()`. Use `hasRole()` for role-based access control (coarse-grained: admin, user, manager) and `hasAuthority()` for permission-based access control (fine-grained: `REPORT_EXPORT`, `USER_DELETE`, `INVENTORY_RESET`) in multi-tenant or complex authorization systems
+
 28. What is method-level security?
    - **Answer:**
       - Method-level security applies access control at the service or controller method level using `@PreAuthorize`, `@PostAuthorize`, `@Secured`, or `@RolesAllowed`
       - In my inventory project, I used `@PreAuthorize("hasRole('ADMIN')")` on the partner data reset method so only admin users could trigger it
-   - **If asked more:**
-      - I would explain `@EnableMethodSecurity` and the attribute-based expression language — I used SpEL expressions like `@PreAuthorize("hasRole('ADMIN') and #partnerId == authentication.principal.id")` for fine-grained access control
+      - Enable it with `@EnableMethodSecurity` on a configuration class. The expression language supports SpEL (Spring Expression Language) — I used expressions like `@PreAuthorize("hasRole('ADMIN') and #partnerId == authentication.principal.id")` for fine-grained access control where only an admin managing that specific partner could access the resource, combining role checks with entity-level ownership validation
+
 29. What is `@PreAuthorize`?
    - **Answer:**
       - `@PreAuthorize` evaluates an access control expression before the method executes
       - In my CDMS project, I used `@PreAuthorize("hasRole('ADMIN')")` on the report generation service to ensure only admin users could generate and download reports, with the security check happening before any business logic
-   - **If asked more:**
-      - I would explain the SpEL context variables available — `authentication`, `principal`, and method arguments using `#paramName` — and how I combined multiple conditions with logical operators for complex authorization rules in the inventory service
+      - SpEL context variables available include `authentication` (the current `Authentication` object), `principal` (shortcut to `authentication.getPrincipal()`), and method arguments referenced via `#paramName` (e.g., `#userId`, `#orderId`). I combined multiple conditions with logical operators for complex authorization rules in the inventory service: `@PreAuthorize("hasRole('ADMIN') or (#orderId != null and @orderService.isOwner(#orderId, authentication.principal.id))")`
+
 30. What is `@PostAuthorize`?
    - **Answer:**
       - `@PostAuthorize` evaluates an access control expression after the method returns, allowing access decisions based on the returned object
       - In my inventory project, I used `@PostAuthorize("returnObject.partnerId == authentication.principal.partnerId")` to enforce that a user can only view their own partner details
-   - **If asked more:**
-      - I would explain the performance considerations — `@PostAuthorize` still executes the method even if access is denied, unlike `@PreAuthorize` which blocks before execution
-      - I would also explain the `returnObject` SpEL variable
+      - The `returnObject` SpEL variable refers to the method's return value, enabling authorization based on the actual data being returned. Performance consideration: `@PostAuthorize` still executes the full method even if the eventual access is denied (the result is discarded and an `AccessDeniedException` is thrown), unlike `@PreAuthorize` which blocks execution before any business logic runs — so use `@PostAuthorize` only when the authorization decision requires the method's output
+
 31. What is OAuth2?
    - **Answer:**
       - OAuth2 is an authorization framework where third-party applications get limited access to resources without sharing credentials
       - In my projects, I didn't use OAuth2 directly — we used JWT with a custom authorization server
       - But I understand OAuth2 grant types: authorization code, client credentials, and refresh token
-   - **If asked more:**
-      - I would explain the roles (resource owner, client, authorization server, resource server), the authorization code flow with PKCE for public clients, and how Spring Security 5 supports OAuth2 resource server configuration with JWT or opaque tokens
+      - Four roles exist: resource owner (the user), client (the app requesting access), authorization server (issues tokens), and resource server (hosts protected resources). The authorization code flow with PKCE is used for public clients (mobile apps, SPAs) — the client gets an authorization code, exchanges it for tokens at the token endpoint, and PKCE prevents authorization code interception attacks. Spring Security 5 supports OAuth2 resource server configuration via `oauth2ResourceServer()` DSL with either JWT validation or opaque token introspection
+
 32. Difference between OAuth2 and JWT.
    - **Answer:**
       - OAuth2 is a protocol framework for authorization; JWT is a token format
       - OAuth2 can use JWT as the token format, but JWT can also be used independently
       - In my projects, I used JWT directly without OAuth2 — the application both issued and validated tokens for its own APIs
-   - **If asked more:**
-      - I would explain that OAuth2 describes how tokens are obtained and refreshed, while JWT defines the token structure and verification mechanism
-      - OAuth2 with JWT introspection is common in microservices, where a gateway validates tokens centrally
+      - OAuth2 describes how tokens are obtained (via grant types like authorization code or client credentials), how they are refreshed (via refresh tokens), and how they expire (via `expires_in`). JWT defines the token structure (header, payload, signature), verification mechanism (signature validation), and self-contained claims. OAuth2 with JWT is common in microservices where a central authorization server issues JWTs and each service validates them independently using the public key, eliminating the need for token introspection calls
+
 33. What is OpenID Connect?
    - **Answer:**
       - OpenID Connect (OIDC) is an identity layer on top of OAuth2 that adds authentication
       - It returns an ID token (JWT) containing user identity information
       - I didn't implement OIDC in my projects, but I understand it solves the authentication gap in OAuth2 by standardizing how the client verifies the user's identity
-   - **If asked more:**
-      - I would explain the ID token, access token, and refresh token roles in OIDC, and how `spring-security-oauth2-client` simplifies integration with providers like Google, GitHub, or Azure AD for login
+      - OIDC defines three tokens: the ID token (JWT with user identity claims like `name`, `email`, `sub`), the access token (for API access, same as OAuth2), and the refresh token (for obtaining new access tokens). The `spring-security-oauth2-client` module simplifies integration with OIDC providers — you configure a `ClientRegistrationRepository` with the provider's details (Google, GitHub, Azure AD), and Spring Security handles the redirect flow, code exchange, token parsing, and user principal extraction automatically
+
 34. What is resource server?
    - **Answer:**
       - A resource server hosts protected resources and validates access tokens
       - In my projects, all my Spring Boot APIs acted as resource servers — they received JWTs from clients, validated the signature and claims, and served data only if the token was valid and had sufficient permissions
-   - **If asked more:**
-      - I would explain how Spring Security's `oauth2ResourceServer()` DSL configures JWT validation with `jwkSetUri()` or `decoder()`, and how I configured my resource server to use a local signing key for token validation instead of a remote JWKS endpoint
+      - Spring Security's `oauth2ResourceServer()` DSL configures JWT validation with either `jwkSetUri()` (fetches public keys from a remote JWKS endpoint) or `decoder()` (uses a local `JwtDecoder` bean). I configured my resource server to use a local signing key for token validation instead of a remote JWKS endpoint, since all services in my deployment shared the same HMAC secret stored in environment variables — this avoided the network call to a JWKS endpoint on every request
+
 35. What is authorization server?
    - **Answer:**
       - An authorization server issues access tokens after successful authentication
       - In my CDMS project, the same Spring Boot application acted as both authorization server (login endpoint) and resource server (API endpoints) — the login endpoint issued JWTs, and the API endpoints validated them
-   - **If asked more:**
-      - I would explain that in production microservices, the authorization server should be separate from resource servers
-      - I would discuss Spring Authorization Server, Keycloak, or AWS Cognito as dedicated authorization server solutions
+      - In production microservices, the authorization server should be separated from resource servers for security and scalability — a compromised resource server should not be able to issue new tokens. Dedicated solutions include Spring Authorization Server (lightweight, Spring-native), Keycloak (full-featured with admin UI, user federation, and social login), or AWS Cognito (managed service with user pools). Spring Authorization Server implements the OAuth2 and OIDC specifications and can be configured with `@EnableAuthorizationServer` to handle token issuance, revocation, and client registration
+
 36. How do you secure actuator endpoints?
    - **Answer:**
       - I secure actuator endpoints by exposing only safe endpoints publicly and applying role-based access
       - In my inventory project, I exposed `/actuator/health` and `/actuator/info` without authentication, while `/actuator/env` and `/actuator/loggers` required ADMIN role
-   - **If asked more:**
-      - I would explain using a dedicated security filter chain for the actuator base path, configuring `management.endpoints.web.exposure.include` carefully, and how I used IP whitelist by adding `hasIpAddress()` constraint in the security rules
+      - I configured a dedicated security filter chain for the actuator base path (`requestMatcher("/actuator/**")`) with its own authorization rules, separate from the main API filter chain. `management.endpoints.web.exposure.include` in `application.yml` controls which endpoints are exposed over HTTP (I only exposed `health`, `info`, `metrics`, and `prometheus`). I also added `hasIpAddress("10.0.0.0/8")` to restrict sensitive actuator endpoints to internal network IPs, preventing external access even if authorization is bypassed
+
 37. How do you handle unauthorized response?
    - **Answer:**
       - I customize the unauthorized response using `AuthenticationEntryPoint` and `AccessDeniedHandler`
       - In my CDMS project, I implemented a `JwtAuthenticationEntryPoint` that returned a JSON response with 401 status and error message instead of the default HTML login page
-   - **If asked more:**
-      - I would show my custom entry point implementation: `response.sendError()` vs writing JSON directly using `response.getWriter().write()`, and how I included a correlation ID in the error response for debugging
+      - `AuthenticationEntryPoint` handles 401 (unauthenticated) — I wrote JSON directly using `response.getWriter().write("{\"error\": \"Unauthorized\", \"message\": \"Invalid or missing JWT token\"}")` with `response.setContentType("application/json")` and `response.setStatus(HttpServletResponse.SC_UNAUTHORIZED)`. `AccessDeniedHandler` handles 403 (authenticated but forbidden). I included a correlation ID (`X-Request-Id` header) in all error responses for debugging — this ID was generated by a `OncePerRequestFilter` at the start of the chain and logged with the full exception details
+
 38. Difference between 401 and 403.
    - **Answer:**
       - 401 Unauthorized means the user is not authenticated (no valid JWT)
       - 403 Forbidden means the user is authenticated but lacks permission
       - In my inventory project, a missing or expired JWT returned 401, while a partner user trying to access admin endpoints returned 403
-   - **If asked more:**
-      - I would explain the filter chain flow: `ExceptionTranslationFilter` handles `AuthenticationException` (→401) and `AccessDeniedException` (→403 when authenticated)
-      - I used `AccessDeniedHandler` to customize the 403 JSON response with the required role information
+      - In the filter chain, `ExceptionTranslationFilter` catches `AuthenticationException` (thrown when no valid authentication exists) and delegates to `AuthenticationEntryPoint` (401), while `AccessDeniedException` (thrown when an authenticated user lacks required authority) is delegated to `AccessDeniedHandler` (403). I customized the 403 response to include the required role information so the frontend could display a meaningful "insufficient permissions" message instead of a generic error
+
 39. How do you implement RBAC?
    - **Answer:**
       - RBAC (Role-Based Access Control) assigns permissions to roles, and roles to users
       - In my CDMS project, I had roles like `ADMIN`, `PARTNER`, and `VIEWER` stored in MSSQL
       - The JWT contained the user's role, and `@PreAuthorize("hasRole('ADMIN')")` on sensitive endpoints enforced access
-   - **If asked more:**
-      - I would explain the database schema: `users`, `roles`, and `user_roles` tables, how I loaded roles via `UserDetailsService`, and how I used `hasAnyRole()` for endpoints accessible by multiple roles
-      - I would also discuss role hierarchy for inheritance patterns
+      - The database schema uses three tables: `users` (id, username, password), `roles` (id, name), and `user_roles` (user_id, role_id) as a many-to-many join table. Roles are loaded in `UserDetailsService.loadUserByUsername()` by joining `users` with `user_roles` and `roles`, then mapping each role to `SimpleGrantedAuthority("ROLE_" + role.getName())`. For endpoints accessible by multiple roles, I used `hasAnyRole('ADMIN', 'PARTNER')`. I also implemented role hierarchy where `ADMIN` implicitly has all `PARTNER` permissions, configured via `RoleHierarchyImpl` with the expression `ROLE_ADMIN > ROLE_PARTNER`
+
 40. How do you implement permission-based access?
    - **Answer:**
       - Permission-based access uses granular permissions like `REPORT_CREATE`, `REPORT_EXPORT`, `USER_DELETE` instead of broad roles
       - In my inventory project, I stored permissions in the `authorities` table and encoded them as `SimpleGrantedAuthority` in the JWT, using `hasAuthority('REPORT_EXPORT')` in security checks
-   - **If asked more:**
-      - I would explain the difference between role-based and permission-based access, how to load permissions from the database, and how I created a custom `PermissionEvaluator` for complex permission checks involving entity ownership
+      - The database schema adds `permissions` (id, name) and `role_permissions` (role_id, permission_id) tables, so roles are assigned specific permissions rather than checking role names directly. Permissions are loaded by joining `roles` → `role_permissions` → `permissions` in the `UserDetailsService` and mapped to `SimpleGrantedAuthority(permission.getName())`. For complex checks involving entity ownership (e.g., "user can only export reports they own"), I created a custom `PermissionEvaluator` bean and used `@PreAuthorize("@permissionEvaluator.hasPermission(authentication, #reportId, 'REPORT', 'EXPORT')")` forSpEL-integrated authorization
+
 41. How do you secure APIs behind a load balancer?
    - **Answer:**
       - When running behind a load balancer or proxy, Spring Security needs to trust forwarded headers to correctly validate requests
       - In my EC2-deployed projects behind an ALB, I configured `server.forward-headers-strategy=NATIVE` and used `X-Forwarded-For`, `X-Forwarded-Proto`, and `X-Forwarded-Prefix` headers
-   - **If asked more:**
-      - I would explain the `ForwardedHeaderFilter` and `RemoteIpFilter`, how to configure trusted proxies in `application.yml`, and the security implications of misconfigured forwarded headers that could bypass IP-based access controls
+      - `ForwardedHeaderFilter` (Servlet) or `ForwardedHeaderWebFilter` (Reactive) processes `Forwarded` and `X-Forwarded-*` headers to reconstruct the original request URL, protocol, and client IP. `RemoteIpFilter` is an alternative that specifically handles `X-Forwarded-For` and `X-Forwarded-Proto` for IP-based access control. I configured trusted proxies in `application.yml` with `server.forward-headers-filter.trusted-proxies=10.0.0.0/8` to prevent header spoofing — misconfigured forwarded headers could allow an attacker to bypass IP whitelists by injecting a fake `X-Forwarded-For` header from a trusted IP
+
 42. How do you handle `Authorization` header through proxies?
    - **Answer:**
       - Proxies and load balancers should preserve the `Authorization` header without modification
       - In my deployment, we configured the ALB to pass through the `Authorization` header by adding it to the whitelist of forwarded headers, ensuring the JWT reached my Spring Boot application intact
-   - **If asked more:**
-      - I would explain that some proxies strip the `Authorization` header for security reasons, and how to use client certificates or API keys as alternatives
-      - I would also discuss configuring `HttpServletRequest` logging to debug header loss in production
+      - Some proxies strip the `Authorization` header for security reasons (e.g., preventing credential forwarding to upstream services). Alternatives when headers are stripped: use client certificates (mutual TLS) for service-to-service auth, pass the token in a custom header like `X-Auth-Token` that the proxy does not strip, or use API keys as a fallback authentication mechanism. I added `HttpServletRequest` logging at the filter level (`request.getHeader("Authorization")`) to debug header loss in production, which helped us identify when a proxy configuration change accidentally dropped the header
+
 43. What is session fixation?
    - **Answer:**
       - Session fixation is an attack where an attacker forces a user to use a session ID known to the attacker
       - In my stateless JWT-based APIs, session fixation did not apply since there was no HTTP session
       - But in stateful apps, Spring Security prevents this by creating a new session on authentication
-   - **If asked more:**
-      - I would explain `SessionCreationPolicy.IF_REQUIRED` vs `STATELESS`, how to configure session fixation protection with `sessionManagement().sessionFixation().newSession()`, and why stateless authentication is inherently immune to session fixation
+      - The attack works when a user clicks a link containing a pre-set session ID (e.g., `?JSESSIONID=attacker-controlled`), logs in, and the server associates the attacker's known session ID with the authenticated session — the attacker then uses that same session ID to access the user's account. Spring Security prevents this with `sessionManagement().sessionFixation().newSession()` (creates a new session after login) or `.migrateSession()` (copies attributes to a new session). `SessionCreationPolicy.STATELESS` (no session created at all) or `NEVER` (no session created but existing ones are used) are inherently immune to session fixation
+
 44. What is stateless session management?
    - **Answer:**
       - Stateless session management means the server does not store any session state between requests
       - In my CDMS and inventory projects, I configured `SessionCreationPolicy.STATELESS` because I used JWT tokens — the token itself carried all authentication information, eliminating server-side session storage
-   - **If asked more:**
-      - I would explain the `SessionCreationPolicy` options (ALWAYS, IF_REQUIRED, NEVER, STATELESS), the benefits of stateless APIs (scalability, no sticky sessions, easier caching), and the trade-off of not being able to invalidate tokens server-side
+      - Four `SessionCreationPolicy` options: `ALWAYS` (creates a session for every request), `IF_REQUIRED` (creates only if needed — the default), `NEVER` (does not create but uses existing), and `STATELESS` (never creates or uses). Benefits of stateless APIs: horizontal scalability without sticky sessions, easier caching (no session affinity needed), simpler load balancer config, and no server-side memory overhead. The trade-off is that you cannot invalidate tokens server-side (requiring a blacklist/deny-list for revocation) and every request must carry the full token since there is no server-side session to reference
+
 45. How do you mix stateful UI and stateless API security?
    - **Answer:**
       - In projects like my cold-chain dashboard, the React UI used session-based authentication for the web pages, and the React app stored a JWT to call the backend APIs
       - The security configuration used two filter chains: one with session-based auth for the UI routes and one with JWT for the API routes
-   - **If asked more:**
-      - I would explain configuring multiple `SecurityFilterChain` beans with `@Order` and `securityMatcher`, how to use `HttpSessionSecurityContextRepository` for stateful parts, and how I managed token refresh in the React app when the JWT expired
-
+      - I configured multiple `SecurityFilterChain` beans with `@Order` (lower order = higher priority) and `securityMatcher()` to route requests to the correct chain. The UI chain (`@Order(1)` with `securityMatcher("/ui/**")`) used `HttpSessionSecurityContextRepository` for stateful session management with CSRF protection. The API chain (`@Order(2)` with `securityMatcher("/api/**")`) used `BearerTokenServerSecurityContextRepository` for stateless JWT validation with CSRF disabled. In the React app, I managed token refresh by intercepting 401 responses from the API, calling `/auth/refresh` with the httpOnly cookie, and retrying the original request with the new JWT
