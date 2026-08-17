@@ -96,6 +96,10 @@ WHERE Department = 'Engineering';
 
 - SQL has sub-languages: **DDL** (CREATE/ALTER/DROP), **DML** (SELECT/INSERT/UPDATE/DELETE), **DCL** (GRANT/REVOKE), and **TCL** (COMMIT/ROLLBACK).
 - SQL Server's dialect is called **T-SQL** (Transact-SQL).
+- **Set-based thinking:** SQL works on *sets* of rows, not one row at a time. Writing "set-based" queries (JOIN, GROUP BY, set operators) is almost always faster than procedural loops (WHILE/CURSOR).
+- **Logical processing order:** even though you write `SELECT` first, the engine logically evaluates: `FROM` → `ON`/`JOIN` → `WHERE` → `GROUP BY` → `HAVING` → `SELECT` → `ORDER BY` → `OFFSET/FETCH`. Knowing this explains why you can't reference an alias in `WHERE` but can in `ORDER BY`.
+- **Dialects:** the core language is standardized (ANSI SQL), but each product adds extensions — T-SQL (SQL Server), PL/pgSQL (PostgreSQL), PL/SQL (Oracle), etc.
+- **Why not just app code?** SQL is optimized for set operations on disk and integrates integrity, transactions, and security at the engine level.
 
 ### 2. What is SQL Server?
 SQL Server is Microsoft's relational database management system (RDBMS). It stores data in tables, uses the T-SQL dialect, and provides enterprise features like indexing, transactions, high availability (Always On), security, and Business Intelligence tools (SSIS, SSRS, SSAS).
@@ -115,6 +119,10 @@ CREATE TABLE Employees (
 
 - It supports ACID transactions, so data stays consistent even on failure.
 - It runs as a Windows service (the **SQL Server Database Engine**), and you manage it with SSMS, Azure Data Studio, or `sqlcmd`.
+- **Editions:** Express (free, 10 GB limit), Standard, Enterprise, and Developer (full-featured, licensed for development only). Some features (In-Memory OLTP, partitioning, Always On Advanced) are Enterprise-only.
+- **Major services:** Database Engine (storage/queries), SQL Server Agent (scheduling), SSIS (ETL), SSRS (reporting), SSAS (OLAP).
+- **SQL Server vs Azure SQL:** Azure SQL Database is the cloud-managed version of the same engine; T-SQL is largely identical, but on-prem features like Agent jobs, CLR, and cross-database queries differ.
+- **High availability:** Always On Availability Groups and Failover Clustering are the modern HA/DR answers (Q7 area — but this is SQL Server-specific).
 
 ### 3. What is a relational database?
 A relational database stores data in **tables** (relations) made of rows and columns, and links tables together using **keys**. It enforces integrity with constraints and supports powerful set-based queries via JOINs.
@@ -132,6 +140,10 @@ CREATE TABLE Orders (
 
 - **Primary key** uniquely identifies a row inside one table.
 - **Foreign key** links a row in one table to a row in another, preventing orphan records.
+- **Based on Codd's relational model (1970s):** data is stored in *relations* (tables) with columns (attributes) and rows (tuples); relationships are expressed via keys, not pointers.
+- **Keys:** PRIMARY KEY (uniquely identifies each row) and FOREIGN KEY (references a PK/UNIQUE column of another table) enforce integrity.
+- **ACID:** relational databases give you transactions (Atomicity, Consistency, Isolation, Durability) — this is their killer feature vs non-relational stores.
+- **vs NoSQL:** RDBMS = structured schema, joins, strong consistency, ACID. NoSQL = flexible schema, horizontal scale, weaker consistency. Choose by workload, not hype.
 
 ### 4. What is a database?
 A database is an organized, persistent collection of data plus the objects that structure it (tables, views, procedures, indexes). In SQL Server, a database is a logical container with its own data files (`.mdf`) and log files (`.ldf`).
@@ -145,6 +157,10 @@ CREATE TABLE Products (ProductID INT PRIMARY KEY, Name NVARCHAR(100));
 ```
 
 - A database is different from a *DBMS*: the DBMS is the software (SQL Server), the database is the data + structure managed by it.
+- **Physical structure:** on disk a database is a set of **data files** (.mdf, .ndf) plus a **transaction log** (.ldf). The log records every change for recovery.
+- **Inside a database:** tables, views, indexes, stored procedures, functions, triggers, and security objects (users, roles).
+- **System databases:** `master` (instance metadata/logins), `model` (template for new DBs), `msdb` (Agent jobs/backup history), `tempdb` (temp objects, sorting).
+- **Multiple DBs per server** isolate environments (dev/test/prod) and workloads; you can also create filegroups for placement and backup granularity.
 
 ### 5. What is a schema?
 The word *schema* has two related meanings in SQL Server:
@@ -162,6 +178,10 @@ SELECT * FROM Sales.Orders;
 
 - Using schemas keeps large databases organized (e.g., `Sales.Orders`, `HR.Employees`).
 - You can grant permissions on a whole schema at once.
+- **Default schema:** the owner `dbo` owns everything unless you say otherwise; if you reference `Orders` unqualified, SQL Server looks in the user's default schema first, then `dbo`.
+- **Object naming:** full name is `Server.Database.Schema.Object` (4-part); within one database you usually need only `Schema.Object`.
+- **Schema vs database:** a schema is a namespace *inside* a database — different schemas can even contain same-named objects (`Sales.Orders` vs `Logistics.Orders`).
+- **Ownership chaining:** if a proc and its referenced tables share the same owner, SQL Server skips checking the underlying table's permissions — a common security gotcha.
 
 ### 6. What is a table?
 A table is the basic storage unit of a relational database. It has a fixed set of **columns** (attributes, each with a data type and rules) and a variable number of **rows** (records).
@@ -181,6 +201,10 @@ VALUES ('Niyaj', 'Engineering', 100000.00);
 
 - Tables store data physically; unlike views or CTEs, a table has its own storage.
 - Rules on columns (constraints) keep data clean at the source.
+- **Storage layout:** a table is either a **heap** (no clustered index; rows stored unordered) or has a **clustered index** (rows physically sorted). Most tables should have a clustered index (usually the PK).
+- **Data types matter:** choosing correct types (INT vs BIGINT, DATETIME2 vs VARCHAR for dates, NVARCHAR for Unicode) affects size, speed, and correctness.
+- **IDENTITY vs SEQUENCE:** `IDENTITY` auto-numbers within one table; a `SEQUENCE` is a standalone counter shared across tables.
+- **Rough row-size limit:** about 8,060 bytes per row (excluding LOB and off-row data) — relevant for wide tables.
 
 ### 7. What is a view?
 A view is a **virtual table** — a saved `SELECT` query that you can query like a table. It does not store data itself (unless it is an indexed/materialized view); it just presents a predefined result set.
@@ -197,6 +221,10 @@ SELECT * FROM vw_EngineeringSalaries;
 
 - **Benefits:** simplifies complex queries, adds a security layer (show only some columns), and enforces consistent logic.
 - **Limitations:** no parameters, and you cannot always `INSERT/UPDATE/DELETE` through a view (must be a single base table, no aggregation, etc.).
+- **Indexed views** (materialized): create a clustered index on the view to physically store results — great for heavy aggregations, but they add maintenance overhead and constraints (e.g., `SCHEMABINDING`, specific SET options).
+- **`WITH SCHEMABINDING`** ties the view to the underlying tables so columns can't be changed/dropped; also required for indexed views.
+- **`WITH CHECK OPTION`** prevents data-modifying statements that would make rows disappear from the view.
+- **Nested views** (view on a view) are legal but can hurt performance and clarity — be careful with deep nesting.
 
 ### 8. What is a stored procedure?
 A stored procedure is a **precompiled, reusable block of T-SQL** stored in the database. It accepts input/output parameters, can contain transactions, error handling, and multiple statements, and can return result sets.
@@ -218,6 +246,11 @@ EXEC GetEmployeesByDept @Department = 'Engineering';
 
 - **Benefits:** reuse, security (grant EXECUTE instead of direct table access), encapsulation of business logic, and better plan reuse (when parameterized properly).
 - Procedures are the recommended place for multi-step business logic.
+- **Parameters:** input (default) and `OUTPUT` parameters let you return values back to the caller; you can also return an integer status code with `RETURN`.
+- **Plan reuse & performance:** procs are precompiled — the first run generates a plan that's cached and reused, and parameterization reduces injection risk compared to ad-hoc SQL.
+- **`SET NOCOUNT ON`** at the top suppresses row-count messages and reduces network chatter.
+- **Try/Catch:** modern error handling uses `BEGIN TRY / BEGIN CATCH` with `THROW`; in old code you'll see `RAISERROR`/`@@ERROR`.
+- **vs Functions:** procs can modify data, do DDL, and use dynamic SQL; functions cannot have side effects.
 
 ### 9. What is a function?
 A function is a T-SQL routine that **must return a value** (scalar or table) and is deterministic or near-deterministic. Unlike a stored procedure, a function cannot change data or run DDL, and cannot use side-effecting operations like `INSERT/UPDATE/DELETE` on permanent tables.
@@ -242,6 +275,10 @@ RETURN (SELECT * FROM Employees WHERE Department = 'Engineering');
 
 - **Scalar functions** can be embedded in `SELECT` and `WHERE` clauses.
 - Scalar UDFs are often slow because SQL Server runs them **row by row** — avoid them in hot queries.
+- **Types:** scalar (returns one value), inline table-valued (like a parameterized view), and multi-statement table-valued (can contain logic, but slower).
+- **Deterministic vs non-deterministic:** `GETDATE()`/`NEWID()` are non-deterministic; this matters because non-deterministic functions can't be used in indexed views or persisted computed columns.
+- **`WITH SCHEMABINDING`** on a function protects its underlying objects and enables some optimizations.
+- **Inlining:** SQL Server can sometimes inline simple scalar UDFs (2019+), but complex ones still execute row-by-row — prefer joins/expressions or a proc when possible.
 
 ### 10. What is a trigger?
 A trigger is a special stored-procedure-like object that **runs automatically** in response to an event: DML (`INSERT/UPDATE/DELETE`) or DDL (`CREATE/ALTER/DROP`), or logon events.
@@ -261,6 +298,9 @@ END;
 ```
 
 - **inserted** and **deleted** pseudo-tables hold the affected rows inside the trigger.
+- **AFTER vs INSTEAD OF:** AFTER runs after the statement (and can be rolled back); INSTEAD OF replaces the operation entirely (useful on views).
+- **DDL triggers** fire on `CREATE/ALTER/DROP`; **logon triggers** fire on login events (e.g., to limit concurrent admin logins).
+- **`UPDATE()` function** inside a trigger tells you whether a specific column changed.
 - **Caution:** triggers run implicitly and add overhead to every DML; hidden logic and recursion can cause hard-to-debug issues. Use them for auditing or complex cascades that cannot be done with constraints.
 
 ### 11. What is a constraint?
@@ -278,6 +318,8 @@ CREATE TABLE Orders (
 
 - **Types:** PRIMARY KEY, FOREIGN KEY, UNIQUE, NOT NULL, CHECK, DEFAULT (detailed in Q45).
 - Constraints are the last line of defense — application code can be buggy, constraints protect the data no matter what.
+- **Naming:** giving constraints names (e.g., `CONSTRAINT FK_Orders_Customers`) makes error messages readable and makes them easy to find/drop later.
+- **Performance trade-off:** every constraint adds a check per insert/update — indexes (e.g., on FK columns) are usually needed to keep FK checks fast on large tables.
 
 ### 12. What is a JOIN?
 A JOIN combines rows from two or more tables based on a related condition (usually matching key values), producing a single result set.
@@ -290,6 +332,8 @@ INNER JOIN Orders o ON c.CustomerID = o.CustomerID;
 
 - **INNER JOIN** returns only matching rows; **OUTER JOINs** (LEFT/RIGHT/FULL) preserve unmatched rows from one or both sides.
 - The `ON` clause defines the relationship; without it you get a CROSS JOIN (Cartesian product).
+- **SELF JOIN:** joining a table to itself (with aliases) for hierarchical data like managers/reports; **CROSS APPLY** runs a right-side query per left row (Q47).
+- **Always specify join type** — it's also good practice to prefix columns with table aliases so the query is unambiguous.
 
 ### 13. What is a subquery?
 A subquery is a `SELECT` query nested inside another query — inside `WHERE`, `HAVING`, `FROM`, or `SELECT`. It returns a value, a single row, or a set of values.
@@ -306,6 +350,8 @@ FROM Employees;
 ```
 
 - Subqueries can often be rewritten as JOINs; the optimizer usually treats them the same, but reading them clearly matters for maintainability.
+- **Placement:** `WHERE` (filter), `FROM` (derived table — must be aliased), `HAVING` (aggregate filter), and `SELECT` (scalar subquery).
+- **NULL trap:** `NOT IN` fails if the subquery returns even one NULL — use `NOT EXISTS` or filter NULLs instead (see Q16).
 
 ### 14. What is a correlated subquery?
 A correlated subquery **references a column from the outer query**, so it must be evaluated once for each outer row. It depends on the outer query — it cannot run by itself.
@@ -323,6 +369,7 @@ WHERE e.Salary > (
 
 - Because it runs per row, it can be slow on large tables — but for small outer result sets it is perfectly fine and reads naturally.
 - The same logic can usually be rewritten with a window function or a JOIN on a grouped subquery.
+- **`EXISTS` is the correlated subquery's best friend** — `WHERE EXISTS (SELECT 1 ...)` short-circuits on the first match and is often faster than `IN`.
 
 ### 15. What is a non-correlated subquery?
 A non-correlated subquery is **independent** of the outer query — it can run on its own and is typically evaluated once.
@@ -340,6 +387,7 @@ WHERE DepartmentID NOT IN (SELECT DepartmentID FROM Employees);
 
 - Since it is evaluated once, it is usually cheaper than a correlated one.
 - The result is either a scalar, a single row, or a set of values consumed by the outer query.
+- **Safety:** a scalar subquery that returns multiple rows raises an error — pair it with `TOP 1` or an aggregate if that's a risk.
 
 ### 16. What is the difference between a JOIN and a subquery?
 Conceptually they can return the same results, but they differ in structure and behavior:
@@ -364,6 +412,8 @@ WHERE CustomerID IN (SELECT CustomerID FROM Orders WHERE Amount > 500);
 ```
 
 - Use JOIN when you need data from the joined table; use `EXISTS` (subquery) for existence checks — the optimizer often converts `IN` to the same plan anyway.
+- **NULL behavior:** `IN`/`NOT IN` treat NULLs the "safe but confusing" way (see Q13); `EXISTS`/`NOT EXISTS` handle NULLs predictably — prefer them with NULLable columns.
+- **Duplication:** if the joined table has multiple matching rows, a JOIN returns duplicates; `EXISTS` returns each outer row once.
 
 ### 17. What is a CTE?
 A CTE (Common Table Expression) is a **named, temporary result set** defined with the `WITH` clause, scoped to a single statement. It makes complex queries easier to read by breaking them into logical steps.
@@ -380,7 +430,9 @@ GROUP BY Department;
 ```
 
 - The CTE is not stored; it behaves like an inline view or derived table.
-- CTEs also support **recursion** (recursive CTEs), which joins themselves repeatedly — useful for hierarchies.
+- CTEs also support **recursion** (recursive CTEs), which joins itself repeatedly — useful for hierarchies.
+- **Multiple CTEs:** comma-separated `WITH a AS (...), b AS (...) SELECT ...` lets later CTEs reference earlier ones.
+- **Syntax note:** `WITH` must be the first keyword of the statement (put a semicolon before it if needed).
 
 ### 18. Why do we use CTEs?
 CTEs improve **readability, maintainability, and logical structuring** of SQL:
@@ -401,6 +453,8 @@ ORDER BY Total DESC;               -- Top 5 customers by spend
 ```
 
 - Note: CTEs do not add performance by themselves — the optimizer treats them like inline subqueries. For materialization, use a temporary table.
+- **Recursion example:** `WITH Org (Id, MgrId, Lvl) AS (SELECT ... WHERE MgrId IS NULL UNION ALL SELECT ... FROM Org ...)` walks an org chart level by level.
+- **When to avoid:** for very large intermediate results, prefer a temp table so you can index it and avoid re-evaluation.
 
 ### 19. What is the difference between CTE and temporary table?
 
@@ -424,6 +478,8 @@ SELECT COUNT(*) FROM #ActiveEmployees;
 ```
 
 - For a **large** intermediate result that is used many times, a temp table (with an index) is usually faster because it avoids re-evaluating the CTE repeatedly.
+- **Scope:** a temp table lives for the whole session/batch, so later statements (even separate ones) can reuse it — that's the big practical difference from a CTE.
+- **Rule of thumb:** CTE for one statement; temp table when the result is reused, large, or needs an index.
 
 ### 20. Can a CTE be referenced multiple times?
 Yes — **within the same statement**. You can reference the same CTE name several times in the one query that follows its definition. You cannot use it across separate statements (each statement needs its own `WITH`).
@@ -444,6 +500,8 @@ SELECT a.Department, a.AvgSal, b.MaxSal FROM Pairs a JOIN Pairs b ON 1=1;
 ```
 
 - Repeated references do **not** cache data — the CTE may be evaluated multiple times (materialize with a temp table if that matters).
+- **Statement scope only:** once the query finishes, the CTE is gone; the next statement must redefine it with its own `WITH`.
+- **Real-world check:** if you find yourself copying the same CTE into ten statements, promote it to a view or temp table.
 
 ### 21. Can a CTE be indexed?
 **No.** A CTE is a logical construct, not a stored object, so you cannot create an index on it directly.
@@ -459,6 +517,7 @@ CREATE INDEX ix_tmp ON #tmp(Department);
 ```
 
 - If you need an index on an intermediate result, materialize it into a **temporary table** and create the index there.
+- **Derived table alternative:** you can also index via a table variable (only a clustered index/PK) but temp tables give full control.
 
 ### 22. Does a CTE physically store data?
 **No** — a CTE does not store data on its own. It is basically an inline view; SQL Server merges (inlines) it into the outer query. The optimizer *may* decide to spool parts to tempdb internally, but you have no control over it.
@@ -469,6 +528,7 @@ SELECT * FROM Big WHERE Amount > 1000;
 ```
 
 - The practical implication: referencing a complex CTE multiple times can recompute it each time. If you truly need materialization (store once), use a temp table.
+- **Inlining is usually good:** most simple CTEs get inlined and optimized into the outer query, so don't assume a CTE is slow by default — measure with the actual plan.
 
 ### 23. What is a temporary table?
 A temporary table is a table created in **tempdb** that exists for the duration of a session or batch. Local temp tables use a single `#`, global ones use `##`.
@@ -488,6 +548,8 @@ SELECT * FROM #ActiveCustomers;
 
 - Temp tables can have indexes, statistics, and constraints.
 - They are ideal for multi-step processing: store a working set once, then query it several times.
+- **Auto-drop:** local temp tables are dropped automatically when the session ends — no cleanup step needed, though explicit `DROP TABLE #t` releases tempdb space sooner.
+- **Tempdb pressure:** heavy temp-table usage can fill tempdb — watch `tempdb` file sizes and consider `SELECT ... INTO` vs `CREATE TABLE + INSERT` performance.
 
 ### 24. What is the difference between #TempTable and ##GlobalTempTable?
 
@@ -504,6 +566,7 @@ CREATE TABLE ##Global (ID INT);    -- visible to all sessions
 ```
 
 - Use local temp tables almost always; global temp tables are rare and shared — easy to create cross-session interference.
+- **Table variables vs temp tables:** table variables (`@t`) stay in memory (mostly), roll back on transaction rollback, and have no statistics — great for tiny result sets; temp tables win for large ones.
 
 ### 25. What is a trigger?
 See Q10 — a trigger is a database object that automatically executes code when a DML (INSERT/UPDATE/DELETE), DDL, or logon event occurs. A quick reminder of the pattern:
@@ -520,6 +583,8 @@ END;
 
 - **AFTER** triggers run after the operation; **INSTEAD OF** triggers replace the operation.
 - Keep triggers simple; hidden side effects and overhead are the most common complaints.
+- **Ordering:** multiple AFTER triggers can be ordered with `sp_settriggerorder`; triggers can also be `ENABLE`d/`DISABLE`d per table.
+- **Nesting/recursion settings** control whether a trigger's DML fires other triggers — check `nested_triggers` and `recursive_triggers` database options.
 
 ### 26. What is SQL Server Agent?
 SQL Server Agent is a **scheduler service** that runs automated tasks on a SQL Server instance: jobs, schedules, alerts, and operators. It is used for backups, index maintenance, data imports, and any recurring T-SQL or OS-level task.
@@ -534,6 +599,8 @@ SQL Server Agent is a **scheduler service** that runs automated tasks on a SQL S
 
 - Each job is made of **steps**, runs on a **schedule**, can notify **operators**, and can send emails via **Database Mail**.
 - Agent needs to be running and properly configured (SQL Server Agent service account) for jobs to fire.
+- **Operators & alerts:** an operator is a contact (email/pager/SMS); an alert fires on a specific error number or severity and can notify operators or start a job.
+- **Job history** is kept in msdb — set a sensible retention so old runs don't bloat it.
 
 ### 27. What is a SQL Server Agent Job?
 A SQL Server Agent Job is a defined unit of automated work made of one or more **steps**, an optional **schedule**, **alerts**, and **notification** settings.
@@ -547,6 +614,8 @@ A SQL Server Agent Job is a defined unit of automated work made of one or more *
 
 - Steps can run T-SQL, PowerShell, CmdExec, SSIS packages, etc.
 - Jobs are stored in **msdb** and managed via SSMS → SQL Server Agent, or `msdb.dbo.sp_add_job`, `sp_add_jobstep`, `sp_add_schedule`.
+- **Step flow control:** each step defines success/failure actions (go to next step, quit with success/failure, or retry) — this is how you build a pipeline with error handling.
+- **Schedules** can be one-time, recurring (daily/weekly/monthly), or triggered by CPU idle.
 
 ### 28. What is Database Mail?
 Database Mail is a SQL Server feature that lets the server **send email** (via SMTP) from T-SQL — commonly used to notify DBAs about job failures, backup results, alerts, or to send report output.
@@ -561,6 +630,8 @@ EXEC msdb.dbo.sp_send_dbmail
 
 - It uses an **SMTP server**, a **profile**, and optionally an **account** with authentication.
 - Email goes to **msdb**'s mail queue (`sysmail_*` tables) and is sent asynchronously.
+- **Why async?** the sending statement returns immediately; the Database Mail service processes the queue in the background, so a slow SMTP server won't block your query.
+- **Attachments:** `@file_attachments` lets you attach files (e.g., a generated report) up to a size limit (default ~1 MB, configurable).
 
 ### 29. How do you configure Database Mail?
 Configuration has these steps:
@@ -583,6 +654,8 @@ EXEC msdb.dbo.sysmail_add_profileaccount_sp
 ```
 
 - Verify with the **Database Mail Log** and `sysmail_unsentitems` / `sysmail_sentitems` if emails don't arrive.
+- **Troubleshooting order:** check the queue tables → check the log → confirm the SMTP server/port/firewall → test the account with a manual `sp_send_dbmail`.
+- **Security:** only members of `DatabaseMailUserRole` can send mail; the profile should be marked **default** if you want `@profile_name` to be optional.
 
 ### 30. What is an SMTP server?
 SMTP (Simple Mail Transfer Protocol) is the standard protocol for **sending email**. An SMTP server accepts outgoing messages, queues them, and routes them to the recipient's mail server.
@@ -590,6 +663,7 @@ SMTP (Simple Mail Transfer Protocol) is the standard protocol for **sending emai
 - In the SQL Server world, Database Mail connects to an SMTP server (e.g., Exchange, Office 365, a relay) to deliver emails.
 - Authentication (user/password) and **TLS/SSL** are common requirements for modern SMTP services.
 - It only *sends* mail — receiving mail uses a different protocol (POP3/IMAP).
+- **Common ports:** 25 (plain SMTP), 587 (submission, usually with STARTTLS), 465 (implicit SSL). Firewalls often block 25 — 587 is the usual choice for app servers.
 
 ### 31. What is a database backup?
 A database backup is a **copy of the database data** (and sometimes log) written to a backup file/device, used to restore the database after failure, corruption, or user error.
@@ -603,6 +677,8 @@ WITH INIT, COMPRESSION;
 
 - Backups can be **full**, **differential**, or **transaction log** (see Q33/Q34/Q71).
 - Without a valid, tested backup, the database effectively has no recovery capability — a backup that is never restored is a backup that is never trusted.
+- **Backup devices:** disk files, `BACKUP TO URL` (Azure Blob), or tapes; `WITH COMPRESSION` shrinks size and can speed up I/O at the cost of some CPU.
+- **Verify integrity:** use `RESTORE VERIFYONLY` to check a backup file's readability without restoring it.
 
 ### 32. Why do we take database backups?
 Backups exist to make data **recoverable**:
@@ -612,6 +688,7 @@ Backups exist to make data **recoverable**:
 - **Corruption** — page or logical corruption from software/hardware issues.
 - **Compliance** — regulatory retention requirements.
 - Backups define your **RPO** (Recovery Point Objective) and **RTO** (Recovery Time Objective): how much data you can lose and how fast you must be back up.
+- **3-2-1 rule:** keep 3 copies, on 2 different media, 1 off-site — protects against both hardware and site-level failures.
 
 ```sql
 -- Best practice pattern: full weekly + differential nightly + log backups every 15-30 min
@@ -629,6 +706,8 @@ BACKUP DATABASE SalesDB TO DISK = 'D:\Backups\SalesDB_Full.bak' WITH COMPRESSION
 
 - Full backups take time and space proportional to the database size.
 - Typical strategy: full backup nightly or weekly, depending on size and SLA.
+- **What it contains:** all used data pages + enough log to make the DB consistent; it *does not* truncate the log (that's a log backup's job, in FULL mode).
+- **Copy-only backup** (`WITH COPY_ONLY`) snapshots the data without affecting the differential base or log chain — handy for ad-hoc copies.
 
 ### 34. What is a differential backup?
 A differential backup captures **all changes since the last full backup** (it does not reset the base). Restoring requires the last full backup + the last differential — and log backups after that, if the recovery model allows.
@@ -639,6 +718,8 @@ BACKUP DATABASE SalesDB TO DISK = 'D:\Backups\SalesDB_Diff.bak' WITH DIFFERENTIA
 
 - Smaller and faster than a full backup, so it's common nightly.
 - Once a new full backup is taken, the old differential chain is replaced.
+- **Cumulative, not incremental:** each differential contains *all* changes since the base full, so you only ever restore the latest one (not a chain of them).
+- **Restore order:** full backup → latest differential → log backups (if needed for point-in-time).
 
 ### 35. What is database security?
 Database security protects the data through **authentication** (who are you), **authorization** (what can you do), **data protection** (encryption, masking), and **auditing** (tracking activity).
@@ -659,6 +740,8 @@ GRANT SELECT, INSERT, UPDATE ON Sales.Orders TO app_user;
 
 - Follow **least privilege**: give only the permissions needed.
 - Separate credentials for app vs DBA vs reporting.
+- **Encryption in transit:** enable TLS for client connections so passwords/queries aren't sent in clear text.
+- **Defense in depth:** combine authentication, roles, encryption (TDE for at-rest, Always Encrypted for column-level), masking, and auditing.
 
 ### 36. What is a login?
 A **login** is a server-level identity that lets someone (or an application) **connect** to a SQL Server instance. It authenticates against the instance; by itself it grants no access to any database.
@@ -671,6 +754,9 @@ CREATE LOGIN [DOMAIN\niyaj] FROM WINDOWS;
 ```
 
 - A login becomes useful only when it's mapped to a **database user** with permissions.
+- **Two auth modes:** Windows authentication (domain) and SQL Server authentication (login/password). Windows auth is generally preferred — no passwords in connection strings.
+- **Contained databases:** allow a login-less user inside the database (good for moving DBs between servers without logins).
+- **Disabled logins:** `ALTER LOGIN x DISABLE` keeps the login but prevents connections — better than dropping for temporarily revoking access.
 
 ### 37. What is a database user?
 A **database user** is a database-level identity inside a specific database, mapped to a login, that holds permissions **within that database**.
@@ -683,6 +769,8 @@ GRANT SELECT ON dbo.Orders TO niyaj;
 
 - The same login can have different users in different databases, each with different rights.
 - Special built-in users: `dbo` (database owner), `guest`, `INFORMATION_SCHEMA`.
+- **Orphaned users:** after a restore/attach to a different server, a user may have no matching login — fix with `sp_change_users_login` (or `ALTER USER ... WITH LOGIN`).
+- **Without login:** you can create a user *without* a login (`CREATE USER x WITHOUT LOGIN`) to use in roles/modules without direct logon.
 
 ### 38. What is a role?
 A role is a **group of permissions** that you assign to users, making permission management manageable. SQL Server has **fixed server roles**, **fixed database roles**, and **user-defined roles**.
@@ -698,6 +786,8 @@ EXEC sp_addrolemember 'SalesReader', 'niyaj';   -- niyaj inherits those grants
 
 - Examples of fixed roles: `sysadmin` (server), `db_owner`, `db_datareader`, `db_datawriter` (database).
 - Use roles instead of granting to each user individually — it scales and makes audits easier.
+- **Membership hierarchy:** roles can contain other roles (server roles can contain database roles), and permissions add up across all memberships.
+- **Best practice:** create business roles (`SalesReader`, `FinanceAdmin`) and assign users to roles, not to individual objects.
 
 ### 39. Difference between login and user?
 
@@ -716,6 +806,8 @@ CREATE USER app_user FOR LOGIN app_login;          -- database-level
 ```
 
 - You must have a login **and** a user (in each database you need) to do anything.
+- **Mapping:** one login maps to at most one user per database; `CREATE USER ... FOR LOGIN` ties them.
+- **Quick test:** `SELECT SUSER_SNAME()` shows the current login, `SELECT USER_NAME()` the current user.
 
 ### 40. What are server-level permissions?
 Server-level permissions control what a **login** can do across the whole instance: connect, view server state, create databases, manage logins, run extended stored procedures, etc.
@@ -730,6 +822,8 @@ EXEC sp_addsrvrolemember 'app_monitor', 'processadmin';
 
 - Fixed server roles: `sysadmin`, `securityadmin`, `serveradmin`, `processadmin`, `dbcreator`, `bulkadmin`, `diskadmin`.
 - Start with the least powerful role needed.
+- **`sysadmin` = full control** — membership effectively bypasses all checks; keep its member list tiny and audit it regularly.
+- **Effective permissions** combine direct grants, fixed-role membership, and `public` role — use `sys.fn_my_permissions` to see what a login actually has.
 
 ### 41. What are database-level permissions?
 Database-level permissions control what a **user** can do inside a database: `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `EXECUTE`, `ALTER`, `CREATE TABLE`, etc., scoped to objects or schemas.
@@ -743,6 +837,8 @@ DENY DELETE ON Sales.Orders TO SalesReader;
 
 - Fixed database roles: `db_owner`, `db_securityadmin`, `db_datareader`, `db_datawriter`, `db_ddladmin`.
 - Permission precedence: `DENY` overrides `GRANT`. Users can inherit permissions through roles and schema membership.
+- **Schema-level grants:** `GRANT SELECT ON SCHEMA::Sales` covers every current and future table in that schema.
+- **Ownership chaining:** if a proc and its tables share an owner, the caller only needs `EXECUTE` on the proc — inner permission checks are skipped.
 
 ### 42. What is a SQL Server instance?
 An **instance** is a separate, independent installation of the SQL Server database engine on a machine. Each instance has its own services, port, databases, logins, and configuration. One machine can run several instances (default + named instances).
@@ -756,6 +852,8 @@ SELECT @@SERVERNAME AS ServerName, @@VERSION AS Version;
 
 - Instances share machine resources (CPU/RAM) but are otherwise isolated.
 - Useful for separating environments or workloads on one box, but each instance costs memory and management overhead.
+- **Ports:** the default instance listens on 1433; named instances use dynamic ports (resolved via the SQL Browser service).
+- **`@@SERVERNAME` vs `SERVERPROPERTY('MachineName')`:** instance name vs machine name — useful when a box hosts multiple instances.
 
 ### 43. What is a SQL Server database?
 A SQL Server database is the **container for data and database objects** within an instance — tables, views, procedures, indexes, users, schemas. Physically it maps to at least two files: a primary data file (`.mdf`) and a transaction log (`.ldf`).
@@ -768,6 +866,8 @@ CREATE DATABASE SalesDB ON
 
 - Each database has its own **recovery model** (SIMPLE/FULL/BULK_LOGGED) that decides log backup behavior.
 - System databases: `master`, `model`, `msdb`, `tempdb` — and user databases like `SalesDB`.
+- **Filegroups:** databases can span multiple filegroups to place tables/indexes on different disks or back them up separately.
+- **Collation:** each database has a collation (case/accent sensitivity for string comparisons) — change it early if needed, it's painful later.
 
 ### 44. What is the difference between a server and database?
 
@@ -784,6 +884,8 @@ SELECT name FROM sys.databases;     -- databases on this instance
 ```
 
 - A connection goes: **instance** (login) → **database** (user) → **objects**.
+- **Why it matters:** two different instances are fully isolated; within one instance, databases are isolated too (you need `USE DatabaseName` or 3-part naming `DB.schema.object`).
+- **Cross-database:** you can query across databases in one instance with 3-part names, but not across servers without a Linked Server (Q72).
 
 ### 45. What are the different types of constraints in SQL Server? Explain Primary Key, Foreign Key, Unique, NOT NULL, CHECK, and DEFAULT with practical examples.
 Constraints enforce data integrity at the database level. The six core types:
@@ -827,6 +929,8 @@ SELECT * FROM Customers WHERE Name = 'Sam';  -- Country shows 'IN' (default appl
 ```
 
 - Constraints are checked **per row** by default (`WITH NOCHECK` skips validation — use carefully for large backfills).
+- **On UPDATE/DELETE of parent:** `ON DELETE CASCADE` / `ON DELETE SET NULL` / `NO ACTION` (default, blocks the delete) — choose the right referential action deliberately.
+- **Always name constraints** — unnamed ones get auto-generated names (`FK__Orders__Custome__...`) that are painful to reference later.
 
 ### 46. What is the difference between DELETE, TRUNCATE, and DROP? Explain their impact on transactions, identity values, indexes, and rollback.
 
@@ -864,6 +968,8 @@ INSERT INTO T (V) VALUES (99);  -- ID restarts at 1
 - **DELETE** is slowest on huge tables but gives row-level control and fires triggers.
 - **TRUNCATE** is the fastest way to clear all rows, but it needs `ALTER` permission and won't work on tables referenced by a foreign key.
 - **DROP** removes the object entirely — there is nothing left to recover except via backup.
+- **Also consider:** `DELETE` logs every row (log grows fast), while `TRUNCATE` only logs page deallocations — on a million-row table the difference is dramatic.
+- **DBCC CHECKIDENT('Orders', RESEED, 0)** manually resets an identity if you need to reuse values without truncating.
 
 ### 47. Explain INNER JOIN, LEFT JOIN, RIGHT JOIN, FULL JOIN, CROSS JOIN, and SELF JOIN. When would you use each one?
 
@@ -911,6 +1017,8 @@ FROM Employees e LEFT JOIN Employees m ON e.ManagerID = m.EmployeeID;
 ```
 
 - Practice rule: use `INNER` unless you need to preserve non-matching rows; then choose the side(s) to preserve with LEFT/RIGHT/FULL.
+- **WHERE on the "right" table of a LEFT JOIN** (e.g., `WHERE o.Amount > 100`) silently converts it to an INNER join — put such filters in the `ON` clause if you want to keep unmatched left rows.
+- **Anti-join:** "customers with no orders" = `NOT EXISTS`/`NOT IN` (Q16) — often clearer and faster than `LEFT JOIN ... WHERE o.OrderID IS NULL`.
 
 ### 48. What is the difference between a CTE, Temporary Table, Table Variable, Derived Table, and Subquery? When would you choose one over another?
 
@@ -947,6 +1055,7 @@ SELECT * FROM #t;
 - Very small set used in a loop → **table variable** (cheap, but no stats — optimizer may underestimate).
 - Large set, used multiple times, or needs indexes/stats → **temp table**.
 - Remember: table variables have **no statistics**, so on large datasets the optimizer guesses badly — that's their #1 performance trap.
+- **Temp table stats:** since `SELECT ... INTO #t` from a big base table does a full scan, the row estimates are accurate — great for heavy intermediate steps.
 
 ### 49. Explain normalization and denormalization. What is the difference between an OLTP and OLAP database, and how would their designs differ?
 **Normalization** splits data into separate tables to remove redundancy and ensure each fact is stored once (1NF → 2NF → 3NF...). **Denormalization** intentionally merges/duplicates data to reduce JOINs and speed up reads.
@@ -980,6 +1089,8 @@ CREATE TABLE FactSales (SaleID INT PRIMARY KEY, CustomerKey INT, Amount DECIMAL(
 ```
 
 - Rule of thumb: **normalize for write-heavy OLTP correctness, denormalize for read-heavy reporting** — and use columnstore indexes in SQL Server for large analytic tables.
+- **NF levels quick check:** 1NF = atomic columns; 2NF = no partial dependency (all cols depend on the whole PK); 3NF = no transitive dependency (non-key col depends only on the key). Most OLTP designs stop at 3NF/BCNF.
+- **In practice:** a fully normalized schema often gets *selectively* denormalized (e.g., a cached `OrderCount` column) where the read/write ratio justifies it.
 
 ### 50. What is an Execution Plan? What is the difference between an Estimated Execution Plan and an Actual Execution Plan? How do you use an execution plan to troubleshoot a slow query?
 An **execution plan** is the step-by-step strategy SQL Server's optimizer builds to run a query — which indexes it seeks/scans, how it joins tables (nested loop/hash/merge), sorts, and where cost concentrates.
@@ -1007,6 +1118,7 @@ SELECT * FROM sys.dm_db_missing_index_details;
 ```
 
 - Always validate a change with the **actual** plan and `SET STATISTICS IO` — don't rely on the estimated plan alone.
+- **Also useful:** `SET STATISTICS IO, TIME ON` prints reads/writes per table and elapsed CPU — the fastest first pass to see where a query spends time without reading the whole plan.
 
 ### 51. Explain Table Scan, Clustered Index Scan, Index Scan, Clustered Index Seek, and Nonclustered Index Seek. When is a Scan acceptable, and when is it a performance problem?
 
@@ -1034,6 +1146,7 @@ SELECT * FROM Orders WHERE Status = 'Pending';
 **When is it a problem?**
 - A large table is scanned for a highly selective predicate — that's a missing-index smell.
 - **Key Lookups** hide under an Index Seek and multiply random I/O (see Q61).
+- **Quick tell:** in SSMS, an index with a small number of rows read but a large `% of cost` under a Nested Loops join usually means lookups dominate — expand the operator tooltips.
 
 ### 52. Suppose a query has an index on the filtering column, but SQL Server is still doing a Table Scan. What could be the reasons, and how would you investigate it?
 Possible reasons the optimizer ignores the index:
@@ -1065,6 +1178,7 @@ SELECT * FROM Orders WITH (INDEX(IX_Orders_OrderDate)) WHERE OrderDate >= '2025-
 ```
 
 - Fix by rewriting the predicate to be SARGable, creating a proper covering index, or refreshing statistics — depending on which cause you found.
+- **Also check the plan's actual vs estimated rows:** if the optimizer thinks 5% of rows match but actually 95% do, a scan is the *right* choice and the real bug is stale statistics, not a missing index.
 
 ### 53. A query that normally takes 5 seconds suddenly takes 10 minutes in production. Walk me through your complete troubleshooting approach.
 A structured, hypothesis-driven approach:
@@ -1108,6 +1222,8 @@ EXEC sp_spaceused 'Orders';
 **7. Fix incrementally:** refresh stats → add/fix index → rewrite predicate → fix plan (WITH RECOMPILE or plan guide only as last resort) → verify with `SET STATISTICS IO, TIME ON`.
 
 - The golden rule: **measure first** (waits, plan, stats), then change one thing at a time and re-measure.
+- **Don't forget the obvious:** is the query still running or waiting? Check `sp_who2`/`sys.dm_exec_requests` first — sometimes "slow query" is actually "blocked query" (a long transaction holding locks).
+- **Compare like-for-like:** verify the same parameter/same data volume as before, otherwise a plan change may be a red herring.
 
 ### 54. What is a SARGable predicate? Give examples of SARGable and non-SARGable queries and explain how functions, conversions, LIKE, and calculations can affect index usage.
 **SARGable** (Search ARGument-able) means the predicate can be evaluated directly against the index B-tree so the optimizer can **seek**. A predicate is non-SARGable when you wrap the column in a function, conversion, or calculation, forcing an index/table **scan**.
@@ -1143,6 +1259,7 @@ WHERE Name LIKE '%nn'     -- NON-SARGable
 
 - **Implicit conversions** (e.g., comparing `int` column to `varchar`, or `nvarchar` column to `varchar` literal) also block seeks (see Q62).
 - Keep the **column alone** on one side of the operator; put all functions/constants on the other side.
+- **Trick to find them:** `SET SHOWPLAN_ALL` or the actual plan — a `CONVERT_IMPLICIT` operator on the column means the predicate isn't SARGable.
 
 ### 55. What is a covering index? Explain key columns vs included columns. How would you design an index for a query containing WHERE, JOIN, and ORDER BY conditions?
 A **covering index** contains **all** columns a query needs, so SQL Server never has to go back to the base table (no Key Lookup). It covers the query.
@@ -1177,6 +1294,8 @@ INCLUDE (OrderID, Amount);
 ```
 
 - **Trade-off:** covering indexes are wider and slower to maintain on writes — cover only the hot, frequent queries.
+- **Key order matters:** put the most selective / most-used equality columns first; a leading column that's never filtered makes the rest of the key useless for seeks.
+- **Limit INCLUDE to ~100 columns / keep pages dense** — included columns are stored in every leaf row, so bloat hurts scan performance.
 
 ### 56. What is index fragmentation? Explain Index Rebuild vs Index Reorganize. How would you decide which one to use?
 **Fragmentation** happens when index pages become scattered (page splits, out-of-order pages, empty pages), causing more I/O and less efficient scans. It's measured by **avg_fragmentation_in_percent** (logical fragmentation) via `sys.dm_db_index_physical_stats`.
@@ -1205,6 +1324,7 @@ ALTER INDEX IX_Orders_OrderDate ON Orders REBUILD WITH (ONLINE = ON);  -- > 30%
 - **Workload:** scans suffer more from fragmentation than seeks.
 - **Downtime:** rebuild with `ONLINE = ON` on Enterprise/Standard (2022) avoids blocking.
 - REBUILD also **refreshes statistics**; REORGANIZE does not (unless you update stats separately).
+- **Fill factor:** rebuilding with `FILLFACTOR` (e.g., 80) leaves page free space to reduce future page splits on insert-heavy tables — at the cost of denser storage.
 
 ### 57. Can having too many indexes reduce performance? Explain how indexes affect INSERT, UPDATE, and DELETE operations. How would you identify unnecessary indexes?
 Yes. Every index must be **maintained on every write**:
@@ -1239,6 +1359,8 @@ WHERE a.name IS NOT NULL AND b.name IS NOT NULL;
 2. Look for **duplicate/redundant** indexes (same leading columns).
 3. Compare read benefit vs write cost; drop unneeded indexes, keep those feeding the top slow queries.
 4. Remove **before** a big ETL/bulk load and re-add after if needed.
+- **Also consider redundant prefixes:** an index on `(A, B, C)` makes `(A)` and `(A, B)` redundant — only keep the widest unless the narrow ones are seek-optimized for specific queries.
+- **Indexes on heavily updated columns** (e.g., a `Status` column flipped constantly) cost more than they save if reads are rare.
 
 ### 58. What are statistics in SQL Server? Why are they important for query optimization? What happens when statistics are outdated?
 **Statistics** are histograms (distribution of values) plus density info that the optimizer uses to **estimate how many rows** a predicate returns. The estimated row count drives every decision: index seek vs scan, join order, join type, memory grants.
@@ -1266,6 +1388,8 @@ EXEC sp_updatestats;                                    -- all in the database
 
 - Automatic stats update uses a **sampling threshold** (e.g., ~20% of rows change) — on huge volatile tables, manual/scheduled updates are wise.
 - **Index REBUILD** also updates statistics with a full scan.
+- **Auto-create:** stats are created automatically on columns used in WHERE/JOIN when missing — but explicit stats on key columns let you control sample size and freshness.
+- **Statistics lock:** you can `WITH NORECOMPUTE` or disable auto-update on a stats object, but that's usually a last resort.
 
 ### 59. In an execution plan, the estimated rows are 10 but the actual rows are 10 million. What could cause this difference, and what impact can it have on query performance?
 The optimizer guessed **10 rows**, reality returned **10 million**. Causes:
@@ -1292,6 +1416,7 @@ OPTION (RECOMPILE);                        -- get fresh estimates for that value
 ```
 
 - **Impact:** bad estimates → wrong index, wrong join type, wrong memory grant (spills to tempdb), and a query that runs orders of magnitude slower than it should.
+- **Where to look first:** in SSMS hover the operator → compare "Estimated Number of Rows" vs "Actual Number of Rows"; a 100x+ gap points straight at this issue.
 
 ### 60. What are Nested Loops, Hash Match, and Merge Join? How does SQL Server decide which join algorithm to use, and how can a bad choice affect performance?
 The **physical join operators**:
@@ -1349,6 +1474,7 @@ CREATE INDEX IX_Orders_OrderDate ON Orders(OrderDate) INCLUDE (OrderID, Amount);
 4. Sometimes **shrinking the seek result** (more selective predicate) reduces the lookups proportionally.
 
 - A tiny number of key lookups on a small result is fine; hundreds of thousands on a hot query is a classic tuning target.
+- **Signs in the plan:** the operator under the Nested Loops is a Clustered Index Seek with a large number of executions — that repetition is the lookup multiplying.
 
 ### 62. What is an implicit conversion? How can datatype mismatches between JOIN or WHERE columns cause performance problems? How would you identify it in an execution plan?
 **Implicit conversion** happens when SQL Server silently converts one datatype to another to compare values. It is visible in the plan as a `CONVERT_IMPLICIT(...)` **on the column side**, which makes the predicate **non-SARGable** → index scans.
@@ -1380,6 +1506,7 @@ SELECT * FROM Sales WHERE SalesAmount = CAST('100.50' AS DECIMAL(10,2));
 ```
 
 - Rule: **never let the engine convert the column**; convert the literal/parameter side instead.
+- **Quick audit:** join `sys.columns` metadata on both sides of a join to spot type mismatches before they hit production.
 
 ### 63. What is parameter sniffing? Give a production scenario where a stored procedure performs well for one parameter but poorly for another. How would you troubleshoot and fix it?
 **Parameter sniffing** is the optimizer using the **actual parameter value from the first call** to build and cache a plan. That plan is tuned for the sniffed value — it may be terrible for other values that follow.
@@ -1418,6 +1545,8 @@ SELECT * FROM Orders WHERE Country = @Country OPTION (OPTIMIZE FOR (@Country = '
 ```
 
 - Choose based on the workload: `RECOMPILE` for skewed data and low call rates; `OPTIMIZE FOR` for a known "typical" value; or fix statistics/indexes so the generic plan is good.
+- **Why `OPTIMIZE FOR UNKNOWN` helps:** it asks the optimizer to use an average/generic estimate instead of sniffing any value — a good middle ground when no single value is typical.
+- **Forcing good plans:** Query Store lets you *force* a proven good plan per query, effectively pinning the plan until data truly changes (Q69).
 
 ### 64. A query contains multiple JOINs, subqueries, CTEs, and millions of rows. How would you systematically optimize it without randomly adding indexes or rewriting everything?
 A methodical, step-by-step approach:
@@ -1459,6 +1588,8 @@ JOIN (SELECT DeptID, SUM(Salary) AS Total FROM Employees GROUP BY DeptID) s
 **8. Verify each change** against the baseline (time + reads + plan diff). Change one thing at a time.
 
 - Rule: **measure → fix estimates → fix indexes → simplify** — never "randomly add indexes or rewrite everything."
+- **Mind tempdb spills:** if an operator shows "spilled to disk", raise memory via a more accurate estimate (stats) or simplify the operator — don't just add RAM and call it done.
+- **Keep the original query working:** change one thing, re-run, compare time/reads — a diff of two actual plans shows exactly which operator improved.
 
 ### 65. Explain ROW_NUMBER(), RANK(), and DENSE_RANK(). How would you use them to find the latest record per customer, top 3 records per department, or remove duplicates?
 Window ranking functions assign numbers to rows inside a partition.
@@ -1504,6 +1635,8 @@ DELETE FROM c WHERE rn > 1;
 ```
 
 - **ROW_NUMBER** for deterministic numbering (pagination, dedupe); **RANK** when ties should all count but you accept gaps; **DENSE_RANK** for "top N distinct" like medals (1,2,3 for top three distinct scores).
+- **Pagination pattern:** `ROW_NUMBER() ... ORDER BY` + `OFFSET/FETCH` is the modern way to page results (`ORDER BY ... OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY`).
+- **ORDER BY inside the OVER is mandatory** — it defines the numbering; a different order per partition function changes the meaning entirely.
 
 ### 66. What is the difference between a Stored Procedure, View, Scalar Function, Inline Table-Valued Function, and Multi-Statement Table-Valued Function? Which can have performance issues and why?
 
@@ -1537,6 +1670,7 @@ SELECT * FROM dbo.BigOrdersMS(5000);   -- optimizer assumes tiny @t -> bad joins
 - **Multi-statement TVFs** — not inlined, no stats on the returned table → row-count guesses → wrong joins.
 - **Views** — fine unless heavily nested (the optimizer usually flattens them); never index unless necessary.
 - **Stored procedures** — main risk is **parameter sniffing**; otherwise they're the preferred performant choice.
+- **Rule of thumb:** if you only need a reusable SELECT, an inline TVF or view is usually better than a scalar function; prefer procs when there's logic or multi-step work.
 
 ### 67. What is dynamic SQL? What is the difference between EXEC() and sp_executesql? How do you prevent SQL Injection and maintain good execution-plan behavior?
 **Dynamic SQL** is T-SQL built and executed at runtime — typically because table/column names, filters, or a whole statement is only known at runtime.
@@ -1573,6 +1707,7 @@ EXEC sp_executesql @sql, N'@n NVARCHAR(50)', @n = @u;
 - **Whitelist** dynamic identifiers (table/column names) — never concatenate them raw; validate against `sys.tables`/`sys.columns`.
 - **Escaping** for `LIKE` wildcards when needed; validate/sanitize all inputs.
 - **Plan behavior:** parameterized dynamic SQL (sp_executesql) reuses cached plans and avoids both injection and plan-cache bloat from thousands of unique strings.
+- **Security model:** set the `EXECUTE AS` of the module, or better — use parameterized procs rather than dynamic SQL for anything touched by user input.
 
 ### 68. What are transactions and ACID properties? Explain isolation levels, blocking, locking, and deadlocks. How would you troubleshoot a blocking or deadlock issue in production?
 A **transaction** is a unit of work that must fully succeed or fully fail. ACID guarantees:
@@ -1624,6 +1759,7 @@ WHERE r.blocking_session_id <> 0;
 **Troubleshoot deadlocks:**
 - Enable deadlock capture: `DBCC TRACEON(1222, -1)` and read the SQL Server error log — it logs both sessions, their statements, and the locks involved.
 - Fixes: consistent **lock order** across code paths, **short transactions**, indexes to reduce scanned/locked rows, `READ COMMITTED SNAPSHOT` (RCSI) to reduce read blocking, and retry logic in the app.
+- **Blocking vs deadlock:** blocking is a *wait* (resolves when the lock is released); a deadlock is a *mutual wait* that the engine breaks by killing a victim — they need different fixes and different monitoring.
 
 ### 69. What is Query Store? How can you use it to identify slow queries, plan changes, and query-performance regressions in production?
 **Query Store** records query text, execution plans, and runtime stats over time, letting you compare plan performance and **force** good plans. It is the DBA's memory of what happened to queries.
@@ -1653,6 +1789,8 @@ ORDER BY rs.avg_duration DESC;
 ```
 
 - Query Store makes **parameter sniffing** and plan regressions visible and reversible — a key production tool (Q53, Q63 rely on it).
+- **Settings to know:** capture modes (`OFF`, `READ_ONLY`, `READ_WRITE`), data retention, and `MAX_STORAGE_SIZE_MB`; monitor that it doesn't grow forever on busy servers.
+- **Cost:** Query Store adds a small write overhead per query — usually worth it in production for the visibility.
 
 ### 70. A SQL Server Agent Job that normally completes in 30 minutes has been running for 4 hours. How would you investigate whether the problem is blocking, query performance, resource pressure, or data volume?
 A systematic triage:
@@ -1695,6 +1833,7 @@ WHERE r.session_id = <job_session_id>;
 **5. Rule in/out data volume** — `EXEC sp_spaceused 'Orders';` and compare row counts vs when it took 30 minutes.
 
 **Conclusion path:** if blocked → resolve the blocker; if CPU-heavy plan → stats/index tuning; if I/O → storage; if data grew → partition/archive/improve the query. Always fix the **primary** bottleneck and re-run to verify.
+- **Also check job parallelism:** a job that used to run in parallel may now run serially (`MAXDOP`), or another job started at the same time competes for CPU — compare the job schedule/overlap on the day it regressed.
 
 ### 71. Explain Full, Differential, and Transaction Log backups. If a production database fails at 3:45 PM and you need to restore it to 3:40 PM, explain the complete recovery approach.
 - **Full backup:** complete copy of the database (foundation of the chain).
@@ -1723,6 +1862,8 @@ RESTORE LOG SalesDB FROM DISK = 'D:\Backups\SalesDB_Log2.trn'
 ```
 
 - **Key points:** you can only hit 3:40 if you have log backups covering that time (**FULL recovery model**); log backups taken at 3:15 and 3:30 exist, so STOPAT gets there. If the database were in SIMPLE mode, you'd lose everything since the last backup.
+- **Tail-log backup:** if the data file still exists, take a `BACKUP LOG ... WITH NORECOVERY` *before* restoring to avoid losing transactions after the last scheduled log backup.
+- **Why NORECOVERY:** it keeps the database in "restoring" state so more backups can be applied; only the **final** step uses RECOVERY to bring the DB online.
 
 ### 72. What is a Linked Server? What is the difference between a four-part query and OPENQUERY? If a query joining a local table with a remote table takes 30 minutes, how would you optimize it?
 A **Linked Server** connects one SQL Server to another data source (SQL Server, Oracle, files, etc.) so you can query remote objects with a 4-part name.
@@ -1766,6 +1907,8 @@ SELECT * FROM LocalTable l JOIN #remote r ON l.ID = r.ID;
 4. Consider **ETL/refresh** of the remote table locally if it's queried often.
 
 - The #1 cause of slowness: shipping the **entire remote table** over the network then joining locally — fix by pushing filters/aggregation to the source.
+- **Provider matters:** OLEDB vs ODBC vs native drivers have different capabilities (e.g., collation, data-type mapping) — pick the right provider when creating the linked server.
+- **Index on remote keys:** a seek against the remote table still needs a remote index; verify the remote table's keys before blaming the network.
 
 ### 73. A production report suddenly returns different numbers from the application. How would you investigate the data mismatch? Explain how you would validate source data, joins, filters, duplicates, NULLs, and aggregation logic.
 A methodical reconciliation:
@@ -1815,6 +1958,8 @@ WHERE OrderDate >= '2025-01-01' GROUP BY CustomerID;
 ```
 
 **8. Compare against a known-good baseline** — last week's correct numbers, or reconcile via an independent query. When fixed, document the root cause (join duplication, NULL handling, filter drift).
+- **Timezone/date boundary traps:** a date range using local vs UTC, or `>=` vs `>` on midnight, silently shifts results — check the app's actual datetime values.
+- **Rounding/precision:** `DECIMAL` vs `FLOAT`, or summing in a different order, can change totals — confirm types and look for a `ROUND` change.
 
 ### 74. Tell me about the most complex SQL performance problem you have personally solved. What was the original query and execution time, what did you identify from the execution plan, what changes did you make, and what was the final performance improvement?
 **Problem:** In my current company, the Lenovo CDMS channel-partner reporting stored procedure was taking **~5 hours** to run. The business needed reports daily; the nightly batch kept failing, so partners' incentive data was delayed.
@@ -1862,6 +2007,7 @@ for each outer_row in OuterInput:
 - **Cost:** roughly **O(outer × inner)** but with an indexed inner it's really **O(outer × log(inner))** per probe.
 - **Best when:** the outer is small and the inner side can **seek** (equality on an indexed column).
 - **Worst when:** both inputs are large and the inner side is **scanned** per outer row — that's millions × millions.
+- **Look for it:** in the plan the operator shows "Number of Executions" on the inner seek equal to the outer row count — that repetition is loops at work.
 
 ### 76. If Table A has 1 million rows and Table B has 10 million rows, when might SQL Server choose a Nested Loops Join?
 Even though both tables are large, Nested Loops can still win when the **effective outer input is small**:
@@ -1878,6 +2024,7 @@ SELECT * FROM A JOIN B ON B.AID = A.ID;                       -- both large -> l
 ```
 
 - **Danger:** if the estimate is wrong (stale stats — Q59) and A actually yields **1M rows**, the "cheap" loops plan becomes **1M probes → minutes/hours**. That's exactly when a plan regression appears. Fix by refreshing statistics so the optimizer picks a **hash or merge** join instead.
+- **Bottom line:** Nested Loops isn't about table *size*, it's about **effective outer size × probe cost**. Small effective outer + cheap indexed probe = loops; anything else → hash/merge.
 
 ### 77. What happens if the join columns have different data types?
 A type mismatch triggers an **implicit conversion** on one side of the join (Q62). SQL Server converts the **lower-precedence** type to the higher-precedence one. The problem: the conversion often lands **on the column** side, making it non-SARGable → the index on that column can't be used for seeks → **scans**, **key lookups**, poor performance.
@@ -1905,3 +2052,5 @@ SELECT * FROM A JOIN B ON A.CustomerID = TRY_CONVERT(INT, B.CustomerID);  -- sam
 ```
 
 **The real fix:** make the datatypes match at the table level (or in a temp-table staging step) so no column-side conversion happens. **Check the actual plan** for `CONVERT_IMPLICIT` after the change — the scan should become a seek.
+- **Also affects parameters:** passing an `INT` into an `NVARCHAR` parameter (or vice versa) causes the same implicit conversion and index-blocking — use matching types in application parameters.
+- **Collation mismatch:** same type but different collations (e.g., case-sensitive vs insensitive) can also degrade joins or cause errors — align collations with `COLLATE` if needed.
