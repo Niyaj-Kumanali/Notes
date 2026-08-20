@@ -196,7 +196,7 @@ CREATE TABLE Employees (
 );
 
 INSERT INTO Employees (Name, Department, Salary)
-VALUES ('Niyaj', 'Engineering', 100000.00);
+VALUES ('Alice', 'Engineering', 100000.00);
 ```
 
 - Tables store data physically; unlike views or CTEs, a table has its own storage.
@@ -1962,25 +1962,25 @@ WHERE OrderDate >= '2025-01-01' GROUP BY CustomerID;
 - **Rounding/precision:** `DECIMAL` vs `FLOAT`, or summing in a different order, can change totals — confirm types and look for a `ROUND` change.
 
 ### 74. Tell me about the most complex SQL performance problem you have personally solved. What was the original query and execution time, what did you identify from the execution plan, what changes did you make, and what was the final performance improvement?
-**Problem:** In my current company, the Lenovo CDMS channel-partner reporting stored procedure was taking **~5 hours** to run. The business needed reports daily; the nightly batch kept failing, so partners' incentive data was delayed.
+**Problem:** A channel-partner reporting stored procedure was taking **~5 hours** to run. The business needed reports daily; the nightly batch kept failing, so partner incentive data was delayed.
 
-**Original query:** a large stored procedure with multiple CTEs and subqueries joining a **5-million-row transaction table**, with heavy filtering on `PartnerID` and a date range.
+**Original query:** a large stored procedure with multiple CTEs and subqueries joining a **5-million-row transaction table**, with heavy filtering on a partner ID and a date range.
 
-**What I found from the execution plan:**
+**What was found from the execution plan:**
 - A **Table Scan** on the 5M-row table — no useful index on the join/filter column.
 - A **non-SARGable predicate** — a `YEAR(ReportDate)`-style function on the filtered column, blocking index seeks.
 - A **Key Lookup** pattern on a secondary index that was fetching extra columns for the SELECT list.
 - **Stale statistics** — estimated rows (thousands) vs actual rows (millions) mismatched, so the optimizer picked poor join orders.
 - A **missing join predicate** in one subquery causing a Cartesian product (massive nested loop).
 
-**What I changed:**
-1. Created **composite indexes** on the transaction table — leading with the highly selective `PartnerID`, then the date range column, and `INCLUDE`d the SELECT-list columns to make them **covering**.
+**What was changed:**
+1. Created **composite indexes** on the transaction table — leading with the highly selective partner ID column, then the date range column, and `INCLUDE`d the SELECT-list columns to make them **covering**.
 2. Rewrote the **non-SARGable predicates** to range comparisons.
 3. Refreshed **statistics** with `FULLSCAN`.
 4. Added a **missing join predicate** that eliminated the Cartesian product.
 5. Validated **output correctness** after every change by comparing old vs new results row-by-row.
 
-**Final result:** execution dropped from **~5 hours to under 12 minutes** (roughly 96% faster), the nightly job ran reliably, and partners got their incentives on time. I kept a change log and verified each optimization against the actual execution plan and `SET STATISTICS IO`.
+**Final result:** execution dropped from **~5 hours to under 12 minutes** (roughly 96% faster), the nightly job ran reliably, and partners got their incentives on time. A change log was kept and each optimization was verified against the actual execution plan and `SET STATISTICS IO`.
 
 ### 75. What is a Nested Loops Join? How does it work internally?
 A **Nested Loops Join** processes an **outer input** row by row; for each outer row it probes the **inner input** (usually via an index seek) to find matching rows.

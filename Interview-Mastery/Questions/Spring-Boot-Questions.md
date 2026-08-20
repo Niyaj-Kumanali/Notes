@@ -72,314 +72,314 @@
 1. What is Spring Framework?
    - **Answer:**
       - Spring Framework is a lightweight, modular framework for building Java enterprise applications using IoC and dependency injection
-      - In my CDMS project at Talentpace, I used Spring to manage service layers, repository injection, and transaction boundaries for MSSQL operations
-      - Modular architecture: Core Container, Data Access, Web, AOP — I chose specific modules for my REST APIs instead of pulling the entire framework
+      - Spring is used to manage service layers, repository injection, and transaction boundaries for database operations
+      - Modular architecture: Core Container, Data Access, Web, AOP — specific modules can be chosen for REST APIs instead of pulling the entire framework
 2. What is Spring Boot?
    - **Answer:**
       - Spring Boot is Spring's opinionated auto-configuration layer that removes boilerplate setup
-      - In my projects, I just added `spring-boot-starter-web`, `spring-boot-starter-data-jpa`, and `spring-boot-starter-security`, and everything was pre-configured for Tomcat, Hibernate, and security defaults
-      - `@SpringBootApplication` combines `@Configuration`, `@EnableAutoConfiguration`, and `@ComponentScan` — I used these annotations across my CDMS and inventory microservices
+      - By adding `spring-boot-starter-web`, `spring-boot-starter-data-jpa`, and `spring-boot-starter-security`, everything is pre-configured for Tomcat, Hibernate, and security defaults
+      - `@SpringBootApplication` combines `@Configuration`, `@EnableAutoConfiguration`, and `@ComponentScan` — these annotations are used across microservices
 3. Why use Spring Boot?
    - **Answer:**
       - Spring Boot cuts development time by providing embedded Tomcat, auto-configuration, production-ready features like Actuator, and easy externalized configuration
-      - In my inventory project, I deployed a Spring Boot JAR on EC2 and didn't need to manage a separate Tomcat install
-      - Concrete time savings: I could go from a new starter project to a deployed API with JWT security and JPA in under an hour, which was critical for fast client demos
+      - A Spring Boot JAR can be deployed on EC2 without needing to manage a separate Tomcat install
+      - Concrete time savings: it is possible to go from a new starter project to a deployed API with JWT security and JPA in under an hour, which is critical for fast client demos
 4. Difference between Spring and Spring Boot.
    - **Answer:**
       - Spring is the core framework providing DI, AOP, and MVC; Spring Boot adds auto-configuration, embedded servers, and starter dependencies on top
-      - For my cold-chain APIs, I used Spring Boot so I didn't need to manually configure DispatcherServlet or Hibernate — Boot handled that automatically
-      - Spring Boot still uses Spring under the hood but adds `spring.factories` auto-configuration classes — I customized them with `application.yml` properties in my projects
+      - Spring Boot eliminates the need to manually configure DispatcherServlet or Hibernate — Boot handles that automatically
+      - Spring Boot still uses Spring under the hood but adds `spring.factories` auto-configuration classes — these can be customized with `application.yml` properties
 5. What is auto-configuration?
    - **Answer:**
       - Auto-configuration is Spring Boot's ability to automatically configure beans based on dependencies in the classpath
-      - For example, adding `spring-boot-starter-data-jpa` automatically configured my MSSQL DataSource, EntityManager, and TransactionManager in the inventory project
-      - Internally, `@ConditionalOnClass`, `@ConditionalOnMissingBean`, and `@ConditionalOnProperty` control which auto-configurations activate — I used these to conditionally configure Redis cache only when the Redis dependency was present
+      - For example, adding `spring-boot-starter-data-jpa` automatically configures the DataSource, EntityManager, and TransactionManager
+      - Internally, `@ConditionalOnClass`, `@ConditionalOnMissingBean`, and `@ConditionalOnProperty` control which auto-configurations activate — these can be used to conditionally configure Redis cache only when the Redis dependency is present
 6. How does Spring Boot auto-configuration work?
    - **Answer:**
       - Spring Boot scans `META-INF/spring.factories` for `EnableAutoConfiguration` classes and applies `@Conditional` checks to decide which beans to create
-      - For my CDMS project, this meant when I added `spring-boot-starter-web`, Boot automatically configured Jackson, DispatcherServlet, and error handling without any XML
-      - The `AutoConfigurationImportSelector` mechanism reads auto-configuration classes, `@Conditional` annotations prevent conflicting beans, and I debugged auto-configuration using the `--debug` flag and Actuator's `/conditions` endpoint
+      - When adding `spring-boot-starter-web`, Boot automatically configures Jackson, DispatcherServlet, and error handling without any XML
+      - The `AutoConfigurationImportSelector` mechanism reads auto-configuration classes, `@Conditional` annotations prevent conflicting beans, and auto-configuration can be debugged using the `--debug` flag and Actuator's `/conditions` endpoint
 7. What is starter dependency?
    - **Answer:**
       - A starter dependency is a curated Maven POM that bundles related libraries
-      - For my inventory validation API, I used `spring-boot-starter-validation` which brought in Hibernate Validator and its transitive dependencies, so I could use `@NotBlank` and `@Pattern` on DTOs immediately
-      - Starters follow the naming convention `spring-boot-starter-*`, and you can create a custom starter by defining auto-configuration classes and a `spring.factories` file
+      - For example, `spring-boot-starter-validation` brings in Hibernate Validator and its transitive dependencies, so `@NotBlank` and `@Pattern` can be used on DTOs immediately
+      - Starters follow the naming convention `spring-boot-starter-*`, and a custom starter can be created by defining auto-configuration classes and a `spring.factories` file
 8. What is embedded server?
    - **Answer:**
       - An embedded server is a web server bundled inside the application JAR
-      - My Spring Boot JARs for CDMS and cold-chain projects ran on embedded Tomcat, which I configured by setting `server.port`, `server.servlet.context-path`, and SSL properties in `application.yml`
-      - Tomcat is the default; Jetty and Undertow are alternatives — I switched to Undertow for better performance in the cold-chain project that handled high-frequency IoT API calls
+      - Spring Boot JARs run on embedded Tomcat by default, which can be configured by setting `server.port`, `server.servlet.context-path`, and SSL properties in `application.yml`
+      - Tomcat is the default; Jetty and Undertow are alternatives — Undertow can be used for better performance in high-throughput scenarios
 9. What is IoC?
    - **Answer:**
       - Inversion of Control means the framework controls object creation and lifecycle instead of the developer
-      - In all my Talentpace projects, the Spring IoC container managed my service, repository, and security filter beans — I just defined them and injected where needed
-      - The IoC container has two main types: BeanFactory (lazy, lightweight) and ApplicationContext (eager, full-featured) — I used `ApplicationContext.getBean()` in a rare case to dynamically fetch cache manager beans based on tenant config
+      - The Spring IoC container manages service, repository, and security filter beans — they are defined and injected where needed
+      - The IoC container has two main types: BeanFactory (lazy, lightweight) and ApplicationContext (eager, full-featured) — `ApplicationContext.getBean()` can be used in rare cases to dynamically fetch beans based on runtime configuration
 10. What is dependency injection?
    - **Answer:**
       - Dependency Injection is when Spring provides required objects instead of the class creating them
-      - In my CDMS project, I used constructor injection for service and repository dependencies, which made testing easier with mocks and kept dependencies immutable and explicit
+      - Constructor injection is recommended for service and repository dependencies, which makes testing easier with mocks and keeps dependencies immutable and explicit
       - There are three injection types with a preference for constructor injection — Spring resolves circular dependencies using a three-level cache in singleton scope
 11. Types of dependency injection.
    - **Answer:**
       - There are three types: constructor injection, setter injection, and field injection
-      - In all my production code, I strictly used constructor injection because it enforces immutability and makes testing straightforward
-      - I never used field injection in Talentpace code since it hides dependencies and breaks testability
-      - Spring validates dependencies at startup; field injection can cause NullPointerException in tests because you cannot inject mocks through the constructor — I used `@RequiredArgsConstructor` from Lombok to reduce boilerplate while keeping constructor injection
+      - In production code, constructor injection should be strictly used because it enforces immutability and makes testing straightforward
+      - Field injection is discouraged since it hides dependencies and breaks testability
+      - Spring validates dependencies at startup; field injection can cause NullPointerException in tests because mocks cannot be injected through the constructor — `@RequiredArgsConstructor` from Lombok can reduce boilerplate while keeping constructor injection
 12. Constructor injection vs field injection.
    - **Answer:**
       - Constructor injection makes dependencies explicit, immutable, and mandatory
-      - I used constructor injection throughout my CDMS and inventory services
-      - Field injection hides dependencies and makes unit tests harder because you cannot inject mocks through the constructor easily
-      - The Spring team recommends constructor injection, and I used constructor injection with Lombok's `@RequiredArgsConstructor` to keep the code clean in all my REST controllers and service classes
+      - Constructor injection should be used throughout service layers
+      - Field injection hides dependencies and makes unit tests harder because mocks cannot be injected through the constructor easily
+      - The Spring team recommends constructor injection, and Lombok's `@RequiredArgsConstructor` keeps the code clean in REST controllers and service classes
 13. What is a Spring bean?
    - **Answer:**
       - A Spring bean is a Java object managed by the Spring IoC container
-      - In my projects, classes annotated with `@Service`, `@Repository`, or `@Component` became beans
-      - For example, my `InventoryValidationService` was a bean with singleton scope, reused across multiple API calls
-      - Beans follow naming conventions and are registered via `@ComponentScan` or `@Bean` methods — I used `@Scope("prototype")` for a stateful validation context in the inventory engine
+      - Classes annotated with `@Service`, `@Repository`, or `@Component` become beans
+      - For example, a service class can be a bean with singleton scope, reused across multiple API calls
+      - Beans follow naming conventions and are registered via `@ComponentScan` or `@Bean` methods — `@Scope("prototype")` can be used for stateful validation contexts
 14. What is bean scope?
    - **Answer:**
       - Bean scope determines the lifecycle and visibility of a bean
-      - Singleton scope creates one instance per container, which I used for all my service beans
+      - Singleton scope creates one instance per container, which is used for all service beans
       - Prototype creates a new instance every request
-      - In my cold-chain project, I used prototype scope for one-time export DTOs that carried mutable state
-      - Web-aware scopes include request and session — I discovered singleton scope issues with `@Async` methods where the proxy behavior requires public non-static methods
+      - Prototype scope can be used for one-time-use objects that carry mutable state
+      - Web-aware scopes include request and session — singleton scope issues can occur with `@Async` methods where the proxy behavior requires public non-static methods
 15. Difference between singleton and prototype scope.
    - **Answer:**
-      - Singleton creates one instance shared across the whole application, which I used for all stateless services like `PartnerService` and `ReportService`
-      - Prototype creates a new instance every time it is injected or requested, which I used sparingly for objects with request-specific state
-      - Performance trade-off: singleton saves memory but can have thread-safety issues, while prototype avoids state conflicts but increases GC pressure — I resolved a thread-safety issue in a singleton service by removing instance variables
+      - Singleton creates one instance shared across the whole application, which is used for all stateless services
+      - Prototype creates a new instance every time it is injected or requested, which should be used sparingly for objects with request-specific state
+      - Performance trade-off: singleton saves memory but can have thread-safety issues, while prototype avoids state conflicts but increases GC pressure — thread-safety issues in singleton services can be resolved by removing instance variables
 16. What is application context?
    - **Answer:**
       - ApplicationContext is the Spring IoC container that manages bean lifecycle, event propagation, and internationalization
-      - In my projects, `AnnotationConfigApplicationContext` was created behind the scenes by `SpringApplication.run()`, and I occasionally used `ApplicationContextAware` to access beans programmatically
-      - ApplicationContext has a hierarchy and differs from BeanFactory by providing event publishing, i18n, and eager bean initialization — I used `ConfigurableApplicationContext.close()` in a test `@AfterClass` method to clean up the context
+      - `AnnotationConfigApplicationContext` is created behind the scenes by `SpringApplication.run()`, and `ApplicationContextAware` can be used to access beans programmatically
+      - ApplicationContext has a hierarchy and differs from BeanFactory by providing event publishing, i18n, and eager bean initialization — `ConfigurableApplicationContext.close()` can be used in test `@AfterClass` methods to clean up the context
 17. What is bean lifecycle?
    - **Answer:**
       - Bean lifecycle goes through: instantiation, property population, initialization callbacks (`@PostConstruct`, `InitializingBean`), bean is ready, then destruction callbacks (`@PreDestroy`, `DisposableBean`)
-      - In my CDMS project, I used `@PostConstruct` to load reference data from MSSQL into a cache after the bean was initialized
-      - The full sequence includes BeanPostProcessors, `@PostConstruct`, `afterPropertiesSet()`, and custom init-method — I used `BeanPostProcessor` to log bean initialization times for performance monitoring
+      - `@PostConstruct` can be used to load reference data from a database into a cache after the bean is initialized
+      - The full sequence includes BeanPostProcessors, `@PostConstruct`, `afterPropertiesSet()`, and custom init-method — `BeanPostProcessor` can be used to log bean initialization times for performance monitoring
 18. What is `@Component`?
    - **Answer:**
       - `@Component` is a stereotype annotation that marks a class as a Spring-managed bean
-      - In my projects, I typically used its specializations like `@Service` and `@Repository` instead of plain `@Component`, since they add semantic meaning and enable persistence exception translation
-      - `@ComponentScan` discovers these annotations during classpath scanning, custom stereotype annotations can be created, and I used `@Component` for utility classes like `JwtUtil` that didn't fit the service/repository pattern
+      - Its specializations like `@Service` and `@Repository` are typically preferred over plain `@Component`, since they add semantic meaning and enable persistence exception translation
+      - `@ComponentScan` discovers these annotations during classpath scanning, custom stereotype annotations can be created, and `@Component` can be used for utility classes like `JwtUtil` that don't fit the service/repository pattern
 19. Difference between `@Component`, `@Service`, `@Repository`, and `@Controller`.
    - **Answer:**
       - All four register Spring beans, but `@Service` is a service layer specialization, `@Repository` enables persistence exception translation, and `@Controller` marks web controllers
-      - In my projects, I used `@Service` for business logic like `InventoryValidationService`, `@Repository` for DAO layers, and `@Controller` for REST endpoints
-      - `@Repository` adds `PersistenceExceptionTranslationPostProcessor` to convert SQLExceptions into Spring's `DataAccessException`, which I relied on in the CDMS project when handling MSSQL constraint violations
+      - `@Service` is used for business logic, `@Repository` for DAO layers, and `@Controller` for REST endpoints
+      - `@Repository` adds `PersistenceExceptionTranslationPostProcessor` to convert SQLExceptions into Spring's `DataAccessException`, which handles exception translation for database constraint violations
 20. What is `@SpringBootApplication`?
    - **Answer:**
       - `@SpringBootApplication` is a convenience annotation combining `@Configuration`, `@EnableAutoConfiguration`, and `@ComponentScan`
-      - Every one of my Talentpace projects had this on the main class, enabling auto-configuration and scanning all beans under the base package
-      - You can exclude specific auto-configurations using the `exclude` parameter — I used `@SpringBootApplication(exclude = {DataSourceAutoConfiguration.class})` when setting up a test that didn't need database connectivity
+      - This annotation is typically placed on the main class, enabling auto-configuration and scanning all beans under the base package
+      - Specific auto-configurations can be excluded using the `exclude` parameter — for example, `@SpringBootApplication(exclude = {DataSourceAutoConfiguration.class})` when setting up a test that doesn't need database connectivity
 21. What does `@EnableAutoConfiguration` do?
    - **Answer:**
       - `@EnableAutoConfiguration` enables Spring Boot's auto-configuration mechanism that creates beans based on classpath dependencies
-      - When I added `spring-boot-starter-web`, it automatically configured `DispatcherServlet`, `Jackson ObjectMapper`, and error handling through `ErrorMvcAutoConfiguration`
-      - It is backed by `AutoConfigurationImportSelector` which reads `spring.factories` files — I used `spring.autoconfigure.exclude` in `application.properties` when I needed to disable a conflicting auto-configuration for Redis
+      - When `spring-boot-starter-web` is added, it automatically configures `DispatcherServlet`, `Jackson ObjectMapper`, and error handling through `ErrorMvcAutoConfiguration`
+      - It is backed by `AutoConfigurationImportSelector` which reads `spring.factories` files — `spring.autoconfigure.exclude` in `application.properties` can be used to disable a conflicting auto-configuration
 22. What is `@Configuration`?
    - **Answer:**
       - `@Configuration` marks a class as a source of bean definitions using `@Bean` methods
-      - In my inventory project, I had a `RedisConfig` class annotated with `@Configuration` where I defined `RedisTemplate` and `CacheManager` beans with custom serialization settings
+      - A configuration class annotated with `@Configuration` can define `RedisTemplate` and `CacheManager` beans with custom serialization settings
       - There is a difference between `@Configuration` with `@Bean` vs `@Component` with `@Autowired` — Spring proxies `@Configuration` classes using CGLIB to ensure singleton bean semantics, so calling a `@Bean` method inside a `@Configuration` class returns the cached singleton rather than creating a new instance
 23. What is `@Bean`?
    - **Answer:**
       - `@Bean` is a method-level annotation that tells Spring to register the returned object as a bean in the container
-      - In my cold-chain project, I used `@Bean` in a `@Configuration` class to create `KafkaTemplate`, `RedisTemplate`, and `RestTemplate` with project-specific configurations
-      - `@Bean` supports lifecycle callbacks using `initMethod` and `destroyMethod` — I configured the `KafkaTemplate` bean with custom serializer properties and retry configuration for the IoT data pipeline
+      - `@Bean` in a `@Configuration` class can create managed instances like `KafkaTemplate`, `RedisTemplate`, and `RestTemplate` with project-specific configurations
+      - `@Bean` supports lifecycle callbacks using `initMethod` and `destroyMethod` — for example, a `KafkaTemplate` bean can be configured with custom serializer properties and retry configuration for data pipelines
 24. Difference between `@Bean` and `@Component`.
    - **Answer:**
       - `@Bean` is used in `@Configuration` classes for third-party or manually configured beans; `@Component` is for your own classes
-      - I used `@Bean` for `RedisTemplate`, `KafkaTemplate`, and `PasswordEncoder` since these were framework classes, while my services used `@Component` derivatives
-      - `@Bean` gives full control over instantiation and configuration, while `@Component` relies on classpath scanning — I used `@Bean` when I needed to pass constructor arguments like database connection pools or Redis connection factory
+      - `@Bean` is used for framework classes like `RedisTemplate`, `KafkaTemplate`, and `PasswordEncoder`, while application services use `@Component` derivatives
+      - `@Bean` gives full control over instantiation and configuration, while `@Component` relies on classpath scanning — `@Bean` is preferred when passing constructor arguments like database connection pools or Redis connection factory
 25. What is `application.properties`?
    - **Answer:**
       - `application.properties` is Spring Boot's default configuration file for externalizing settings
-      - In my CDMS project, I stored MSSQL connection URL, username, password, Hibernate DDL strategy, and server port in this file, keeping config separate from code
-      - Property loading has a specific order, profile-specific properties like `application-dev.properties` override defaults, and I used `@Value` and `@ConfigurationProperties` to bind these values to Java objects in my services
+      - Database connection properties, Hibernate DDL strategy, and server port are configured in this file, keeping config separate from code
+      - Property loading has a specific order, profile-specific properties like `application-dev.properties` override defaults, and `@Value` and `@ConfigurationProperties` can bind these values to Java objects
 26. Difference between `application.properties` and `application.yml`.
    - **Answer:**
       - Both serve the same purpose but `.properties` is flat key-value while `.yml` uses hierarchical indentation
-      - I preferred `.yml` for my projects because it is more readable for nested configs like `spring.datasource.*` and `spring.jpa.*`, reducing duplication
-      - YAML supports list syntax for cleaner multi-profile configuration, but YAML does not support `@PropertySource` natively — I worked around this in the inventory project by using `application.yml` as the primary config source
+      - `.yml` is often preferred for nested configs like `spring.datasource.*` and `spring.jpa.*`, reducing duplication
+      - YAML supports list syntax for cleaner multi-profile configuration, but YAML does not support `@PropertySource` natively — a workaround is to use `application.yml` as the primary config source
 27. What are profiles?
    - **Answer:**
       - Profiles allow environment-specific bean definitions and configurations
-      - I defined `application-dev.yml`, `application-staging.yml`, and `application-prod.yml` for my cold-chain project, each with different database URLs, log levels, and cache settings
-      - `spring.profiles.active` is set via environment variable or JVM argument, and I used `@Profile("dev")` to conditionally load mock beans for local testing of the Kafka pipeline
+      - Profile-specific files like `application-dev.yml`, `application-staging.yml`, and `application-prod.yml` can be defined, each with different database URLs, log levels, and cache settings
+      - `spring.profiles.active` is set via environment variable or JVM argument, and `@Profile("dev")` can conditionally load mock beans for local testing
 28. How do you externalize configuration?
    - **Answer:**
       - Spring Boot externalizes config through application properties, environment variables, command-line arguments, and `@ConfigurationProperties`
-      - In my inventory project, I kept database credentials in environment variables on the EC2 instance and accessed them via `${DATABASE_URL}` in `application.yml`
-      - `PropertySource` defines loading order; I used `@ConfigurationProperties(prefix = "inventory.validation")` to bind nested properties to a POJO, which provides type safety and IDE validation over raw `@Value` usage
+      - Database credentials can be kept in environment variables and accessed via `${DATABASE_URL}` in `application.yml`
+      - `PropertySource` defines loading order; `@ConfigurationProperties(prefix = "inventory.validation")` can bind nested properties to a POJO, which provides type safety and IDE validation over raw `@Value` usage
 29. What is `@Value`?
    - **Answer:**
       - `@Value` injects a property value from configuration files into a field or parameter
-      - In my CDMS project, I used `@Value("${report.batch-size:1000}")` to configure batch processing size for stored procedure execution, with a sensible default
+      - `@Value("${report.batch-size:1000}")` can configure batch processing size for stored procedure execution, with a sensible default
       - `@Value` supports SpEL for dynamic evaluation, but `@ConfigurationProperties` is preferred for grouped properties because it provides type safety and IDE validation — `@Value` is simpler for individual property injection
 30. What is `@ConfigurationProperties`?
    - **Answer:**
       - `@ConfigurationProperties` binds entire property hierarchies to strongly-typed Java objects
-      - In my inventory engine, I had an `InventoryProperties` class annotated with `@ConfigurationProperties(prefix = "inventory")` that held validation thresholds, batch sizes, and retry counts
-      - `@EnableConfigurationProperties` activates binding, nested POJO binding is supported, and I used `@Validated` with JSR-303 annotations to validate configuration values at startup, preventing production issues from misconfigured properties
+      - A properties class annotated with `@ConfigurationProperties(prefix = "inventory")` can hold validation thresholds, batch sizes, and retry counts
+      - `@EnableConfigurationProperties` activates binding, nested POJO binding is supported, and `@Validated` with JSR-303 annotations can validate configuration values at startup, preventing production issues from misconfigured properties
 31. What is actuator?
    - **Answer:**
       - Actuator provides production-ready HTTP endpoints for monitoring and managing Spring Boot applications
-      - In my cold-chain project deployed on EC2, I enabled `/health`, `/metrics`, and `/info` endpoints to monitor API health and response times without building custom monitoring endpoints
-      - Actuator has different endpoint categories exposed via `management.endpoints.web.exposure.include`, and I extended it by adding a custom `HealthIndicator` that checked Kafka connectivity and MSSQL availability
+      - `/health`, `/metrics`, and `/info` endpoints can be enabled to monitor API health and response times without building custom monitoring endpoints
+      - Actuator has different endpoint categories exposed via `management.endpoints.web.exposure.include`, and it can be extended by adding a custom `HealthIndicator` that checks external service connectivity and database availability
 32. Which actuator endpoints are useful in production?
    - **Answer:**
       - `/health` for liveness checks, `/metrics` for JVM and request metrics, `/info` for application metadata, and `/loggers` for runtime log level changes
-      - In production, I exposed only `/health` and `/info` publicly and kept others behind the firewall for security
-      - I integrated `/metrics` with Prometheus using `micrometer-registry-prometheus`, and `/loggers` helped me debug the cold-chain IoT pipeline by enabling DEBUG logging for the Kafka consumer without restarting the JAR
+      - In production, only `/health` and `/info` should be exposed publicly while others are kept behind the firewall for security
+      - `/metrics` integrates with Prometheus using `micrometer-registry-prometheus`, and `/loggers` helps debug pipelines by enabling DEBUG logging for specific components without restarting the JAR
 33. How do you secure actuator endpoints?
    - **Answer:**
       - Actuator endpoints can be secured by restricting exposure, using separate management ports, and applying Spring Security
-      - In my projects, I set `management.endpoints.web.exposure.exclude=*` and only exposed specific endpoints with `include=health,info`, then added `management.server.port=8081`
-      - Custom Actuator endpoints can be secured with `@RolesAllowed`, and I configured a separate security filter chain for the management port with IP whitelist through a custom `WebSecurityConfigurerAdapter`
+      - Setting `management.endpoints.web.exposure.exclude=*` and only exposing specific endpoints with `include=health,info`, then adding `management.server.port=8081` restricts access
+      - Custom Actuator endpoints can be secured with `@RolesAllowed`, and a separate security filter chain can be configured for the management port with IP whitelist through a custom `WebSecurityConfigurerAdapter`
 34. What is Spring Boot DevTools?
    - **Answer:**
       - DevTools provides automatic restart, live reload, and remote debugging for development
-      - During local development of my CDMS project, I used DevTools for automatic restart when Java files changed, and I used the LiveReload server to refresh the Swagger UI in the browser
-      - DevTools uses two classloaders for fast restart, resources can be excluded from restart, and I never enabled DevTools in production — it can leak sensitive information and causes performance overhead
+      - DevTools can be used during local development for automatic restart when Java files change, and the LiveReload server can refresh the Swagger UI in the browser
+      - DevTools uses two classloaders for fast restart, resources can be excluded from restart, and DevTools should never be enabled in production — it can leak sensitive information and causes performance overhead
 35. How do you handle exceptions globally?
    - **Answer:**
-      - I handle exceptions globally using `@ControllerAdvice` combined with `@ExceptionHandler` methods
-      - In my CDMS project, I created a `GlobalExceptionHandler` class that caught `DataAccessException`, `MethodArgumentNotValidException`, and custom business exceptions, returning consistent JSON error responses with proper HTTP status codes
-      - The exception handling hierarchy maps specific exceptions to handlers — I mapped `MSSQLException` constraint violations to user-friendly messages and logged stack traces selectively using MDC to include request IDs in logs
+      - Exceptions are handled globally using `@ControllerAdvice` combined with `@ExceptionHandler` methods
+      - A `GlobalExceptionHandler` class can catch `DataAccessException`, `MethodArgumentNotValidException`, and custom business exceptions, returning consistent JSON error responses with proper HTTP status codes
+      - The exception handling hierarchy maps specific exceptions to handlers — database constraint violations can be mapped to user-friendly messages and stack traces logged selectively using MDC to include request IDs in logs
 36. What is `@ControllerAdvice`?
    - **Answer:**
       - `@ControllerAdvice` is a global interceptor for controllers that enables cross-cutting exception handling, data binding, and model attributes
-      - In my inventory project, I used a single `@ControllerAdvice` class to handle validation errors, authentication failures, and database constraint violations across all endpoints
-      - `@RestControllerAdvice` is the REST-specific variant combining `@ControllerAdvice` + `@ResponseBody` — I customized the response body with `ErrorResponse` DTOs containing error code, message, timestamp, and trace ID for debugging
+      - A single `@ControllerAdvice` class can handle validation errors, authentication failures, and database constraint violations across all endpoints
+      - `@RestControllerAdvice` is the REST-specific variant combining `@ControllerAdvice` + `@ResponseBody` — the response body can be customized with `ErrorResponse` DTOs containing error code, message, timestamp, and trace ID for debugging
 37. What is `@ExceptionHandler`?
    - **Answer:**
       - `@ExceptionHandler` defines a method to handle specific exceptions thrown by controllers
-      - In my global handler, I had methods like `handleValidationException(MethodArgumentNotValidException)` returning 400 with field-level errors, and `handleResourceNotFound(ResourceNotFoundException)` returning 404
-      - Exception handler priority determines which handler matches when multiple could apply, multiple exception types can be handled in one method, and I used `ResponseEntity` for fine-grained control over response headers and status codes in my projects
+      - Methods like `handleValidationException(MethodArgumentNotValidException)` returning 400 with field-level errors, and `handleResourceNotFound(ResourceNotFoundException)` returning 404 can be defined
+      - Exception handler priority determines which handler matches when multiple could apply, multiple exception types can be handled in one method, and `ResponseEntity` provides fine-grained control over response headers and status codes
 38. What is validation in Spring Boot?
    - **Answer:**
       - Validation in Spring Boot uses Bean Validation API (JSR-380) with annotations like `@NotNull`, `@Size`, and `@Pattern` on DTO fields
-      - In my inventory API, I validated incoming serial numbers with `@Pattern(regexp = "^[A-Z0-9]+$")` and checked mandatory fields with `@NotBlank`
-      - Validation integrates with `@Valid` in `@RequestBody` parameters, I created custom validation annotations for inventory-specific rules, and validation errors are automatically handled by `MethodArgumentNotValidException`
+      - Incoming data can be validated with `@Pattern(regexp = "^[A-Z0-9]+$")` and mandatory fields checked with `@NotBlank`
+      - Validation integrates with `@Valid` in `@RequestBody` parameters, custom validation annotations can be created for business-specific rules, and validation errors are automatically handled by `MethodArgumentNotValidException`
 39. What is `@Valid`?
    - **Answer:**
       - `@Valid` triggers JSR-380 bean validation on request bodies, query parameters, or path variables
-      - In my inventory project, I annotated `@RequestBody InventoryRequest` with `@Valid` in the controller, which automatically validated all field constraints before the service method was called
-      - `@Valid` is the standard JSR-380 annotation while `@Validated` is Spring's variant that adds support for validation groups — I used validation groups in the CDMS project to have different validation rules for create vs update operations
+      - Annotating `@RequestBody` with `@Valid` in the controller automatically validates all field constraints before the service method is called
+      - `@Valid` is the standard JSR-380 annotation while `@Validated` is Spring's variant that adds support for validation groups — validation groups can differentiate between create vs update operations
 40. Difference between `@Valid` and `@Validated`.
    - **Answer:**
       - `@Valid` is standard JSR-380 that triggers validation; `@Validated` is Spring's variant that adds support for validation groups
-      - In my CDMS project, I used `@Validated` with groups like `OnCreate.class` and `OnUpdate.class` to apply different rules for POST and PUT endpoints
-      - Validation groups are defined using empty interfaces, and I integrated group validation with `@RequestParam` and `@PathVariable` using `@Validated` at the class level
+      - `@Validated` with groups like `OnCreate.class` and `OnUpdate.class` can apply different rules for POST and PUT endpoints
+      - Validation groups are defined using empty interfaces, and group validation integrates with `@RequestParam` and `@PathVariable` using `@Validated` at the class level
 41. What is scheduling in Spring Boot?
    - **Answer:**
       - Scheduling in Spring Boot uses `@EnableScheduling` and `@Scheduled` annotations to run tasks periodically
-      - In my CDMS project, I scheduled nightly stored procedure execution at 2 AM using a cron expression to refresh report data without manual intervention
+      - A nightly stored procedure execution can be scheduled at 2 AM using a cron expression to refresh report data without manual intervention
       - The `TaskScheduler` abstraction manages execution, thread pools should be configured for scheduled tasks, and handling failures using try-catch blocks prevents silent task termination
 42. What is `@Scheduled`?
    - **Answer:**
       - `@Scheduled` marks a method to be executed on a schedule
-      - In my inventory project, I used `@Scheduled(fixedDelay = 300000)` on a method that reconciled inventory data every 5 minutes after the previous run completed, ensuring no overlapping executions
-      - Three modes are available: `fixedRate`, `fixedDelay`, and `cron` — I used `cron = "0 0 2 * * ?"` in the CDMS project for the nightly ETL batch without needing any external job scheduler initially
+      - `@Scheduled(fixedDelay = 300000)` can run a reconciliation method every 5 minutes after the previous run completes, ensuring no overlapping executions
+      - Three modes are available: `fixedRate`, `fixedDelay`, and `cron` — `cron = "0 0 2 * * ?"` can schedule nightly ETL batches without needing any external job scheduler initially
 43. Difference between fixed rate and fixed delay.
    - **Answer:**
       - `fixedRate` triggers every N milliseconds regardless of whether the previous execution finished; `fixedDelay` waits N milliseconds after the previous execution completes
-      - In my CDMS project, I used `fixedDelay` for the stored procedure job because overlapping runs would corrupt report data
-      - `fixedRate` risks thread starvation when tasks take longer than the interval — I mitigated this in the inventory project by configuring a custom `ThreadPoolTaskScheduler` with a bounded queue
+      - `fixedDelay` is preferred for batch jobs because overlapping runs would corrupt data
+      - `fixedRate` risks thread starvation when tasks take longer than the interval — this can be mitigated by configuring a custom `ThreadPoolTaskScheduler` with a bounded queue
 44. What is cron expression?
    - **Answer:**
       - A cron expression defines schedule using six or seven fields: second, minute, hour, day-of-month, month, day-of-week, and optional year
-      - In my cold-chain project, I used `0 0/15 * * * ?` to run temperature data aggregation every 15 minutes without needing a separate cron job on the server
-      - Cron syntax uses `?` for no specific value and `*` for all values — a common mistake is forgetting that cron runs in the server's timezone, so I adjusted it using the `zone` attribute in `@Scheduled`
+      - `0 0/15 * * * ?` can run data aggregation every 15 minutes without needing a separate cron job on the server
+      - Cron syntax uses `?` for no specific value and `*` for all values — a common mistake is forgetting that cron runs in the server's timezone, so the `zone` attribute in `@Scheduled` can be used to adjust it
 45. How do you configure scheduled task thread pool?
    - **Answer:**
       - By default, `@Scheduled` uses a single-threaded executor
-      - In my inventory project, I configured a `ThreadPoolTaskScheduler` bean with `pool-size=5` and a custom `ErrorHandler` that logged failures without killing the scheduler, preventing a single failed task from blocking the others
+      - A `ThreadPoolTaskScheduler` bean with `pool-size=5` and a custom `ErrorHandler` that logs failures without killing the scheduler can prevent a single failed task from blocking the others
       - A custom `SchedulingConfigurer` with `@Configuration` sets the thread pool, and the trade-off is between a shared thread pool vs dedicated pools for critical vs non-critical scheduled jobs
 46. How do you prevent scheduled jobs from running on all pods?
    - **Answer:**
       - When running multiple instances, scheduled jobs need a coordination mechanism
-      - In my projects deployed on single EC2 instances, this wasn't an issue, but I planned using ShedLock with Redis to ensure only one pod executes a scheduled job at a time by acquiring a distributed lock
-      - ShedLock locks are persisted in a database table or Redis, lock duration is configurable, and I would integrate ShedLock with `@Scheduled` using `@SchedulerLock(name = "nightlyReport")` for the CDMS batch job
+      - ShedLock with Redis can ensure only one pod executes a scheduled job at a time by acquiring a distributed lock
+      - ShedLock locks are persisted in a database table or Redis, lock duration is configurable, and ShedLock integrates with `@Scheduled` using `@SchedulerLock(name = "nightlyReport")` for batch jobs
 47. What is async processing?
    - **Answer:**
       - Async processing allows methods to run in a separate thread without blocking the caller
-      - In my cold-chain project, I used async processing for sending email notifications when temperature excursions exceeded thresholds, so the API response wasn't delayed by the email SMTP call
+      - Async processing can be used for sending email notifications when certain events occur, so the API response isn't delayed by the email SMTP call
       - Async differs from reactive and parallel processing — async improves API responsiveness but carries threading implications including the risk of thread pool exhaustion if not configured properly
 48. What is `@Async`?
    - **Answer:**
       - `@Async` marks a method for execution in a separate thread
-      - In my inventory project, I annotated the `AuditLogService.saveAuditLog()` method with `@Async` so that writing audit records to MSSQL wouldn't block the main API response, improving perceived performance
-      - `@Async` requires `@EnableAsync` and only works on public methods called from outside the class — self-invocation bypasses the proxy — and I used `CompletableFuture` return types to handle async results
+      - An `@Async`-annotated method for writing audit records won't block the main API response, improving perceived performance
+      - `@Async` requires `@EnableAsync` and only works on public methods called from outside the class — self-invocation bypasses the proxy — and `CompletableFuture` return types can be used to handle async results
 49. How do you configure async executor?
    - **Answer:**
-      - I configure a `ThreadPoolTaskExecutor` bean with custom core pool size, max pool size, queue capacity, and rejection policy
-      - In my cold-chain project, I set `corePoolSize=10`, `maxPoolSize=25`, and `CallerRunsPolicy` to handle spikes in sensor data processing without losing tasks
-      - The `AsyncConfigurer` interface allows custom configuration, `AsyncUncaughtExceptionHandler` handles uncaught exceptions in async methods, and queue capacity impacts memory during traffic bursts in the IoT pipeline
+      - A `ThreadPoolTaskExecutor` bean is configured with custom core pool size, max pool size, queue capacity, and rejection policy
+      - Setting `corePoolSize=10`, `maxPoolSize=25`, and `CallerRunsPolicy` can handle spikes in data processing without losing tasks
+      - The `AsyncConfigurer` interface allows custom configuration, `AsyncUncaughtExceptionHandler` handles uncaught exceptions in async methods, and queue capacity impacts memory during traffic bursts
 50. What is caching in Spring Boot?
    - **Answer:**
       - Caching stores frequently accessed data in memory to reduce database load and improve response times
-      - In my cold-chain project, I used Redis cache for storing temperature threshold configurations and partner device mappings, reducing repeated MSSQL queries for data that rarely changed
-      - `@EnableCaching` activates the cache abstraction layer, cache managers include InMemory and Redis, and I measured cache hit ratios in production using Actuator metrics to tune TTL values
+      - Redis cache can store frequently accessed configuration data and entity mappings, reducing repeated database queries for data that rarely changed
+      - `@EnableCaching` activates the cache abstraction layer, cache managers include InMemory and Redis, and cache hit ratios in production can be measured using Actuator metrics to tune TTL values
 51. What is `@Cacheable`?
    - **Answer:**
       - `@Cacheable` stores the method result in cache and returns it on subsequent calls with the same arguments
-      - I applied `@Cacheable("deviceConfigs")` on the method that fetched gateway-to-device mappings in the cold-chain project, which reduced MSSQL round trips from hundreds per minute to only a few cache misses
-      - Cache key generation uses the `key` attribute with SpEL, conditional caching is supported via `condition` and `unless`, and I invalidated the cache proactively when device configurations were updated via admin API
+      - Applying `@Cacheable("deviceConfigs")` on a method that fetches mappings can reduce database round trips from hundreds per minute to only a few cache misses
+      - Cache key generation uses the `key` attribute with SpEL, conditional caching is supported via `condition` and `unless`, and the cache can be proactively invalidated when underlying data is updated
 52. Difference between `@Cacheable`, `@CachePut`, and `@CacheEvict`.
    - **Answer:**
       - `@Cacheable` reads and stores; `@CachePut` always executes and updates the cache; `@CacheEvict` removes entries
-      - In my CDMS project, I used `@CachePut` on the partner update method to refresh cached data, and `@CacheEvict(allEntries = true)` on the data reload endpoint to clear stale entries before repopulation
+      - `@CachePut` can be used on update methods to refresh cached data, and `@CacheEvict(allEntries = true)` on data reload endpoints to clear stale entries before repopulation
       - `@Caching` combines multiple cache annotations on a single method, and `@CacheEvict(beforeInvocation = true)` evicts cache before method execution when failure should still result in cache being cleared
 53. How do you use Redis cache with Spring Boot?
    - **Answer:**
-      - I add `spring-boot-starter-data-redis`, configure Redis connection in `application.yml`, define a `RedisCacheManager` bean, and use `@Cacheable` on service methods
-      - In the cold-chain project, I configured Redis with TTL of 30 minutes for sensor config cache and used `RedisTemplate` for direct operations
-      - `RedisCacheManager` handles cache abstraction while `RedisTemplate` provides direct Redis operations — I configured serialization with Jackson2JsonRedisSerializer for JSON storage, and handled Redis connection failures by falling back to MSSQL queries
+      - Add `spring-boot-starter-data-redis`, configure Redis connection in `application.yml`, define a `RedisCacheManager` bean, and use `@Cacheable` on service methods
+      - Redis can be configured with TTL for cache entries and `RedisTemplate` can be used for direct operations
+      - `RedisCacheManager` handles cache abstraction while `RedisTemplate` provides direct Redis operations — serialization can be configured with Jackson2JsonRedisSerializer for JSON storage, and Redis connection failures can be handled by falling back to database queries
 54. How do you write REST APIs in Spring Boot?
    - **Answer:**
-      - I use `@RestController` with `@RequestMapping` for class-level mapping and `@GetMapping`, `@PostMapping`, etc. for HTTP methods
-      - In my CDMS project, I created `PartnerController` with endpoints like `GET /api/partners`, `POST /api/partners/sync`, and `PUT /api/partners/{id}`, returning `ResponseEntity` for status control
-      - REST best practices include proper HTTP methods, status codes, request/response DTOs, content negotiation, and I versioned my APIs using URL path prefix like `/v1/` in the CDMS project
+      - Use `@RestController` with `@RequestMapping` for class-level mapping and `@GetMapping`, `@PostMapping`, etc. for HTTP methods
+      - A controller can have endpoints like `GET /api/partners`, `POST /api/partners/sync`, and `PUT /api/partners/{id}`, returning `ResponseEntity` for status control
+      - REST best practices include proper HTTP methods, status codes, request/response DTOs, content negotiation, and API versioning using URL path prefix like `/v1/`
 55. How do you version APIs?
    - **Answer:**
-      - I version APIs through the URL path prefix like `/api/v1/partners`
-      - In my inventory project, I maintained backward compatibility by keeping v1 endpoints while adding new fields in v2 request/response DTOs, allowing partners to migrate gradually without breaking their integrations
-      - Other versioning strategies include header-based (`Accept-version`), query parameter (`?version=1`), and content negotiation — I chose URL path versioning for simplicity since it's explicit in logs and easy to route
+      - APIs can be versioned through the URL path prefix like `/api/v1/partners`
+      - Backward compatibility can be maintained by keeping v1 endpoints while adding new fields in v2 request/response DTOs, allowing consumers to migrate gradually without breaking their integrations
+      - Other versioning strategies include header-based (`Accept-version`), query parameter (`?version=1`), and content negotiation — URL path versioning is often chosen for simplicity since it's explicit in logs and easy to route
 56. How do you document APIs?
    - **Answer:**
-      - I document REST APIs using Swagger/OpenAPI 3.0 with `springdoc-openapi` library
-      - In my CDMS project, I added `@Operation` and `@ApiResponse` annotations on controllers to describe endpoints, request bodies, and error responses, making it easy for the frontend team to integrate without constant back-and-forth
-      - I customized the Swagger UI with bearer token support for JWT, grouped endpoints by tags, and used `springdoc.swagger-ui.enabled=false` in production to expose docs only on staging environments
+      - REST APIs are documented using Swagger/OpenAPI 3.0 with `springdoc-openapi` library
+      - `@Operation` and `@ApiResponse` annotations on controllers describe endpoints, request bodies, and error responses, making it easy for frontend teams to integrate without constant back-and-forth
+      - The Swagger UI can be customized with bearer token support for JWT, endpoints grouped by tags, and `springdoc.swagger-ui.enabled=false` in production to expose docs only on staging environments
 57. What is Swagger/OpenAPI?
    - **Answer:**
       - Swagger/OpenAPI is a specification for documenting REST APIs in a machine-readable format (JSON/YAML)
-      - In my inventory project, I integrated `springdoc-openapi-starter-webmvc-ui` which auto-generated OpenAPI docs from `@RestController` annotations, and provided an interactive Swagger UI at `/swagger-ui.html`
-      - OpenAPI 3.0 differs from Swagger 2.0 in structure and schema support — I defined reusable components (schemas, security schemes) in the OpenAPI config, and the generated docs helped QA write automated tests using the OpenAPI spec
+      - Integrating `springdoc-openapi-starter-webmvc-ui` auto-generates OpenAPI docs from `@RestController` annotations and provides an interactive Swagger UI at `/swagger-ui.html`
+      - OpenAPI 3.0 differs from Swagger 2.0 in structure and schema support — reusable components (schemas, security schemes) can be defined in the OpenAPI config, and the generated docs help QA write automated tests using the OpenAPI spec
 58. What is Spring Boot testing?
    - **Answer:**
       - Spring Boot testing uses `@SpringBootTest` for full context integration tests and slice tests for focused layers
-      - In my CDMS project, I wrote integration tests that loaded the full Spring context and tested the REST endpoint from HTTP request to MSSQL persistence using an H2 in-memory database
-      - The testing pyramid guides test distribution, `@TestContainers` enables testing with real MSSQL, and `@DirtiesContext` cleans up state between tests that modify the application context
+      - Integration tests can load the full Spring context and test REST endpoints from HTTP request to database persistence using an H2 in-memory database
+      - The testing pyramid guides test distribution, `@TestContainers` enables testing with real databases, and `@DirtiesContext` cleans up state between tests that modify the application context
 59. What is `@SpringBootTest`?
    - **Answer:**
       - `@SpringBootTest` loads the complete Spring application context for integration testing
-      - In my inventory project, I used `@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)` with `TestRestTemplate` to send real HTTP requests to the API and verify response status, headers, and body
-      - Properties can be overridden with `@TestPropertySource` or the `properties` attribute, `@MockBean` replaces external dependencies, and I configured the test to use an embedded H2 database instead of the production MSSQL
+      - `@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)` with `TestRestTemplate` can send real HTTP requests to the API and verify response status, headers, and body
+      - Properties can be overridden with `@TestPropertySource` or the `properties` attribute, `@MockBean` replaces external dependencies, and tests can be configured to use an embedded H2 database instead of the production database
 60. What is `@WebMvcTest`?
    - **Answer:**
       - `@WebMvcTest` loads only the web layer for controller unit testing — it does not load services, repositories, or security
-      - In my CDMS project, I used `@WebMvcTest(PartnerController.class)` with `@MockBean` for the service dependency and tested request mapping, validation, and response serialization
+      - `@WebMvcTest(PartnerController.class)` with `@MockBean` for the service dependency can test request mapping, validation, and response serialization
       - `@WebMvcTest` is faster than `@SpringBootTest` because it avoids scanning all beans in the context, `MockMvc` performs requests and assertions, and it isolates controller logic from service and repository layers
 61. Difference between the traditional Java Singleton design pattern and the Spring singleton bean scope.
    - **Answer:**
       - The GoF Singleton pattern guarantees a class has exactly one instance and exposes it via a private constructor and static `getInstance()`
-      - Spring's singleton bean scope means the IoC container creates exactly one bean instance per bean name per container, but the class itself is a normal class — I can still create other instances with `new`
+      - Spring's singleton bean scope means the IoC container creates exactly one bean instance per bean name per container, but the class itself is a normal class — other instances can still be created with `new`
       - Spring manages the instance lifecycle (creation, dependency wiring, destruction) through the container, while the GoF Singleton manages itself
-      - Practically, in a Spring app, `@Component`/`@Service` beans are singletons by default, so I don't hand-roll GoF Singletons — the container handles it
+      - Practically, in a Spring app, `@Component`/`@Service` beans are singletons by default, so there's no need to hand-roll GoF Singletons — the container handles it
       - GoF singleton is hard to test (global state, no constructor injection) while Spring singletons are easily mockable because they are injected
       - GoF uses static state shared across the whole JVM, Spring singleton scope is per `ApplicationContext`
       - Prototype scope is the alternative in Spring, and a Spring singleton is thread-safe only if the bean is stateless or synchronized — same as any shared object
@@ -396,15 +396,15 @@
       - `@Controller` — a specialization for MVC controllers that return views (Spring MVC / Thymeleaf)
          - It is detected by `DispatcherServlet` for `@RequestMapping` handling
       - `@RestController` — a convenience annotation combining `@Controller` + `@ResponseBody`
-         - Every method's return value is serialized directly to JSON/XML in the HTTP response body, which is what I use for my REST APIs
+         - Every method's return value is serialized directly to JSON/XML in the HTTP response body, making it suitable for REST APIs
       - `@Configuration` — marks a class as a source of bean definitions; the class contains `@Bean` methods
          - Spring processes it with CGLIB proxying so `@Bean` methods follow singleton semantics even if called directly within the config class
       - `@Bean` — a method-level annotation (used inside a `@Configuration` or `@Component` class) that tells Spring to use the method's return value as a bean definition
-         - It is how I register beans that are not our own classes — like a `RestTemplate`, `PasswordEncoder`, or `DataSource`
+         - It is used to register beans that are not your own classes — like a `RestTemplate`, `PasswordEncoder`, or `DataSource`
       - **Why dedicated annotations?**
-         - They are not functionally required — only `@Component` is technically needed for scanning — but they give **semantic clarity** (I can see at a glance which layer a class belongs to) and enable **layer-specific behavior**
+         - They are not functionally required — only `@Component` is technically needed for scanning — but they give **semantic clarity** (it's possible to see at a glance which layer a class belongs to) and enable **layer-specific behavior**
          - `@Repository` adds exception translation, `@Controller`/`@RestController` get picked up for web handling, `@Service` is used by Spring's transaction and AOP conventions, and tools (like Spring docs and some code generators) can detect layered architecture from them
       - `@Component` vs `@Bean` differ in usage — `@Component` is class-level and discovered by scanning; `@Bean` is method-level and explicitly declared, useful for third-party classes and conditional wiring
       - `@Configuration` vs `@Component` proxy behavior: calling a `@Bean` method inside a `@Configuration` class returns the cached singleton, while inside a `@Component` class it creates a new instance
       - `@RestController` vs `@Controller` — a plain `@Controller` returns a view name unless a method is annotated `@ResponseBody`, whereas `@RestController` applies `@ResponseBody` to every method
-      - A config example with `@Bean` for a `RestTemplate` and `@Repository` translating JPA exceptions like `DataIntegrityViolationException` in my service code
+      - A config example with `@Bean` for a `RestTemplate` and `@Repository` translating JPA exceptions like `DataIntegrityViolationException` in service code
